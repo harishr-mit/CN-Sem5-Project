@@ -1,982 +1,290 @@
-# NetPlay Lab — Multiplayer Arena Game Rules
+# NoBu Shooter — Game Rules
 
-## 1. Game Objective
+**Audience:** the implementing agent. This file is the **single source of truth for gameplay rules and game constants**. `SPEC.md` is the source of truth for architecture, protocol, netcode, emulator and UI. Every rule below is a decision, not a suggestion. Do not add mechanics that are not listed here (see §16).
 
-NetPlay Lab is a real-time multiplayer top-down arena game.
-
-Each player controls one character inside a bounded arena. Players can move and fire projectiles at other players.
-
-The objective is to obtain the highest number of eliminations before the three-minute match timer expires.
-
-### Match duration
-
-**3 minutes (180 seconds)**
-
-### Winning condition
-
-When the timer reaches zero:
-
-1. The match ends.
-2. Players can no longer move or fire.
-3. The final scores are calculated.
-4. The player with the highest score wins.
-5. If multiple players have the same highest score, the match ends in a tie between those players.
-
-There is no score penalty for dying.
+Constants live in one file, `shared/src/config/game.json` (§15), imported by client, server and tests. Never hard-code a number from this document in game logic.
 
 ---
 
-# 2. Players
+## 1. Objective
 
-Each connected client represents one player.
+NoBu Shooter is a real-time, top-down, free-for-all arena shooter. Each player controls one circular character, moves with the keyboard, aims with the mouse and fires straight-line projectiles. One hit eliminates a player. The player with the most eliminations when the 180-second timer expires wins.
 
-A player has:
+The game is deliberately simple. Its purpose is to make network effects (lag, loss, jitter) visible and measurable. Gameplay depth is a non-goal.
 
-* unique player ID
-* position `(x, y)`
-* movement state
-* alive/dead state
-* respawn state
-* score
-* shooting cooldown
-* connection state
+### Controls
 
-Example:
-
-```text
-Player A
-Position: (420, 260)
-State: Alive
-Score: 4
-```
-
-The server is authoritative over all of these values.
-
-The client may send **intent/input**, but the server decides the resulting game state.
+| Input | Action |
+|---|---|
+| `W` `A` `S` `D` (also arrow keys) | Move up / left / down / right. Diagonals are allowed by pressing two keys. |
+| Mouse position | Aim. The aim angle is the angle from the player's position to the cursor. |
+| Left mouse button (hold) | Fire. Holding fires repeatedly, limited by the server-enforced cooldown. |
 
 ---
 
-# 3. Arena
+## 2. Match lifecycle
 
-The game takes place in a fixed 2D rectangular arena.
-
-Example:
+A **room** runs one match at a time. The default room is `main`. A second room, `lab`, is a movement-only sandbox (§14).
 
 ```text
-┌──────────────────────────────────────┐
-│                                      │
-│     ● Player A                       │
-│                                      │
-│                 ███                  │
-│                 ███                  │
-│                                      │
-│                         ● Player B   │
-│                                      │
-│       ███                            │
-│       ███                    ●       │
-│                                      │
-└──────────────────────────────────────┘
+WAITING ──(participants >= 2)──► COUNTDOWN ──(3 s)──► RUNNING ──(180 s)──► ENDED ──(10 s)──► COUNTDOWN ...
+   ▲                                                                                              │
+   └────────────────────────(all human players gone)──────────────────────────────────────────────┘
 ```
 
-The arena contains:
+| State | Behavior |
+|---|---|
+| `WAITING` | Fewer than `minParticipants` participants. Players cannot move or fire. UI shows "WAITING FOR PLAYERS". |
+| `COUNTDOWN` | 3 s ("3, 2, 1, GO!"). All players are placed at spawn points. Movement and firing are ignored. |
+| `RUNNING` | Normal play for exactly 180 s. The server owns the timer. |
+| `ENDED` | Movement, firing and projectile spawning are ignored. Remaining projectiles are removed. Final scores are computed and broadcast. Lasts 10 s. |
 
-* outer boundaries
-* static rectangular obstacles
-* player spawn locations
-
-The arena geometry remains unchanged during a match.
+- A **participant** is a human player or a bot. Bots count toward the 2-participant minimum (§12), so one human alone can play against bots.
+- **Late join:** a human may join at any time. During `RUNNING` they spawn immediately with score 0. During `COUNTDOWN` or `ENDED` they join the next match flow normally.
+- **Restart:** after `ENDED` the room automatically returns to `COUNTDOWN` with all scores reset to 0 and all players re-spawned. No lobby, no vote.
+- **Demo shortcut:** `match.durationMs` is configuration. The default is 180 000. Setting it lower (for example 60 000 via a URL parameter `?match=60`) must work without code changes.
+- When the last human leaves, the room removes all bots and returns to `WAITING`.
 
 ---
 
-# 4. Player Movement
+## 3. Arena
 
-Players move in four directions:
+A fixed rectangle of **1280 × 720** logical pixels. The origin is the top-left corner; x grows right, y grows down. The arena contains:
 
-```text
-          UP
-           ↑
-           │
-LEFT ←──── ● ────→ RIGHT
-           │
-           ↓
-         DOWN
-```
+- outer boundaries,
+- 9 static axis-aligned rectangular obstacles (§15 gives exact coordinates),
+- 8 predefined spawn points (§15).
 
-Diagonal movement may be supported by combining horizontal and vertical input.
-
-For example:
-
-```text
-UP + RIGHT = diagonal movement
-```
-
-The server should normalize diagonal movement so that moving diagonally does not make the player faster than moving horizontally or vertically.
-
-### Suggested movement speed
-
-Start with:
-
-```text
-Player speed = 200 pixels/second
-```
-
-The exact value can be tuned during implementation.
-
-The important point is that movement speed remains constant.
+Arena geometry never changes during a match. Players and projectiles cannot leave it.
 
 ---
 
-# 5. Movement Collision
+## 4. Players
 
-Players cannot leave the arena.
+A player is a circle of radius 16 px. Server-side player state:
 
-If movement would place the player outside the arena boundary, the server clamps the position to the valid area.
+| Field | Meaning |
+|---|---|
+| `id` | Unique, assigned by the server on join |
+| `name` | Display name, max 12 characters, sanitized |
+| `x`, `y` | Center position |
+| `alive` | `true` / `false` |
+| `life` | Integer, incremented on every (re)spawn. Lets clients tell a respawn teleport from a misprediction. |
+| `respawnTicksLeft` | Counts down while dead |
+| `protectionTicksLeft` | Counts down while spawn-protected |
+| `fireCooldownTicks` | Counts down after each shot |
+| `score` | Eliminations this match |
+| `bot` | `true` for server-controlled players |
 
-Example:
+The client sends **inputs**, never state. The server decides all resulting state (§13).
 
-```text
-Before:
-
-┌──────────────┐
-│          ● → │
-└──────────────┘
-
-After:
-
-┌──────────────┐
-│           ●  │
-└──────────────┘
-```
-
-Players also cannot pass through static obstacles.
-
-Example:
-
-```text
-       Player
-          ●
-          ↓
-       ┌─────┐
-       │     │
-       │     │
-       └─────┘
-```
-
-The player stops at the obstacle rather than passing through it.
-
-### Recommended collision model
-
-Use simple shapes:
-
-* player → circle
-* projectile → small circle
-* obstacle → rectangle
-
-This keeps collision detection easy to implement and deterministic.
+**Players do not collide with other players.** They can overlap. This is a deliberate simplification: it keeps client prediction free of other-player interactions, so prediction error is caused only by the network, not by gameplay.
 
 ---
 
-# 6. Shooting
+## 5. Movement and collision
 
-Every living player can fire a projectile.
-
-Shooting is **linear**.
-
-When the player fires:
-
-1. The server obtains the player's current position.
-2. The firing direction is determined.
-3. A projectile is created.
-4. The projectile travels in a straight line.
-5. The projectile does not change direction.
-6. The projectile disappears when it hits a collidable object.
-7. If the object hit is another player, that player is eliminated.
-
-Example:
-
-```text
-Player
-  ● ────────────────► ●
-                     Target
-```
-
-No projectile physics such as gravity, acceleration, bouncing, or homing is required.
+- Speed: 200 px/s. One simulation step is 1/60 s, so a step moves 3.333… px.
+- Diagonal movement is normalized (multiply both components by `Math.SQRT1_2`) so diagonal speed equals axis speed.
+- Collision shapes: player = circle, projectile = small circle (radius 4), obstacle = rectangle.
+- Players cannot leave the arena: the center is clamped to `[radius, width − radius]` × `[radius, height − radius]`.
+- Players cannot pass through obstacles: after moving on each axis, push the circle out of any overlapping rectangle. The exact algorithm is in `SPEC.md` §7 and is implemented once, in `shared/src/sim`, and used by both client and server.
+- Dead players do not move, collide or block anything.
 
 ---
 
-# 7. Projectile Collision
+## 6. Shooting
 
-A projectile can collide with:
-
-* another player
-* an arena obstacle
-* the arena boundary
-
-The first valid collision determines what happens.
-
-### Player collision
-
-```text
-Projectile ─────► Player
-                    X
-                 eliminated
-```
-
-The projectile disappears immediately.
-
-The hit player dies.
-
-The shooter receives one point.
-
-### Obstacle collision
-
-```text
-Projectile ─────► █████
-                   obstacle
-```
-
-The projectile disappears.
-
-No player is affected.
-
-### Arena boundary
-
-If a projectile reaches the edge of the arena, it disappears.
+- Each input message carries a `fire` flag and an `aim` angle (radians, quantized to 0.001).
+- The **server** creates the projectile. The client never announces a hit.
+- The server accepts a shot only if all of these hold: the player is alive, the room state is `RUNNING`, the room allows firing, and `fireCooldownTicks == 0`. Otherwise the fire flag is silently ignored.
+- Fire cooldown: 300 ms (18 ticks), counted in server ticks.
+- On an accepted shot the projectile spawns at `playerCenter + dir × (playerRadius + projectileRadius + 1)`, where `dir = (cos aim, sin aim)`. Speed is 600 px/s. If the straight segment from the player center to the spawn point crosses an obstacle, the projectile is destroyed immediately (it hit the obstacle).
+- Projectiles are linear. No gravity, acceleration, bounce or homing.
+- **Lag compensation is not implemented.** The projectile starts from the shooter's *server* position and hits what is at the *server* positions. This is a documented limitation (`SPEC.md` §16).
 
 ---
 
-# 8. One-Hit Elimination
+## 7. Projectiles
 
-Players have **one hit point**.
+Each projectile has: `id`, `ownerId`, `x`, `y`, direction `(dx, dy)`, and `ticksLeft` (lifetime 2 s = 120 ticks).
 
-A successful projectile collision immediately eliminates the player.
+Each tick the server moves a projectile by `speed / 60` px along its direction and tests the **swept segment** (previous position → new position) against, in this order of priority, the **nearest** hit along the segment:
 
-There is no health system in the initial version.
+1. **Obstacles** (rectangle expanded by the projectile radius): projectile is destroyed.
+2. **Arena boundary:** projectile is destroyed.
+3. **Players:** a circle of radius `playerRadius + projectileRadius`. Ignored if the player is the projectile's owner, is dead, or is spawn-protected. On a valid hit the projectile is destroyed, the player is eliminated (§8) and the owner scores (§10).
 
-Therefore:
+Projectiles pass through spawn-protected players and dead players without being destroyed. A projectile is also destroyed when `ticksLeft` reaches 0. If its owner disconnects, the projectile is removed immediately.
 
-```text
-1 projectile hit
-        ↓
-     player dies
-        ↓
-     shooter +1
-```
-
-This is deliberately simple because it makes the relationship between network events and game-state changes easy to observe.
+A swept test is required: at low tick rates a point test would let projectiles skip through players or thin walls.
 
 ---
 
-# 9. Shooting Cooldown
+## 8. Elimination, respawn and spawn protection
 
-Players should not be able to fire continuously without restriction.
+**One hit point.** A valid projectile hit kills immediately.
 
-Use a small firing cooldown.
+On death the server:
 
-Suggested initial value:
+1. sets `alive = false`,
+2. disables the player's collision and hit-testing,
+3. ignores their movement and fire inputs (inputs are still consumed so sequence numbers advance),
+4. awards the owner +1 (§10),
+5. starts `respawnTicksLeft = 120` (2 s).
 
-```text
-Fire cooldown = 300 ms
-```
+The dead player stays in the state with `alive = false` and a visible respawn countdown.
 
-Therefore, a player can fire approximately:
+When `respawnTicksLeft` reaches 0 the server picks a spawn point (§9), moves the player there, sets `alive = true`, increments `life` and sets `protectionTicksLeft = 60` (1 s).
 
-```text
-1 shot every 0.3 seconds
-```
+**Spawn protection is always on and always visible** (a rotating shield ring plus the text "SPAWN PROTECTED 0.7 s" for the local player). While protected, the player can move and fire, and cannot be eliminated. Incoming projectiles pass through them.
 
-The server should enforce this cooldown.
-
-If a client sends a fire request while its cooldown has not expired, the server ignores the request.
-
-This prevents clients from artificially increasing their firing rate.
+While dead, a player cannot move, fire, score or be hit.
 
 ---
 
-# 10. Player Death
+## 9. Spawn selection
 
-When a player is hit:
+The same rule applies to the initial spawn, countdown placement and respawn.
 
-```text
-Alive
-  │
-  │ projectile collision
-  ▼
-Dead
-```
-
-The server should:
-
-1. mark the player as dead
-2. remove/disable the player's collision
-3. prevent movement
-4. prevent shooting
-5. increment the shooter's score
-6. begin the respawn countdown
-
-The dead player should remain represented in the game state so that the client can display a respawn indicator.
+1. Candidates are the 8 spawn points.
+2. Discard any candidate within 64 px of any other participant that is alive.
+3. Among the rest, choose the candidate that **maximizes the distance to the nearest alive opponent**. Break ties with the seeded PRNG.
+4. If every candidate was discarded, ignore step 2 and use step 3 on all 8.
 
 ---
 
-# 11. Respawning
+## 10. Scoring
 
-Players automatically respawn after a short cooldown.
-
-Suggested value:
-
-```text
-Respawn delay = 2 seconds
-```
-
-Example:
-
-```text
-Player dies
-    │
-    ▼
-  2-second
- countdown
-    │
-    ▼
-Respawn
-```
-
-During the respawn period:
-
-* player cannot move
-* player cannot shoot
-* player cannot score
-* player cannot be hit
-
-After the countdown:
-
-1. the server selects a valid spawn location
-2. the player is moved there
-3. the player becomes alive
-4. movement is enabled
-5. shooting is enabled
+- Each confirmed elimination gives the shooter **+1**.
+- There is no penalty for dying. There is no score for shooting, hitting obstacles or surviving.
+- Scores are part of the authoritative state (not only events), so a client that missed a packet still shows the correct scoreboard.
 
 ---
 
-# 12. Spawn Locations
+## 11. Win condition, tie and disconnects
 
-The arena should contain several predefined spawn locations.
+When the timer reaches 0:
 
-Example:
+1. The room enters `ENDED`.
+2. The server computes the final scoreboard, sorted by score descending (ties sorted by name).
+3. The winner is the player with the highest score. If two or more players share the highest score (including everyone at 0), the result is a **DRAW** between them. There is no sudden death.
+4. The final scoreboard and winner list are included in the snapshots during `ENDED`.
 
-```text
-┌──────────────────────────────────────┐
-│                                      │
-│   S1                              S2 │
-│                                      │
-│                                      │
-│                ███                   │
-│                                      │
-│                                      │
-│   S3                              S4 │
-│                                      │
-└──────────────────────────────────────┘
-```
+**Disconnects.** When a human disconnects (clean close, or no packet for 5 s):
 
-A respawning player should not simply appear at the same location every time.
+1. the player entity disappears,
+2. their projectiles are removed,
+3. their score is kept in the match record and shown greyed-out with "(left)" on the final scoreboard,
+4. they cannot score further.
 
-The server should select a valid spawn location.
+A reconnecting client is treated as a **new player**.
 
-The selected location must:
-
-* be inside the arena
-* not overlap an obstacle
-* not overlap another player
-* preferably not place the player immediately beside an opponent
-
-For the initial implementation, a simple random valid spawn point is sufficient.
+**Capacity.** Maximum 8 participants. A ninth join is rejected with the error code `ROOM_FULL`.
 
 ---
 
-# 13. Spawn Protection
+## 12. Bots
 
-I recommend adding a very short spawn-protection period.
+Bots exist so that a single viewer sees a living arena and so that the 2-participant minimum is met.
 
-Suggested value:
-
-```text
-Spawn protection = 1 second
-```
-
-During this period:
-
-* the player can move
-* the player can optionally shoot
-* incoming projectiles cannot eliminate the player
-
-This prevents an unfortunate situation where:
-
-```text
-Player respawns
-      ↓
-Player appears
-      ↓
-Previously fired projectile hits them
-      ↓
-Player immediately dies again
-```
-
-However, **spawn protection should be clearly visible** in the UI.
-
-For example:
-
-```text
-RESPAWNING...
-2
-
-SPAWN PROTECTED
-0.7s
-```
-
-If you want the simplest possible implementation, spawn protection can be omitted initially and added later.
+- When a `COUNTDOWN` begins, the room adds bots until `participants == bots.targetParticipants` (default 4). Humans who join mid-match are added on top (up to 8) without removing bots. At the next `COUNTDOWN` the bot count is recomputed as `max(0, targetParticipants − humans)`.
+- Bots are real participants in the simulation. They produce **inputs** (same format as humans) and are processed by the same code path. They are labelled `BOT` in the UI and use names from `bots.names`.
+- **Behavior (simple, deterministic given a seed):**
+  - Wander: every ~1.5 s choose a random spawn point or arena point as target and move toward it. If position changes by less than 20 px in 1 s, choose a new target.
+  - Aim and fire: if an alive, non-protected opponent is within `sightRange` and the straight segment to them is not blocked by an obstacle, aim at them with a random angular error of ±`aimErrorDeg`, after a `reactionMs` delay since first seeing them, and fire whenever the cooldown allows.
+- Bot traffic is server-local and **bypasses the network emulator**. The UI must say so in the Network Lab ("Bots are simulated inside the server").
+- The bot RNG is seeded from `bots.seed` so behavior is reproducible in tests.
 
 ---
 
-# 14. Scoring
+## 13. Server authority
 
-Every successful elimination gives the shooter:
+The server is the final authority over positions, collisions, projectiles, hits, deaths, respawns, scores, timers and match state. Clients may only send intent:
 
-```text
-+1 point
+```json
+{ "t": "input", "inputs": [ { "s": 42, "k": 8, "a": 0.785, "f": 1 } ] }
 ```
 
-Example:
-
-```text
-Player A shoots Player B
-
-Player A: 3 → 4
-Player B: 7 → 7
-```
-
-There is no penalty for dying.
-
-There is no score for:
-
-* hitting an obstacle
-* firing a projectile
-* surviving
-* damaging another player
-
-Only confirmed eliminations award points.
+`s` is the input sequence number, `k` the movement key bitmask, `a` the aim angle and `f` the fire flag. The client never sends a position, a hit, a score or a time as a command. The full protocol is in `SPEC.md` §8.
 
 ---
 
-# 15. Self-Kills
+## 14. Rooms
 
-A player's projectile should **not** be able to kill its own shooter.
-
-This can be handled by recording the projectile's owner:
-
-```text
-Projectile
-├── ID
-├── position
-├── direction
-├── speed
-└── owner_id
-```
-
-During collision detection:
-
-```text
-if collided_player.id == projectile.owner_id:
-    ignore collision
-```
-
-This also gives the protocol a useful piece of state for debugging.
+| Room | Purpose | Bots | Firing | Timer / scoring |
+|---|---|---|---|---|
+| `main` | The game | per §12 | on | per §2 |
+| `lab` | Movement-only sandbox used by A/B compare mode (`SPEC.md` §13.8) | off | rejected | state is always `RUNNING`; no timer, no deaths |
 
 ---
 
-# 16. Friendly Fire
+## 15. Game constants (`shared/src/config/game.json`)
 
-Because the game is a free-for-all arena, every player is considered an opponent.
-
-Therefore:
-
-```text
-Player A → Player B = valid
-Player B → Player C = valid
-Player C → Player A = valid
-```
-
-There are no teams in the initial version.
-
----
-
-# 17. Projectile Lifetime
-
-A projectile should not exist forever if it somehow does not collide.
-
-Suggested maximum lifetime:
-
-```text
-Projectile lifetime = 2 seconds
-```
-
-If the projectile survives for two seconds without hitting anything, it is removed.
-
-This prevents abandoned projectiles from accumulating.
-
-The projectile therefore disappears when the first of these occurs:
-
-```text
-             ┌─ hits player
-             │
-Projectile ──┼─ hits obstacle
-             │
-             ├─ hits arena boundary
-             │
-             └─ reaches 2-second lifetime
-```
-
----
-
-# 18. Match Timer
-
-The match lasts exactly:
-
-```text
-180 seconds
-```
-
-The server owns the official timer.
-
-The client only displays it.
-
-Example:
-
-```text
-┌─────────────────────────────┐
-│          02:17              │
-│                             │
-│  P1: 5       P2: 3          │
-│                             │
-│       ●                     │
-│            ███              │
-│                    ●        │
-│                             │
-└─────────────────────────────┘
-```
-
-The client should not be able to change the timer.
-
----
-
-# 19. Match Start
-
-Before the match begins:
-
-```text
-WAITING FOR PLAYERS
-```
-
-Once the required number of players is connected:
-
-```text
-3
-2
-1
-GO!
-```
-
-The match begins.
-
-A minimum of **2 players** should be required.
-
-The server records the official match start time.
-
----
-
-# 20. Match End
-
-When 180 seconds have elapsed:
-
-```text
-MATCH OVER
-```
-
-The server:
-
-1. stops accepting movement inputs
-2. stops accepting firing requests
-3. stops spawning new projectiles
-4. calculates final scores
-5. determines the winner/tied winners
-6. broadcasts the final scoreboard
-
-Example:
-
-```text
-╔══════════════════════════╗
-║       MATCH OVER         ║
-╠══════════════════════════╣
-║                          ║
-║  Player A       12       ║
-║  Player B        9       ║
-║  Player C        5       ║
-║  Player D        4       ║
-║                          ║
-║       WINNER: A          ║
-╚══════════════════════════╝
-```
-
----
-
-# 21. Tie Condition
-
-If two or more players have the same highest score:
-
-```text
-Player A = 8
-Player B = 8
-Player C = 5
-```
-
-The result is:
-
-```text
-DRAW
-A and B
-```
-
-There is no sudden-death round in the initial version.
-
-This keeps the match deterministic and prevents the project from requiring another gameplay phase.
-
----
-
-# 22. Disconnects
-
-If a player disconnects:
-
-1. the server removes them from the active game
-2. their player entity disappears
-3. their projectiles are removed
-4. their score is retained in the server's match record
-5. they are no longer eligible to score
-
-If they reconnect, they should initially be treated as a new player unless a reconnect mechanism is explicitly implemented later.
-
----
-
-# 23. Minimum Player Count
-
-Recommended:
-
-```text
-Minimum: 2 players
-Maximum: 8 players
-```
-
-The game should be designed so that the networking architecture supports more players, but **2–4 players is sufficient for development and demonstration**.
-
-The maximum can be increased later if performance allows.
-
----
-
-# 24. Server Authority
-
-The server is the final authority over:
-
-* player positions
-* collisions
-* projectile positions
-* projectile collisions
-* deaths
-* respawns
-* scores
-* timers
-* match state
-
-The client sends inputs such as:
+Save this block verbatim. Derived tick counts use `ticks = Math.round(ms × sim.hz / 1000)`.
 
 ```json
 {
-  "type": "player_input",
-  "sequence": 42,
-  "input": {
-    "up": false,
-    "down": false,
-    "left": false,
-    "right": true
+  "sim": { "hz": 60 },
+  "match": {
+    "durationMs": 180000,
+    "countdownMs": 3000,
+    "endedMs": 10000,
+    "minParticipants": 2,
+    "maxParticipants": 8
+  },
+  "arena": { "width": 1280, "height": 720 },
+  "player": {
+    "radius": 16,
+    "speed": 200,
+    "respawnDelayMs": 2000,
+    "spawnProtectionMs": 1000,
+    "fireCooldownMs": 300,
+    "maxNameLength": 12
+  },
+  "projectile": { "radius": 4, "speed": 600, "lifetimeMs": 2000 },
+  "scoring": { "pointsPerKill": 1 },
+  "obstacles": [
+    { "id": "center",   "x": 600,  "y": 310, "w": 80,  "h": 100 },
+    { "id": "pillarTL", "x": 240,  "y": 140, "w": 80,  "h": 80  },
+    { "id": "pillarTR", "x": 960,  "y": 140, "w": 80,  "h": 80  },
+    { "id": "pillarBL", "x": 240,  "y": 500, "w": 80,  "h": 80  },
+    { "id": "pillarBR", "x": 960,  "y": 500, "w": 80,  "h": 80  },
+    { "id": "wallL",    "x": 120,  "y": 330, "w": 120, "h": 60  },
+    { "id": "wallR",    "x": 1040, "y": 330, "w": 120, "h": 60  },
+    { "id": "barTop",   "x": 540,  "y": 100, "w": 200, "h": 24  },
+    { "id": "barBottom","x": 540,  "y": 596, "w": 200, "h": 24  }
+  ],
+  "spawnPoints": [
+    { "x": 80,   "y": 80  },
+    { "x": 1200, "y": 80  },
+    { "x": 80,   "y": 640 },
+    { "x": 1200, "y": 640 },
+    { "x": 640,  "y": 52  },
+    { "x": 640,  "y": 668 },
+    { "x": 60,   "y": 360 },
+    { "x": 1220, "y": 360 }
+  ],
+  "spawnMinSeparationPx": 64,
+  "bots": {
+    "targetParticipants": 4,
+    "names": ["NOVA", "ECHO", "VOLT", "ZERO", "ARC", "FLUX", "NYX", "KILO"],
+    "aimErrorDeg": 8,
+    "reactionMs": 300,
+    "sightRange": 700,
+    "seed": 1337
+  },
+  "rooms": {
+    "main": { "bots": true,  "firing": true,  "timed": true  },
+    "lab":  { "bots": false, "firing": false, "timed": false }
   }
 }
 ```
 
-And:
-
-```json
-{
-  "type": "fire",
-  "sequence": 43,
-  "direction": {
-    "x": 1,
-    "y": 0
-  }
-}
-```
-
-The client does **not** send:
-
-```json
-{
-  "position": {
-    "x": 500,
-    "y": 200
-  }
-}
-```
-
-as an authoritative command.
-
-Instead:
-
-```text
-Client
-  │
-  │ input
-  ▼
-Server
-  │
-  ├── validate
-  ├── simulate
-  ├── collision detection
-  ├── update state
-  └── broadcast state
-```
-
-This is particularly important for your networking experiments because it gives you a clear authoritative state against which you can measure client-side divergence.
-
 ---
 
-# 25. Game Tick
+## 16. Deliberately NOT included
 
-The server should run the game simulation at a fixed tick rate.
+Do not build: multiple weapons, damage values, ammo, reloading, power-ups, teams, classes, player-vs-player body collision, grenades, bouncing or homing projectiles, moving or destructible obstacles, procedural maps, matchmaking, accounts, progression, inventories, sudden death, health bars, or a reconnect-to-same-player mechanism.
 
-Suggested initial value:
-
-```text
-Server tick rate = 30 Hz
-```
-
-Therefore:
-
-```text
-30 game updates / second
-```
-
-The server repeatedly performs:
-
-```text
-Receive inputs
-      ↓
-Validate inputs
-      ↓
-Update player movement
-      ↓
-Update projectiles
-      ↓
-Detect collisions
-      ↓
-Process deaths
-      ↓
-Process respawns
-      ↓
-Update scores
-      ↓
-Broadcast state
-      ↓
-Next tick
-```
-
-This fixed simulation loop will also make later experiments easier to reproduce.
-
----
-
-# 26. Network-Relevant Events
-
-The game should expose clear events that can be measured by the project.
-
-Important events include:
-
-```text
-PLAYER_JOIN
-PLAYER_LEAVE
-PLAYER_INPUT
-PLAYER_MOVE
-PLAYER_FIRE
-PROJECTILE_SPAWN
-PROJECTILE_HIT
-PLAYER_DEATH
-PLAYER_RESPAWN
-SCORE_UPDATE
-MATCH_START
-MATCH_END
-```
-
-These events give the emulator/measurement system useful things to correlate with network conditions.
-
----
-
-# 27. Example Complete Gameplay Sequence
-
-Suppose there are three players:
-
-```text
-A = 2 points
-B = 4 points
-C = 1 point
-```
-
-Player A fires at Player B.
-
-```text
-A
-● ─────────────────► ●
-                     B
-```
-
-The projectile reaches B.
-
-Server detects:
-
-```text
-Projectile owner = A
-Collision target = B
-```
-
-The server performs:
-
-```text
-B.state = DEAD
-A.score += 1
-B.respawn_timer = 2 seconds
-Projectile = destroyed
-```
-
-Score becomes:
-
-```text
-A = 3
-B = 4
-C = 1
-```
-
-After two seconds:
-
-```text
-B.state = ALIVE
-B.position = valid_spawn_location
-```
-
-B continues playing.
-
----
-
-# 28. Important Rule: The Server Decides the Hit
-
-The client should not simply announce:
-
-```text
-"I hit B."
-```
-
-Instead, the client announces:
-
-```text
-"I fired in this direction."
-```
-
-The server simulates the projectile and determines whether a collision occurred.
-
-This gives you a clean authoritative architecture:
-
-```text
-CLIENT
-  │
-  │ fire input
-  ▼
-SERVER
-  │
-  │ create projectile
-  │
-  │ simulate projectile
-  │
-  │ collision detection
-  │
-  ├──── miss ────► continue
-  │
-  └──── hit ─────► death + score
-```
-
----
-
-# 29. Initial Game Constants
-
-The first implementation can use these values:
-
-| Rule                | Initial value |
-| ------------------- | ------------: |
-| Match duration      |         180 s |
-| Server tick rate    |         30 Hz |
-| Player speed        |      200 px/s |
-| Fire cooldown       |        300 ms |
-| Projectile speed    |      600 px/s |
-| Projectile lifetime |           2 s |
-| Respawn delay       |           2 s |
-| Spawn protection    |           1 s |
-| Player health       |         1 hit |
-| Points per kill     |             1 |
-| Minimum players     |             2 |
-| Suggested maximum   |             8 |
-
-These values should be treated as **configuration**, rather than hard-coded game logic.
-
----
-
-# 30. What We Should Deliberately NOT Add Initially
-
-To keep the project focused, the first version should avoid:
-
-* multiple weapons
-* weapon damage values
-* ammunition
-* reload mechanics
-* power-ups
-* teams
-* different player classes
-* complex physics
-* grenades
-* bouncing projectiles
-* moving obstacles
-* destructible environments
-* maps with procedural generation
-* matchmaking
-* player progression
-* inventories
-
-The core game should remain:
-
-```text
-MOVE
-  +
-SHOOT
-  +
-COLLIDE
-  +
-DIE
-  +
-RESPAWN
-  +
-SCORE
-  +
-3-MINUTE MATCH
-```
-
-That gives us enough gameplay to make the networking experiments meaningful without allowing the game itself to consume the majority of the project development time.
+The game is: **move + shoot + collide + die + respawn + score + 3-minute match.**
