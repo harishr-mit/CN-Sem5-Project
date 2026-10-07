@@ -1,0 +1,26 @@
+{
+  "name": "@nobu/shared",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    "./config/game": "./src/config/game.ts",
+    "./config/net": "./src/config/net.ts",
+    "./config/game.js": "./src/config/game.ts",
+    "./config/net.js": "./src/config/net.ts",
+    "./config/game.json": "./src/config/game.json",
+    "./config/net.json": "./src/config/net.json",
+    "./config/*": "./src/config/*",
+    "./sim": "./src/sim/index.ts",
+    "./sim/*": "./src/sim/*",
+    "./protocol": "./src/protocol/index.ts",
+    "./protocol/*": "./src/protocol/*"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.2",
+    "vitest": "^1.6.0"
+  }
+}
