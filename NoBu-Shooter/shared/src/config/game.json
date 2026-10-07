@@ -1,0 +1,55 @@
+{
+  "sim": { "hz": 60 },
+  "match": {
+    "durationMs": 180000,
+    "countdownMs": 3000,
+    "endedMs": 10000,
+    "minParticipants": 2,
+    "maxParticipants": 8
+  },
+  "arena": { "width": 1280, "height": 720 },
+  "player": {
+    "radius": 16,
+    "speed": 200,
+    "respawnDelayMs": 2000,
+    "spawnProtectionMs": 1000,
+    "fireCooldownMs": 300,
+    "maxNameLength": 12
+  },
+  "projectile": { "radius": 4, "speed": 600, "lifetimeMs": 2000 },
+  "scoring": { "pointsPerKill": 1 },
+  "obstacles": [
+    { "id": "center",    "x": 600,  "y": 310, "w": 80,  "h": 100 },
+    { "id": "pillarTL",  "x": 240,  "y": 140, "w": 80,  "h": 80  },
+    { "id": "pillarTR",  "x": 960,  "y": 140, "w": 80,  "h": 80  },
+    { "id": "pillarBL",  "x": 240,  "y": 500, "w": 80,  "h": 80  },
+    { "id": "pillarBR",  "x": 960,  "y": 500, "w": 80,  "h": 80  },
+    { "id": "wallL",     "x": 120,  "y": 330, "w": 120, "h": 60  },
+    { "id": "wallR",     "x": 1040, "y": 330, "w": 120, "h": 60  },
+    { "id": "barTop",    "x": 540,  "y": 100, "w": 200, "h": 24  },
+    { "id": "barBottom", "x": 540,  "y": 596, "w": 200, "h": 24  }
+  ],
+  "spawnPoints": [
+    { "x": 80,   "y": 80  },
+    { "x": 1200, "y": 80  },
+    { "x": 80,   "y": 640 },
+    { "x": 1200, "y": 640 },
+    { "x": 640,  "y": 52  },
+    { "x": 640,  "y": 668 },
+    { "x": 60,   "y": 360 },
+    { "x": 1220, "y": 360 }
+  ],
+  "spawnMinSeparationPx": 64,
+  "bots": {
+    "targetParticipants": 4,
+    "names": ["NOVA", "ECHO", "VOLT", "ZERO", "ARC", "FLUX", "NYX", "KILO"],
+    "aimErrorDeg": 8,
+    "reactionMs": 300,
+    "sightRange": 700,
+    "seed": 1337
+  },
+  "rooms": {
+    "main": { "bots": true,  "firing": true,  "timed": true  },
+    "lab":  { "bots": false, "firing": false, "timed": false }
+  }
+}

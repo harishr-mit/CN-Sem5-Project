@@ -1,0 +1,12 @@
+{
+  "name": "nobu-shooter-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm --prefix NoBu-Shooter install",
+    "demo": "npm --prefix NoBu-Shooter run demo",
+    "test": "npm --prefix NoBu-Shooter test",
+    "smoke": "npm --prefix NoBu-Shooter run smoke",
+    "install:all": "npm --prefix NoBu-Shooter install"
+  }
+}

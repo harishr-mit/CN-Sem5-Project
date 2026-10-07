@@ -1,0 +1,25 @@
+export const NET = {
+  ports: { client: 5173, server: 8080, emulatorData: 9000, emulatorControl: 9001 },
+  snapshotHz: 30,
+  inputSendHz: 30,
+  redundancyMax: 10,
+  redundancyDefault: false,
+  maxInputsPerMessage: 20,
+  maxMessagesPerSecond: 120,
+  inputBacklogCatchup: { threshold: 3, maxPerTick: 2 },
+  interpDelayMs: 100,
+  extrapolateMaxMs: 100,
+  snapshotBufferSize: 32,
+  eventRedundancyMs: 500,
+  clockSmoothing: 0.05,
+  reconcile: { epsilonPx: 0.01, smoothHalfLifeMs: 80, snapThresholdPx: 64 },
+  pingIntervalMs: 500,
+  helloRetryMs: 250,
+  connectGiveUpMs: 10000,
+  timeoutMs: 5000,
+  metricsWindowMs: 10000,
+  debug: { allowPerturb: true, perturbPx: 40 },
+  fpsDegrade: { minFps: 45, forSeconds: 3 },
+} as const;
+
+export default NET;
