@@ -60,7 +60,7 @@ const MOVE_CFG = {
   radius: GAME.player.radius,
   arenaW: GAME.arena.width,
   arenaH: GAME.arena.height,
-  obstacles: GAME.obstacles as { x: number; y: number; w: number; h: number }[],
+  obstacles: GAME.obstacles as unknown as { x: number; y: number; w: number; h: number }[],
   hz: GAME.sim.hz,
 };
 
@@ -296,7 +296,11 @@ export class NetClient {
   private onSnapReceived(snap: MsgSnap): void {
     // SPEC.md §10.5: ignore snapshots not newer than last applied
     if (snap.tick <= this.latestAppliedTick) {
-      this.duplicatesIgnored++;
+      if (snap.tick < this.lastSnapTick) {
+        this.reorderedIgnored++;
+      } else {
+        this.duplicatesIgnored++;
+      }
       return;
     }
 

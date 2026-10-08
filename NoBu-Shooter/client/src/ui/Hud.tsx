@@ -1,7 +1,12 @@
 import React from 'react';
 import { useGameStore } from './store.js';
 
-export const Hud: React.FC = () => {
+interface HudProps {
+  onOpenSettings?: () => void;
+  onOpenControls?: () => void;
+}
+
+export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls }) => {
   const snap = useGameStore((s) => s.snap);
   const myPlayerId = useGameStore((s) => s.playerId);
   const killFeed = useGameStore((s) => s.killFeed);
@@ -169,7 +174,7 @@ export const Hud: React.FC = () => {
       {/* Connection Loss / Connecting Overlay */}
       {connStatus !== 'connected' && (
         <div className="connecting-overlay">
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', maxWidth: '420px', textAlign: 'center' }}>
             <div className="connecting-spinner" />
             <div
               className="font-display"
@@ -183,9 +188,76 @@ export const Hud: React.FC = () => {
               {connStatus === 'timeout' && 'CONNECTION TIMED OUT'}
               {connStatus === 'error' && 'COMMUNICATION ERROR'}
             </div>
+            {(connStatus === 'timeout' || connStatus === 'error') && (
+              <div style={{ fontSize: '0.82rem', color: 'var(--c-text-muted)', lineHeight: '1.5', fontFamily: 'var(--font-mono)' }}>
+                Please ensure both the backend server and network emulator are running:
+                <div style={{ marginTop: '6px', color: 'var(--c-cyan)', background: 'rgba(0,0,0,0.4)', padding: '6px 10px', borderRadius: '4px' }}>
+                  npm run demo
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
+
+      {/* Quick Action Floating Bar */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: '12px',
+          left: '12px',
+          display: 'flex',
+          gap: '8px',
+          zIndex: 40,
+        }}
+      >
+        {onOpenControls && (
+          <button
+            onClick={onOpenControls}
+            style={{
+              background: 'rgba(10, 8, 26, 0.75)',
+              border: '1px solid var(--c-border)',
+              borderRadius: '4px',
+              padding: '4px 10px',
+              color: 'var(--c-cyan)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.72rem',
+              letterSpacing: '0.08em',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              backdropFilter: 'blur(4px)',
+            }}
+            title="Controls Guide [F1]"
+          >
+            <span>?</span> CONTROLS [F1]
+          </button>
+        )}
+        {onOpenSettings && (
+          <button
+            onClick={onOpenSettings}
+            style={{
+              background: 'rgba(10, 8, 26, 0.75)',
+              border: '1px solid var(--c-border)',
+              borderRadius: '4px',
+              padding: '4px 10px',
+              color: 'var(--c-text-muted)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.72rem',
+              letterSpacing: '0.08em',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              backdropFilter: 'blur(4px)',
+            }}
+            title="Settings [Esc]"
+          >
+            <span>⚙</span> SETTINGS [ESC]
+          </button>
+        )}
+      </div>
     </div>
   );
 };

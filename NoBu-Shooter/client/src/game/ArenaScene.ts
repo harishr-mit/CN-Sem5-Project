@@ -40,10 +40,10 @@ const PLAYER_COLORS = [
 
 const ARENA_W = GAME.arena.width;
 const ARENA_H = GAME.arena.height;
-const OBSTACLES = GAME.obstacles as { id: string; x: number; y: number; w: number; h: number }[];
+const OBSTACLES = GAME.obstacles as unknown as { id: string; x: number; y: number; w: number; h: number }[];
 const P_RADIUS = GAME.player.radius;
 const PROJ_RADIUS = GAME.projectile.radius;
-const SPAWN_POINTS = GAME.spawnPoints as { x: number; y: number }[];
+const SPAWN_POINTS = GAME.spawnPoints as unknown as { x: number; y: number }[];
 
 interface ParticleEffect {
   x: number; y: number;
@@ -60,18 +60,28 @@ interface CorrectionLine {
 
 export class ArenaScene extends Phaser.Scene {
   private netClient!: NetClient;
-  private arenaContainer!: Phaser.GameObjects.Container;
+  // arenaContainer removed (Bug 3B) — graphics objects are added directly
   private bgGraphics!: Phaser.GameObjects.Graphics;
   private playerGraphics!: Phaser.GameObjects.Graphics;
   private projGraphics!: Phaser.GameObjects.Graphics;
   private fxGraphics!: Phaser.GameObjects.Graphics;
   private ghostGraphics!: Phaser.GameObjects.Graphics;
 
+  // Keyboard keys (Bug 2A fix — stored as class fields, polled in update())
+  private keyW!: Phaser.Input.Keyboard.Key;
+  private keyA!: Phaser.Input.Keyboard.Key;
+  private keyS!: Phaser.Input.Keyboard.Key;
+  private keyD!: Phaser.Input.Keyboard.Key;
+  private keyUp!: Phaser.Input.Keyboard.Key;
+  private keyDown!: Phaser.Input.Keyboard.Key;
+  private keyLeft!: Phaser.Input.Keyboard.Key;
+  private keyRight!: Phaser.Input.Keyboard.Key;
+
   // Particle system
   private particles: ParticleEffect[] = [];
   private correctionLines: CorrectionLine[] = [];
 
-  // Muzzle flash
+  // Muzzle flash (timer is now in milliseconds, Bug 6D fix)
   private muzzleFlashTimer = 0;
   private muzzleFlashX = 0;
   private muzzleFlashY = 0;
@@ -84,7 +94,7 @@ export class ArenaScene extends Phaser.Scene {
   private accumMs = 0;
   private lastTickMs = 0;
   private inputSendAccum = 0;
-  private metricsAccum = 0;
+  // metricsAccum removed — NetworkLab drives updateMetrics() (Bug 6A fix)
 
   constructor(config: Phaser.Types.Scenes.SettingsConfig & { netClient: NetClient }) {
     super({ key: 'ArenaScene', ...config });
@@ -105,16 +115,16 @@ export class ArenaScene extends Phaser.Scene {
     this.playerGraphics = this.add.graphics();
     this.fxGraphics    = this.add.graphics();
 
-    // Input
+    // Input — pointer uses worldX/Y to stay in game/arena-space (Bug 2B fix)
     this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => {
-      // Convert screen coords to arena coords
-      const rx = ptr.x;
-      const ry = ptr.y;
+      // ptr.worldX/Y are already in Phaser game-space (not CSS screen pixels).
+      // me.x/me.y are also in game-space, so the atan2 is now correct at any
+      // window size when Phaser.Scale.FIT is active.
       const me = this.netClient.latestSnapshot?.players.find(
         p => p.id === this.netClient.myPlayerId
       );
       if (me) {
-        this.netClient.aimAngle = Math.atan2(ry - me.y, rx - me.x);
+        this.netClient.aimAngle = Math.atan2(ptr.worldY - me.y, ptr.worldX - me.x);
       }
     });
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
@@ -122,24 +132,20 @@ export class ArenaScene extends Phaser.Scene {
     });
     this.input.on('pointerup', () => { this.netClient.fireDown = false; });
 
-    // Keyboard
+    // Keyboard — store refs so we can poll them inside update() (Bug 2A fix)
     const kb = this.input.keyboard!;
-    const W = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-    const A = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-    const S = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-    const D = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
-    const UP    = kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
-    const DOWN  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
-    const LEFT  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
-    const RIGHT = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
+    this.keyW     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+    this.keyA     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+    this.keyS     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+    this.keyD     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.keyUp    = kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
+    this.keyDown  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
+    this.keyLeft  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
+    this.keyRight = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
 
-    this.events.on('update', () => {
-      let keys = 0;
-      if (W.isDown || UP.isDown)    keys |= 1; // UP
-      if (S.isDown || DOWN.isDown)  keys |= 2; // DOWN
-      if (A.isDown || LEFT.isDown)  keys |= 4; // LEFT
-      if (D.isDown || RIGHT.isDown) keys |= 8; // RIGHT
-      this.netClient.keys = keys;
+    // Clean up key objects on scene shutdown to prevent stale refs on restart (Bug 2A fix)
+    this.events.once('shutdown', () => {
+      kb.removeAllKeys(true);
     });
 
     // Correction callback
@@ -147,19 +153,20 @@ export class ArenaScene extends Phaser.Scene {
       this.correctionLines.push({
         fx: ev.fromX, fy: ev.fromY,
         tx: ev.toX, ty: ev.toY,
-        life: 60, errorPx: ev.errorPx,
+        life: 1000, errorPx: ev.errorPx, // 1000 ms lifetime (Bug 6D fix)
       });
     };
 
-    // Muzzle flash callback
+    // Muzzle flash callback — use renderX/Y (predicted pos) not snapshot me.x/y
+    // so the flash stays aligned with the visually-displayed player (Bug 2B fix)
     this.netClient.onFire = () => {
-      const me = this.netClient.latestSnapshot?.players.find(
+      const hasPlayer = this.netClient.latestSnapshot?.players.some(
         p => p.id === this.netClient.myPlayerId
       );
-      if (me) {
-        this.muzzleFlashTimer = 6;
-        this.muzzleFlashX = me.x + Math.cos(this.netClient.aimAngle) * (P_RADIUS + 10);
-        this.muzzleFlashY = me.y + Math.sin(this.netClient.aimAngle) * (P_RADIUS + 10);
+      if (hasPlayer) {
+        this.muzzleFlashTimer = 100; // ms (converted to time-based, Bug 6D fix)
+        this.muzzleFlashX = this.netClient.renderX + Math.cos(this.netClient.aimAngle) * (P_RADIUS + 10);
+        this.muzzleFlashY = this.netClient.renderY + Math.sin(this.netClient.aimAngle) * (P_RADIUS + 10);
       }
     };
 
@@ -184,6 +191,14 @@ export class ArenaScene extends Phaser.Scene {
     const nowMs = time;
     const dt = delta;
 
+    // ── Poll keyboard (Bug 2A fix: moved here from events.on('update')) ────
+    let keys = 0;
+    if (this.keyW?.isDown  || this.keyUp?.isDown)    keys |= 1; // UP
+    if (this.keyS?.isDown  || this.keyDown?.isDown)  keys |= 2; // DOWN
+    if (this.keyA?.isDown  || this.keyLeft?.isDown)  keys |= 4; // LEFT
+    if (this.keyD?.isDown  || this.keyRight?.isDown) keys |= 8; // RIGHT
+    this.netClient.keys = keys;
+
     // ── Fixed sim accumulator (60 Hz) ────────────────────────
     this.accumMs += dt;
     while (this.accumMs >= (1000 / GAME.sim.hz)) {
@@ -198,12 +213,7 @@ export class ArenaScene extends Phaser.Scene {
       this.inputSendAccum -= (1000 / 30);
     }
 
-    // ── Metrics update (5 Hz) ────────────────────────────────
-    this.metricsAccum += dt;
-    if (this.metricsAccum >= 200) {
-      this.netClient.updateMetrics();
-      this.metricsAccum -= 200;
-    }
+    // updateMetrics() removed from here (Bug 6A fix) — NetworkLab.tsx drives it at 5 Hz
 
     // ── FPS auto-degrade ─────────────────────────────────────
     this.fpsSamples.push(1000 / dt);
@@ -219,16 +229,17 @@ export class ArenaScene extends Phaser.Scene {
     // ── Render ───────────────────────────────────────────────
     this.render(nowMs);
 
-    // ── Decay effects ────────────────────────────────────────
-    if (this.muzzleFlashTimer > 0) this.muzzleFlashTimer--;
+    // ── Decay effects (Bug 6D fix: use delta ms, not frame count) ────────
+    if (this.muzzleFlashTimer > 0) this.muzzleFlashTimer = Math.max(0, this.muzzleFlashTimer - dt);
     this.particles = this.particles.filter(p => p.life > 0);
+    // Correction lines also use ms lifetime now
     this.correctionLines = this.correctionLines.filter(l => l.life > 0);
     for (const p of this.particles) {
       p.x += p.vx; p.y += p.vy;
       p.vx *= 0.92; p.vy *= 0.92;
-      p.life--;
+      p.life -= dt; // ms-based
     }
-    for (const l of this.correctionLines) l.life--;
+    for (const l of this.correctionLines) l.life -= dt; // ms-based
   }
 
   private render(nowMs: number): void {
@@ -270,7 +281,7 @@ export class ArenaScene extends Phaser.Scene {
     // Draw correction lines
     fxG.lineStyle(2, C_GHOST, 0.8);
     for (const line of this.correctionLines) {
-      const alpha = line.life / 60;
+      const alpha = Math.min(1, line.life / 1000); // ms-based alpha (Bug 6D fix)
       fxG.lineStyle(2, C_GHOST, alpha);
       fxG.lineBetween(line.fx, line.fy, line.tx, line.ty);
       // Ring pulse
@@ -285,11 +296,17 @@ export class ArenaScene extends Phaser.Scene {
     for (const proj of projectiles) {
       projG.fillStyle(C_PROJECTILE, 1);
       projG.fillCircle(proj.x, proj.y, PROJ_RADIUS);
-      // Fading trail
-      const trailX = proj.x - proj.dx * 12;
-      const trailY = proj.y - proj.dy * 12;
-      projG.lineStyle(2, C_PROJECTILE, 0.3);
-      projG.lineBetween(trailX, trailY, proj.x, proj.y);
+      // Fading trail — guard against undefined dx/dy (Bug 3A fix)
+      const dx = (proj as unknown as Record<string, number>).dx;
+      const dy = (proj as unknown as Record<string, number>).dy;
+      if (Number.isFinite(dx) && Number.isFinite(dy)) {
+        const trailX = proj.x - dx * 12;
+        const trailY = proj.y - dy * 12;
+        if (Number.isFinite(trailX) && Number.isFinite(trailY)) {
+          projG.lineStyle(2, C_PROJECTILE, 0.3);
+          projG.lineBetween(trailX, trailY, proj.x, proj.y);
+        }
+      }
     }
 
     // Draw particles
@@ -300,8 +317,8 @@ export class ArenaScene extends Phaser.Scene {
     }
 
     // Muzzle flash
-    if (this.muzzleFlashTimer > 0 && me) {
-      const alpha = this.muzzleFlashTimer / 6;
+    if (this.muzzleFlashTimer > 0) {
+      const alpha = Math.min(1, this.muzzleFlashTimer / 100); // ms-based alpha (Bug 6D fix)
       fxG.fillStyle(0xffffff, alpha);
       fxG.fillCircle(this.muzzleFlashX, this.muzzleFlashY, 8 * alpha);
     }

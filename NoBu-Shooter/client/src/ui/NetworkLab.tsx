@@ -82,6 +82,43 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
     }
   };
 
+  // Sync sliders and preset when emulatorState updates (Bug 4B fix)
+  const emulatorState = useGameStore((s) => s.emulatorState) as {
+    defaults?: {
+      latencyMs?: number;
+      jitterMs?: number;
+      lossPct?: number;
+      bandwidthKbps?: number;
+      duplicatePct?: number;
+      reorderPct?: number;
+      lossModel?: string;
+    };
+  } | null;
+
+  useEffect(() => {
+    const defaults = emulatorState?.defaults;
+    if (!defaults) return;
+    if (typeof defaults.latencyMs === 'number') setLatencyMs(defaults.latencyMs);
+    if (typeof defaults.jitterMs === 'number') setJitterMs(defaults.jitterMs);
+    if (typeof defaults.lossPct === 'number') setLossPct(defaults.lossPct);
+    if (typeof defaults.bandwidthKbps === 'number') setBandwidthKbps(defaults.bandwidthKbps);
+    if (typeof defaults.duplicatePct === 'number') setDupPct(defaults.duplicatePct);
+    if (typeof defaults.reorderPct === 'number') setReorderPct(defaults.reorderPct);
+    if (defaults.lossModel !== undefined) setBurstLoss(defaults.lossModel === 'burst');
+
+    if (defaults.latencyMs === 0 && defaults.lossPct === 0 && defaults.jitterMs === 0) {
+      setActivePreset('Baseline');
+    } else if (defaults.latencyMs === 25 && defaults.jitterMs === 15 && defaults.lossPct === 1) {
+      setActivePreset('Café Wi-Fi');
+    } else if (defaults.latencyMs === 45 && defaults.jitterMs === 25 && defaults.lossPct === 2) {
+      setActivePreset('Mobile 4G');
+    } else if (defaults.latencyMs === 90 && defaults.jitterMs === 8 && defaults.lossPct === 0.5) {
+      setActivePreset('Transatlantic');
+    } else if (defaults.latencyMs === 120 && defaults.jitterMs === 50 && defaults.lossPct === 12) {
+      setActivePreset('Nightmare');
+    }
+  }, [emulatorState]);
+
   // Keyboard hotkeys for presets and toggles per SPEC.md §13.2
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

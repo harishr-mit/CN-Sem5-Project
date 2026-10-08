@@ -8,13 +8,18 @@ import { NetworkLab } from './NetworkLab.js';
 import { PacketFlowStrip } from './PacketFlowStrip.js';
 import { PacketInspector } from './PacketInspector.js';
 import { ABCompare } from './ABCompare.js';
+import { SettingsPanel } from './SettingsPanel.js';
+import { ControlsOverlay } from './ControlsOverlay.js';
+import { loadSettings, type UserSettings } from './settings.js';
 import { useGameStore } from './store.js';
 
 export const App: React.FC = () => {
   const [view, setView] = useState<'landing' | 'game' | 'ab-compare'>('landing');
   const [playerName, setPlayerName] = useState('PILOT_01');
-  const [isLabOpen, setIsLabOpen] = useState(true);
+  const [isLabOpen, setIsLabOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 900 : true));
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isControlsOpen, setIsControlsOpen] = useState(false);
 
   // Clients
   const [netClient, setNetClient] = useState<NetClient | null>(null);
@@ -26,6 +31,10 @@ export const App: React.FC = () => {
     // Initialize network clients
     const net = new NetClient('ws://127.0.0.1:9000?label=' + encodeURIComponent(name), name, 'main');
     const emu = new EmulatorClient('ws://127.0.0.1:9001');
+
+    // Apply saved ghost preference
+    const initialSettings = loadSettings();
+    net.toggles.ghost = initialSettings.showGhost;
 
     setNetClient(net);
     setEmulatorClient(emu);
@@ -41,12 +50,39 @@ export const App: React.FC = () => {
     setView('ab-compare');
   };
 
+  // Keyboard shortcut listener for Escape and F1 / ?
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key === 'Escape') {
+        if (isControlsOpen) {
+          setIsControlsOpen(false);
+        } else {
+          setIsSettingsOpen((prev) => !prev);
+        }
+      } else if (e.key === 'F1' || (e.key === '?' && !e.shiftKey)) {
+        e.preventDefault();
+        setIsControlsOpen((prev) => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isControlsOpen]);
+
   // Cleanup on unmount or return to landing
   useEffect(() => {
     return () => {
       if (netClient) netClient.disconnect();
     };
   }, [netClient]);
+
+  const handleSettingsChange = (newSettings: UserSettings) => {
+    if (netClient) {
+      netClient.toggles.ghost = newSettings.showGhost;
+    }
+  };
 
   if (view === 'landing') {
     return (
@@ -77,7 +113,10 @@ export const App: React.FC = () => {
         <div className="arena-wrapper">
           <div className="arena-canvas-container">
             <GameContainer netClient={netClient} id="game-canvas" />
-            <Hud />
+            <Hud
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenControls={() => setIsControlsOpen(true)}
+            />
           </div>
 
           {/* Packet Flow Strip (YOU ── [EMULATOR] ── SERVER) */}
@@ -101,6 +140,19 @@ export const App: React.FC = () => {
           onToggleOpen={() => setIsLabOpen((open) => !open)}
         />
       </div>
+
+      {/* Settings Modal (Esc) */}
+      <SettingsPanel
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onSettingsChange={handleSettingsChange}
+      />
+
+      {/* Controls Overlay Modal (F1 / ?) */}
+      <ControlsOverlay
+        isOpen={isControlsOpen}
+        onClose={() => setIsControlsOpen(false)}
+      />
     </div>
   );
 };

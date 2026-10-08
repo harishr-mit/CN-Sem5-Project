@@ -35,8 +35,13 @@ export const ABCompare: React.FC<ABCompareProps> = ({ playerName, onExit }) => {
   const [metricsA, setMetricsA] = useState({ ...netClientA.metrics });
   const [metricsB, setMetricsB] = useState({ ...netClientB.metrics });
 
-  // Connect clients
+  // Connect clients (suppress global store overwrite for A/B instances)
   useEffect(() => {
+    netClientA.onConnected = () => {};
+    netClientA.onDisconnected = () => {};
+    netClientB.onConnected = () => {};
+    netClientB.onDisconnected = () => {};
+
     netClientA.connect();
     netClientB.connect();
     emulatorClient.connect();

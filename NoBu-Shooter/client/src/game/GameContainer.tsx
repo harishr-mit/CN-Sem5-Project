@@ -42,7 +42,18 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, classNa
     const game = new Phaser.Game(config);
     gameRef.current = game;
 
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        if (gameRef.current?.isBooted && gameRef.current?.scale) {
+          gameRef.current.scale.refresh();
+        }
+      });
+      resizeObserver.observe(containerRef.current);
+    }
+
     return () => {
+      resizeObserver?.disconnect();
       game.destroy(true);
       gameRef.current = null;
     };
@@ -56,6 +67,8 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, classNa
       style={{
         width: '100%',
         height: '100%',
+        minWidth: 0,
+        minHeight: 0,
         position: 'relative',
         display: 'flex',
         alignItems: 'center',

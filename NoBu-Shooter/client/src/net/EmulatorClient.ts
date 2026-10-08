@@ -4,8 +4,22 @@
  * SPEC.md §11.4.
  */
 
-import type { LinkConfig } from '@nobu/shared/sim';
 import { useGameStore } from '../ui/store.js';
+
+export interface LinkConfig {
+  latencyMs: number;
+  jitterMs: number;
+  jitterDist: 'normal' | 'uniform';
+  lossPct: number;
+  lossModel: 'random' | 'burst';
+  burstLen: number;
+  duplicatePct: number;
+  reorderPct: number;
+  reorderDelayMs: number;
+  bandwidthKbps: number;
+  queueLimitMs: number;
+  allowJitterReorder: boolean;
+}
 
 export interface EmulatorStats {
   id: string;
@@ -26,6 +40,7 @@ export interface PacketEvent {
 export class EmulatorClient {
   private ws: WebSocket | null = null;
   private url: string;
+  private retryCount = 0;
 
   onStats?: (sessions: EmulatorStats[]) => void;
   onPacketEvent?: (items: PacketEvent[]) => void;
@@ -39,9 +54,12 @@ export class EmulatorClient {
     this.ws = new WebSocket(this.url);
 
     this.ws.onopen = () => {
+      this.retryCount = 0;
       useGameStore.getState().setEmulatorStatus('connected');
       // Subscribe to packet events
       this.send({ cmd: 'subscribe', packets: true });
+      // Fetch latest state immediately on connect (Bug 4B fix)
+      this.getState();
     };
 
     this.ws.onmessage = (evt) => {
@@ -63,8 +81,11 @@ export class EmulatorClient {
 
     this.ws.onclose = () => {
       useGameStore.getState().setEmulatorStatus('offline');
-      // Reconnect after delay
-      setTimeout(() => this.connect(), 3000);
+      // Cap reconnect retries (Bug 6C fix)
+      if (this.retryCount < 5) {
+        this.retryCount++;
+        setTimeout(() => this.connect(), 3000);
+      }
     };
 
     this.ws.onerror = () => {
