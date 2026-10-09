@@ -1,21 +1,26 @@
 /**
- * NetClient — owns the WebSocket transport, handshake, input generation,
- * prediction, reconciliation, snapshot buffer and metrics.
- * No Phaser or React dependency. SPEC.md §10.
+ * NetClient — transport, handshake, input generation, prediction,
+ * reconciliation, snapshot buffer, clock estimation and metrics.
+ * SPEC.md §10.
+ *
+ * Headless by design: no Phaser, React or store imports. The transport and
+ * clock are injectable so the same class runs in the browser, in the
+ * headless test harness and (later) in Node network players. UI code
+ * subscribes with `on(...)` (see bindStore.ts).
  */
 
 import { encodeClient, decodeServer } from '@nobu/shared/protocol';
 import { stepPlayer } from '@nobu/shared/sim';
 import type {
   MsgSnap, PlayerSnap, ProjectileSnap, InputEntry,
-  MatchState, MsgWelcome, MsgPong, GameEvent,
+  MsgWelcome, MsgPong, GameEvent, ClientMsg,
 } from '@nobu/shared/protocol';
-import type { Vec2 } from '@nobu/shared/sim';
 import GAME from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
-import { useGameStore } from '../ui/store.js';
 
 // ── Types ──────────────────────────────────────────────────────
+export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'timeout' | 'error';
+
 export interface PredictionToggle {
   prediction: boolean;
   reconciliation: boolean;
@@ -26,6 +31,8 @@ export interface PredictionToggle {
 
 export interface SnapshotEntry {
   st: number;
+  /** Local time the snapshot arrived. */
+  arrivedAt: number;
   players: PlayerSnap[];
   projectiles: ProjectileSnap[];
 }
@@ -37,9 +44,12 @@ export interface LocalMetrics {
   pendingInputs: number;
   correctionsPerSec: number;
   lastErrorPx: number;
+  /** Largest correction in the last second (0 when there was none). */
+  recentErrorPx: number;
   avgErrorPx: number;
   maxErrorPx: number;
   inputToScreenMs: number;
+  ackDelayMs: number;
   bwUpKbps: number;
   bwDownKbps: number;
   snapsMissed: number;
@@ -55,6 +65,57 @@ export interface CorrectionEvent {
   errorPx: number;
 }
 
+export interface RenderState {
+  players: PlayerSnap[];
+  projectiles: ProjectileSnap[];
+}
+
+/** Minimal message transport (WebSocket in the browser, in-process in tests). */
+export interface ClientTransport {
+  send(text: string): void;
+  close(): void;
+}
+export interface TransportHandlers {
+  onOpen(): void;
+  onMessage(text: string): void;
+  onClose(): void;
+  onError(): void;
+}
+export type TransportFactory = (url: string, handlers: TransportHandlers) => ClientTransport;
+
+export const browserWebSocketTransport: TransportFactory = (url, h) => {
+  const ws = new WebSocket(url);
+  ws.onopen = () => h.onOpen();
+  ws.onmessage = (evt) => h.onMessage(evt.data as string);
+  ws.onclose = () => h.onClose();
+  ws.onerror = () => h.onError();
+  return {
+    send: (text) => { if (ws.readyState === WebSocket.OPEN) ws.send(text); },
+    close: () => ws.close(),
+  };
+};
+
+export interface NetClientOptions {
+  /** Base URL of the emulator (or server), e.g. ws://127.0.0.1:9000 */
+  url: string;
+  name: string;
+  room?: 'main' | 'lab';
+  /** Prefix for the emulator session label; a random suffix keeps it unique. */
+  labelPrefix?: string;
+  transport?: TransportFactory;
+  /** Monotonic local clock in ms. */
+  now?: () => number;
+}
+
+interface Listeners {
+  status: (s: ConnectionStatus) => void;
+  welcome: (playerId: number) => void;
+  snap: (snap: MsgSnap) => void;
+  event: (ev: GameEvent) => void;
+  correction: (ev: CorrectionEvent) => void;
+  fire: () => void;
+}
+
 const MOVE_CFG = {
   speed: GAME.player.speed,
   radius: GAME.player.radius,
@@ -64,18 +125,43 @@ const MOVE_CFG = {
   hz: GAME.sim.hz,
 };
 
+const SIM_STEP_MS = 1000 / GAME.sim.hz;
+const SNAP_EVERY_TICKS = Math.round(GAME.sim.hz / NET.snapshotHz);
+const METRICS_INTERVAL_MS = 200; // 5 Hz (SPEC.md §12)
+const SEEN_EVENTS_MAX = 1024;
+const LATENCY_SAMPLES = 30;
+const RTT_DISPLAY_SAMPLES = 6; // ~3 s, responsive to preset changes
+
+function mean(a: number[]): number {
+  return a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+}
+function pushCapped(a: number[], v: number, cap: number): void {
+  a.push(v);
+  if (a.length > cap) a.shift();
+}
+
 // ── NetClient ─────────────────────────────────────────────────
 export class NetClient {
-  private ws: WebSocket | null = null;
-  private serverUrl: string;
-  private playerName: string;
-  private roomName: 'main' | 'lab';
-  private nonce: string;
+  readonly label: string;
+  private readonly url: string;
+  private readonly playerName: string;
+  private readonly roomName: 'main' | 'lab';
+  private readonly nonce: string;
+  private readonly transportFactory: TransportFactory;
+  private readonly now: () => number;
+  private transport: ClientTransport | null = null;
+  /** Bumped on every connect/disconnect so callbacks from an old transport are ignored. */
+  private generation = 0;
+
+  private listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = {
+    status: new Set(), welcome: new Set(), snap: new Set(),
+    event: new Set(), correction: new Set(), fire: new Set(),
+  };
 
   // Connection state
   private connected = false;
   private playerId: number | null = null;
-  private welcome: MsgWelcome | null = null;
+  private status: ConnectionStatus = 'connecting';
 
   // Prediction state
   private predictedX = 0;
@@ -84,37 +170,39 @@ export class NetClient {
   private smoothOffsetY = 0;
   private pendingInputs: InputEntry[] = [];
   private seq = 0;
+  private lastSentSeq = 0;
   private lastLife = -1;
 
-  // Snapshot buffer
+  // Snapshot buffer / clock
   private snapBuffer: SnapshotEntry[] = [];
   private latestSnap: MsgSnap | null = null;
   private latestAppliedTick = -1;
-
-  // Clock sync
   private clockOffset = 0;
   private clockInitialized = false;
 
-  // Metrics
+  // Event de-duplication (bounded)
+  private seenEids = new Set<number>();
+  private seenEidOrder: number[] = [];
+
+  // Metric raw data
   private rttSamples: number[] = [];
   private pingId = 0;
   private pingTs = new Map<number, number>();
-  private correctionCount = 0;
-  private correctionWindow = 0;
-  private correctionErrors: number[] = [];
+  private correctionTimes: number[] = [];
+  private correctionErrors: { t: number; px: number }[] = [];
   private snapshotTimes: number[] = [];
-  private lastSnapTick = -1;
   private snapsMissed = 0;
   private duplicatesIgnored = 0;
   private reorderedIgnored = 0;
   private bytesSent = 0;
   private bytesRecv = 0;
-  private bwWindow = Date.now();
-
-  // Input timing
+  private bwHistory: { t: number; up: number; down: number }[] = [];
   private inputCreatedAt = new Map<number, number>();
+  private unpresentedInputAt: number | null = null;
+  private lastFrameMs = SIM_STEP_MS;
+  private inputToScreenSamples: number[] = [];
+  private ackDelaySamples: number[] = [];
 
-  // Toggles
   toggles: PredictionToggle = {
     prediction: true,
     reconciliation: true,
@@ -123,243 +211,237 @@ export class NetClient {
     ghost: true,
   };
 
-  // Callbacks
-  onConnected?: (playerId: number) => void;
-  onDisconnected?: () => void;
-  onSnap?: (snap: MsgSnap) => void;
-  onCorrection?: (ev: CorrectionEvent) => void;
-  onEvent?: (ev: GameEvent) => void;
-  onFire?: () => void; // local muzzle flash
-
-  // Last authoritative position (ghost)
+  /** Latest authoritative position of the local player (ghost). */
   authX = 0;
   authY = 0;
 
-  // Current keys + aim (set by the Phaser scene)
+  // Current keys + aim (set by the scene / input source)
   keys = 0;
   aimAngle = 0;
   fireDown = false;
 
-  // Local fire cooldown (for muzzle flash only)
   private localFireCooldown = 0;
-
-  private helloInterval: ReturnType<typeof setInterval> | null = null;
-  private pingInterval: ReturnType<typeof setInterval> | null = null;
+  private helloTimer: ReturnType<typeof setInterval> | null = null;
+  private giveUpTimer: ReturnType<typeof setTimeout> | null = null;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private metricsTimer: ReturnType<typeof setInterval> | null = null;
   private lastReceivedTime = 0;
 
   metrics: LocalMetrics = {
     rttMs: 0, jitterMs: 0, snapshotHz: 0, pendingInputs: 0,
-    correctionsPerSec: 0, lastErrorPx: 0, avgErrorPx: 0, maxErrorPx: 0,
-    inputToScreenMs: 0, bwUpKbps: 0, bwDownKbps: 0, snapsMissed: 0,
+    correctionsPerSec: 0, lastErrorPx: 0, recentErrorPx: 0, avgErrorPx: 0, maxErrorPx: 0,
+    inputToScreenMs: 0, ackDelayMs: 0, bwUpKbps: 0, bwDownKbps: 0, snapsMissed: 0,
     duplicatesIgnored: 0, reorderedIgnored: 0, serverTickHz: 0, serverTickMs: 0,
   };
 
-  constructor(
-    serverUrl: string,
-    playerName: string,
-    roomName: 'main' | 'lab' = 'main'
-  ) {
-    this.serverUrl = serverUrl;
-    this.playerName = playerName;
-    this.roomName = roomName;
+  constructor(opts: NetClientOptions) {
+    this.url = opts.url;
+    this.playerName = opts.name;
+    this.roomName = opts.room ?? 'main';
+    this.transportFactory = opts.transport ?? browserWebSocketTransport;
+    this.now = opts.now ?? (() => performance.now());
     this.nonce = Math.random().toString(36).slice(2);
+    this.label = `${opts.labelPrefix ?? opts.name}-${this.nonce.slice(0, 4)}`;
   }
 
+  // ── Events ─────────────────────────────────────────────────
+  on<K extends keyof Listeners>(type: K, fn: Listeners[K]): () => void {
+    this.listeners[type].add(fn);
+    return () => { this.listeners[type].delete(fn); };
+  }
+
+  private emit<K extends keyof Listeners>(type: K, ...args: Parameters<Listeners[K]>): void {
+    for (const fn of this.listeners[type]) (fn as (...a: Parameters<Listeners[K]>) => void)(...args);
+  }
+
+  private setStatus(s: ConnectionStatus): void {
+    if (this.status === s) return;
+    this.status = s;
+    this.emit('status', s);
+  }
+
+  // ── Connection ─────────────────────────────────────────────
   connect(): void {
-    this.ws = new WebSocket(this.serverUrl);
-
-    this.ws.onopen = () => {
-      this.lastReceivedTime = Date.now();
-      this.startHello();
-    };
-
-    this.ws.onmessage = (evt) => {
-      const data = evt.data as string;
-      this.bytesRecv += data.length;
-      this.lastReceivedTime = Date.now();
-      const msg = decodeServer(data);
-      if (!msg) return;
-      this.handleServerMsg(msg.t, msg as unknown as Record<string, unknown>);
-    };
-
-    this.ws.onclose = () => {
-      this.connected = false;
-      this.stopIntervals();
-      this.onDisconnected?.();
-      useGameStore.getState().setConnectionStatus('disconnected');
-    };
-
-    this.ws.onerror = () => {
-      useGameStore.getState().setConnectionStatus('error');
-    };
+    const sep = this.url.includes('?') ? '&' : '?';
+    const url = `${this.url}${sep}label=${encodeURIComponent(this.label)}`;
+    this.setStatus('connecting');
+    const gen = ++this.generation;
+    const live = () => gen === this.generation;
+    this.transport = this.transportFactory(url, {
+      onOpen: () => {
+        if (!live()) return;
+        this.lastReceivedTime = this.now();
+        this.startHello();
+      },
+      onMessage: (text) => {
+        if (!live()) return;
+        this.bytesRecv += text.length;
+        this.lastReceivedTime = this.now();
+        if (this.connected && this.status !== 'connected') this.setStatus('connected');
+        const msg = decodeServer(text);
+        if (msg) this.handleServerMsg(msg.t, msg as unknown as Record<string, unknown>);
+      },
+      onClose: () => {
+        if (!live()) return;
+        this.connected = false;
+        this.stopTimers();
+        if (this.status !== 'timeout' && this.status !== 'error') this.setStatus('disconnected');
+      },
+      onError: () => { if (live()) this.setStatus('error'); },
+    });
   }
 
+  /** Clean disconnect. The client can connect() again afterwards (as a new player). */
   disconnect(): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.send(encodeClient({ t: 'bye' }));
-      this.ws.close();
+    this.generation++;
+    if (this.transport) {
+      if (this.connected) this.send({ t: 'bye' });
+      this.transport.close();
+      this.transport = null;
     }
+    this.stopTimers();
+    this.connected = false;
+    this.playerId = null;
+    this.lastLife = -1;
+    this.pendingInputs = [];
+    this.inputCreatedAt.clear();
+    this.snapBuffer = [];
+    this.latestSnap = null;
+    this.latestAppliedTick = -1;
+    this.clockInitialized = false;
   }
 
-  private send(msg: string): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(msg);
-      this.bytesSent += msg.length;
-    }
+  private send(msg: ClientMsg): void {
+    if (!this.transport) return;
+    const text = encodeClient(msg);
+    this.transport.send(text);
+    this.bytesSent += text.length;
   }
 
   private startHello(): void {
-    const sendHello = () => {
-      this.send(encodeClient({
-        t: 'hello', v: 1,
-        name: this.playerName,
-        room: this.roomName,
-        nonce: this.nonce,
-      }));
-    };
+    const sendHello = () => this.send({
+      t: 'hello', v: 1, name: this.playerName, room: this.roomName, nonce: this.nonce,
+    });
     sendHello();
-    this.helloInterval = setInterval(sendHello, NET.helloRetryMs);
-
-    // Give up after connectGiveUpMs
-    setTimeout(() => {
+    this.helloTimer = setInterval(sendHello, NET.helloRetryMs);
+    this.giveUpTimer = setTimeout(() => {
       if (!this.connected) {
-        useGameStore.getState().setConnectionStatus('timeout');
+        if (this.helloTimer) clearInterval(this.helloTimer);
+        this.setStatus('timeout');
       }
     }, NET.connectGiveUpMs);
   }
 
-  private stopIntervals(): void {
-    if (this.helloInterval) clearInterval(this.helloInterval);
-    if (this.pingInterval) clearInterval(this.pingInterval);
+  private stopTimers(): void {
+    for (const t of [this.helloTimer, this.pingTimer, this.metricsTimer]) if (t) clearInterval(t);
+    if (this.giveUpTimer) clearTimeout(this.giveUpTimer);
+    this.helloTimer = this.pingTimer = this.metricsTimer = this.giveUpTimer = null;
   }
 
   private handleServerMsg(type: string, msg: Record<string, unknown>): void {
     switch (type) {
-      case 'welcome':
-        this.onWelcome(msg as unknown as MsgWelcome);
-        break;
-      case 'snap':
-        this.onSnapReceived(msg as unknown as MsgSnap);
-        break;
-      case 'pong':
-        this.onPong(msg as unknown as MsgPong);
-        break;
+      case 'welcome': this.onWelcome(msg as unknown as MsgWelcome); break;
+      case 'snap': this.onSnapReceived(msg as unknown as MsgSnap); break;
+      case 'pong': this.onPong(msg as unknown as MsgPong); break;
       case 'error':
         console.warn('[client] Server error:', msg['code'], msg['msg']);
-        useGameStore.getState().setConnectionStatus('error');
+        this.setStatus('error');
         break;
     }
   }
 
   private onWelcome(msg: MsgWelcome): void {
-    if (this.connected && msg.nonce === this.nonce) return; // already welcomed
-    if (this.helloInterval) clearInterval(this.helloInterval);
+    if (this.connected || msg.nonce !== this.nonce) return; // repeated welcome
+    if (this.helloTimer) clearInterval(this.helloTimer);
+    if (this.giveUpTimer) clearTimeout(this.giveUpTimer);
+    this.helloTimer = this.giveUpTimer = null;
     this.connected = true;
     this.playerId = msg.playerId;
-    this.welcome = msg;
 
-    // Start ping heartbeat
-    this.pingInterval = setInterval(() => {
+    this.pingTimer = setInterval(() => {
       const id = this.pingId++;
-      this.pingTs.set(id, Date.now());
-      this.send(encodeClient({ t: 'ping', id, ct: Date.now() }));
+      const ct = this.now();
+      this.pingTs.set(id, ct);
+      if (this.pingTs.size > 20) this.pingTs.delete(this.pingTs.keys().next().value as number);
+      this.send({ t: 'ping', id, ct });
+      // Watchdog (SPEC.md §10.7): nothing received for timeoutMs
+      if (this.now() - this.lastReceivedTime > NET.timeoutMs) this.setStatus('disconnected');
     }, NET.pingIntervalMs);
+    this.metricsTimer = setInterval(() => this.updateMetrics(), METRICS_INTERVAL_MS);
 
-    useGameStore.getState().setConnectionStatus('connected');
-    useGameStore.getState().setPlayerId(msg.playerId);
-    this.onConnected?.(msg.playerId);
+    this.setStatus('connected');
+    this.emit('welcome', msg.playerId);
   }
 
   private onPong(msg: MsgPong): void {
     const sent = this.pingTs.get(msg.id);
     if (sent == null) return;
     this.pingTs.delete(msg.id);
-    const rtt = Date.now() - sent;
-    this.rttSamples.push(rtt);
-    if (this.rttSamples.length > 20) this.rttSamples.shift();
-
-    // Compute jitter as mean absolute diff between consecutive RTTs
-    const rttAvg = this.rttSamples.reduce((a, b) => a + b, 0) / this.rttSamples.length;
-    let jitterSum = 0;
-    for (let i = 1; i < this.rttSamples.length; i++) {
-      jitterSum += Math.abs(this.rttSamples[i] - this.rttSamples[i - 1]);
-    }
-    const jitter = this.rttSamples.length > 1
-      ? jitterSum / (this.rttSamples.length - 1) : 0;
-
-    this.metrics.rttMs = Math.round(rttAvg);
-    this.metrics.jitterMs = Math.round(jitter);
+    pushCapped(this.rttSamples, this.now() - sent, Math.round(NET.metricsWindowMs / NET.pingIntervalMs));
     this.metrics.serverTickHz = Math.round(msg.tickHz);
-    this.metrics.serverTickMs = Math.round(msg.tickMs * 10) / 10;
+    this.metrics.serverTickMs = Math.round(msg.tickMs * 100) / 100;
   }
 
+  // ── Snapshots ──────────────────────────────────────────────
   private onSnapReceived(snap: MsgSnap): void {
-    // SPEC.md §10.5: ignore snapshots not newer than last applied
+    const now = this.now();
+
+    // SPEC.md §8.3: ignore any snapshot not newer than the latest applied
     if (snap.tick <= this.latestAppliedTick) {
-      if (snap.tick < this.lastSnapTick) {
-        this.reorderedIgnored++;
-      } else {
-        this.duplicatesIgnored++;
-      }
+      if (snap.tick === this.latestAppliedTick) this.duplicatesIgnored++;
+      else this.reorderedIgnored++;
       return;
     }
-
-    // Check for missed snaps
-    if (this.lastSnapTick !== -1 && snap.tick > this.lastSnapTick + 3) {
-      this.snapsMissed++;
+    if (this.latestAppliedTick !== -1) {
+      const gap = Math.round((snap.tick - this.latestAppliedTick) / SNAP_EVERY_TICKS) - 1;
+      if (gap > 0) this.snapsMissed += gap;
     }
-    this.lastSnapTick = snap.tick;
     this.latestAppliedTick = snap.tick;
     this.latestSnap = snap;
+    this.snapshotTimes.push(now);
 
-    // Update snapshot buffer for interpolation
-    this.snapBuffer.push({ st: snap.st, players: snap.players, projectiles: snap.projectiles });
+    // Clock offset: EMA of (server time − local arrival time) (SPEC.md §10.5)
+    const sample = snap.st - now;
+    if (!this.clockInitialized) {
+      this.clockOffset = sample;
+      this.clockInitialized = true;
+    } else {
+      this.clockOffset += (sample - this.clockOffset) * NET.clockSmoothing;
+    }
+
+    this.snapBuffer.push({ st: snap.st, arrivedAt: now, players: snap.players, projectiles: snap.projectiles });
     if (this.snapBuffer.length > NET.snapshotBufferSize) this.snapBuffer.shift();
 
-    // Track snapshot rate
-    const now = Date.now();
-    this.snapshotTimes.push(now);
-    this.snapshotTimes = this.snapshotTimes.filter(t => now - t < 1000);
-    this.metrics.snapshotHz = this.snapshotTimes.length;
-
-    // Process events
-    const seenEids = useGameStore.getState().seenEventIds;
+    // Events are cosmetic and repeated for eventRedundancyMs: de-duplicate by eid
     for (const ev of snap.events) {
-      if (!seenEids.has(ev.eid)) {
-        seenEids.add(ev.eid);
-        this.onEvent?.(ev);
-        useGameStore.getState().addEvent(ev);
-      }
+      if (this.seenEids.has(ev.eid)) continue;
+      this.seenEids.add(ev.eid);
+      this.seenEidOrder.push(ev.eid);
+      if (this.seenEidOrder.length > SEEN_EVENTS_MAX) this.seenEids.delete(this.seenEidOrder.shift()!);
+      this.emit('event', ev);
     }
 
-    // Update store with latest snap
-    useGameStore.getState().setSnap(snap);
-
-    // Perform reconciliation
-    if (this.playerId !== null) {
-      this.reconcile(snap);
-    }
-
-    this.onSnap?.(snap);
+    if (this.playerId !== null) this.reconcile(snap, now);
+    this.emit('snap', snap);
   }
 
   /** SPEC.md §10.4 */
-  private reconcile(snap: MsgSnap): void {
+  private reconcile(snap: MsgSnap, now: number): void {
     const me = snap.players.find(p => p.id === this.playerId);
     if (!me) return;
 
     this.authX = me.x;
     this.authY = me.y;
+    this.recordAck(snap.ack, now);
 
-    // Step 2: life change = hard reset (respawn teleport)
+    // Step 2: life change = hard reset (spawn / respawn teleport, not a correction)
     if (me.life !== this.lastLife) {
       this.lastLife = me.life;
       this.predictedX = me.x;
       this.predictedY = me.y;
       this.smoothOffsetX = 0;
       this.smoothOffsetY = 0;
-      // Drop all pending inputs older than ack
-      this.pendingInputs = this.pendingInputs.filter(i => i.s > snap.ack);
+      this.pendingInputs = [];
       return;
     }
 
@@ -368,61 +450,63 @@ export class NetClient {
 
     if (!this.toggles.reconciliation) return;
 
-    // Step 4–5: replay pending inputs from server state
+    // Steps 4–5: replay pending inputs on top of the authoritative state
     const before = { x: this.predictedX, y: this.predictedY };
-    let rx = me.x, ry = me.y;
-    for (const inp of this.pendingInputs) {
-      const pos = stepPlayer({ x: rx, y: ry }, inp.k, MOVE_CFG);
-      rx = pos.x; ry = pos.y;
+    let pos = { x: me.x, y: me.y };
+    for (const inp of this.pendingInputs) pos = stepPlayer(pos, inp.k, MOVE_CFG);
+
+    // With prediction off nothing was predicted, so there is nothing to correct.
+    if (!this.toggles.prediction) {
+      this.predictedX = pos.x;
+      this.predictedY = pos.y;
+      return;
     }
 
-    // Step 6: error
-    const dx = before.x - rx;
-    const dy = before.y - ry;
+    // Steps 6–9
+    const dx = before.x - pos.x;
+    const dy = before.y - pos.y;
     const error = Math.sqrt(dx * dx + dy * dy);
-
-    // Step 7–8
     if (error > NET.reconcile.epsilonPx) {
-      this.correctionCount++;
-      this.correctionErrors.push(error);
-      if (this.correctionErrors.length > 100) this.correctionErrors.shift();
+      this.correctionTimes.push(now);
+      this.correctionErrors.push({ t: now, px: error });
+      if (this.correctionErrors.length > 200) this.correctionErrors.shift();
       this.metrics.lastErrorPx = Math.round(error * 10) / 10;
 
-      const allErrors = this.correctionErrors;
-      this.metrics.avgErrorPx = Math.round(allErrors.reduce((a, b) => a + b, 0) / allErrors.length * 10) / 10;
-      this.metrics.maxErrorPx = Math.round(Math.max(...allErrors) * 10) / 10;
-
+      const shownFromX = before.x + this.smoothOffsetX;
+      const shownFromY = before.y + this.smoothOffsetY;
       if (error >= NET.reconcile.snapThresholdPx) {
-        // Snap
-        this.predictedX = rx;
-        this.predictedY = ry;
         this.smoothOffsetX = 0;
         this.smoothOffsetY = 0;
       } else {
-        // Smooth
-        this.smoothOffsetX += before.x - rx;
-        this.smoothOffsetY += before.y - ry;
-        this.predictedX = rx;
-        this.predictedY = ry;
+        this.smoothOffsetX += dx;
+        this.smoothOffsetY += dy;
       }
+      this.emit('correction', { fromX: shownFromX, fromY: shownFromY, toX: pos.x, toY: pos.y, errorPx: error });
+    }
+    this.predictedX = pos.x;
+    this.predictedY = pos.y;
+  }
 
-      this.onCorrection?.({
-        fromX: before.x + this.smoothOffsetX,
-        fromY: before.y + this.smoothOffsetY,
-        toX: rx, toY: ry,
-        errorPx: error,
-      });
-    } else {
-      this.predictedX = rx;
-      this.predictedY = ry;
+  /** Ack delay (input creation → server ack seen) and, with prediction off, Input → Screen. */
+  private recordAck(ack: number, now: number): void {
+    let newestCreated: number | undefined;
+    for (const [s, t] of this.inputCreatedAt) {
+      if (s > ack) break; // Map iterates in insertion (= sequence) order
+      newestCreated = t;
+      this.inputCreatedAt.delete(s);
+    }
+    if (newestCreated === undefined) return;
+    const ackDelay = now - newestCreated;
+    pushCapped(this.ackDelaySamples, ackDelay, LATENCY_SAMPLES);
+    if (!this.toggles.prediction) {
+      const interp = this.toggles.interpolation ? NET.interpDelayMs : 0;
+      pushCapped(this.inputToScreenSamples, ackDelay + interp + this.lastFrameMs, LATENCY_SAMPLES);
     }
   }
 
-  /**
-   * Call from the fixed 60 Hz sim loop.
-   * Generates one input, applies prediction.
-   */
-  simStep(localMs: number): void {
+  // ── Simulation / input ─────────────────────────────────────
+  /** Call from the fixed 60 Hz sim loop: samples one input and predicts. */
+  simStep(): void {
     if (!this.connected || this.playerId === null) return;
 
     const snap = this.latestSnap;
@@ -430,147 +514,193 @@ export class NetClient {
     const matchRunning = snap?.match.state === 'RUNNING';
     const isAlive = me?.alive ?? false;
 
-    // Decay smooth offset (half-life = smoothHalfLifeMs)
-    const halfLife = NET.reconcile.smoothHalfLifeMs;
-    const dt = 1000 / GAME.sim.hz;
-    const alpha = Math.pow(0.5, dt / halfLife);
+    // Decay smoothing offset (half-life smoothHalfLifeMs)
+    const alpha = Math.pow(0.5, SIM_STEP_MS / NET.reconcile.smoothHalfLifeMs);
     this.smoothOffsetX *= alpha;
     this.smoothOffsetY *= alpha;
-
-    // Local fire cooldown decay
-    if (this.localFireCooldown > 0) this.localFireCooldown -= dt;
+    if (this.localFireCooldown > 0) this.localFireCooldown -= SIM_STEP_MS;
 
     if (!matchRunning || !isAlive) return;
 
-    // Generate input
-    const aimQ = Math.round(this.aimAngle * 1000) / 1000;
     const fire: 0 | 1 = (this.fireDown && this.localFireCooldown <= 0) ? 1 : 0;
     if (fire) {
       this.localFireCooldown = GAME.player.fireCooldownMs;
-      this.onFire?.();
+      this.emit('fire');
     }
 
     const inp: InputEntry = {
       s: ++this.seq,
       k: this.keys,
-      a: aimQ,
+      a: Math.round(this.aimAngle * 1000) / 1000,
       f: fire,
     };
-
+    const now = this.now();
     this.pendingInputs.push(inp);
-    this.inputCreatedAt.set(inp.s, localMs);
+    this.inputCreatedAt.set(inp.s, now);
+    if (this.unpresentedInputAt === null) this.unpresentedInputAt = now;
 
-    // Apply prediction
     if (this.toggles.prediction) {
       const pos = stepPlayer({ x: this.predictedX, y: this.predictedY }, inp.k, MOVE_CFG);
       this.predictedX = pos.x;
       this.predictedY = pos.y;
     }
-
-    this.metrics.pendingInputs = this.pendingInputs.length;
   }
 
-  /**
-   * Call at inputSendHz (30 Hz) to flush inputs to the server.
-   */
+  /** Call at inputSendHz (30 Hz) to flush inputs to the server (SPEC.md §10.3). */
   sendInputs(): void {
-    if (!this.connected || this.pendingInputs.length === 0) return;
+    if (!this.connected || this.seq === this.lastSentSeq) return;
 
-    let toSend: InputEntry[];
-    if (this.toggles.redundancy) {
-      // All unacknowledged, newest last, max redundancyMax
-      toSend = this.pendingInputs.slice(-NET.redundancyMax);
-    } else {
-      // Only the newest input
-      toSend = [this.pendingInputs[this.pendingInputs.length - 1]];
-    }
+    const toSend = this.toggles.redundancy
+      // All unacknowledged inputs, newest last, at most redundancyMax
+      ? this.pendingInputs.slice(-NET.redundancyMax)
+      // Only the inputs created since the last send (every input is sent once)
+      : this.pendingInputs.filter(i => i.s > this.lastSentSeq);
 
-    this.send(encodeClient({ t: 'input', inputs: toSend }));
-  }
-
-  /** Update per-second metrics. Call at 5 Hz from the UI. */
-  updateMetrics(): void {
-    const now = Date.now();
-    const windowSec = (now - this.bwWindow) / 1000;
-    if (windowSec > 0) {
-      this.metrics.bwUpKbps = Math.round(this.bytesSent * 8 / windowSec / 1000);
-      this.metrics.bwDownKbps = Math.round(this.bytesRecv * 8 / windowSec / 1000);
-      this.bytesSent = 0;
-      this.bytesRecv = 0;
-      this.bwWindow = now;
-    }
-    this.metrics.correctionsPerSec = this.correctionCount;
-    this.correctionCount = 0;
-    this.metrics.snapsMissed = this.snapsMissed;
-    this.metrics.duplicatesIgnored = this.duplicatesIgnored;
+    this.lastSentSeq = this.seq;
+    if (toSend.length > 0) this.send({ t: 'input', inputs: toSend });
   }
 
   perturb(dx: number, dy: number): void {
-    this.send(encodeClient({ t: 'perturb', dx, dy }));
+    this.send({ t: 'perturb', dx, dy });
   }
 
-  /** Rendered position for the local player (prediction + smooth offset). */
-  get renderX(): number {
-    if (!this.toggles.prediction && this.latestSnap) {
-      const me = this.latestSnap.players.find(p => p.id === this.playerId);
-      return me?.x ?? this.predictedX;
+  // ── Rendering helpers ──────────────────────────────────────
+  /**
+   * Call once per rendered frame. With prediction on, Input → Screen is the
+   * time from the first unrendered input to the presentation of this frame
+   * (≈ one frame later). SPEC.md §12.
+   */
+  framePresented(frameMs: number): void {
+    this.lastFrameMs = frameMs;
+    if (this.unpresentedInputAt === null) return;
+    if (this.toggles.prediction) {
+      pushCapped(this.inputToScreenSamples, this.now() - this.unpresentedInputAt + frameMs, LATENCY_SAMPLES);
     }
-    return this.predictedX + this.smoothOffsetX;
+    this.unpresentedInputAt = null;
   }
 
-  get renderY(): number {
-    if (!this.toggles.prediction && this.latestSnap) {
-      const me = this.latestSnap.players.find(p => p.id === this.playerId);
-      return me?.y ?? this.predictedY;
-    }
-    return this.predictedY + this.smoothOffsetY;
-  }
-
-  /** Get interpolated state for remote entities. SPEC.md §10.5 */
-  getInterpolatedState(localNowMs: number): { players: PlayerSnap[]; projectiles: ProjectileSnap[] } {
-    if (!this.toggles.interpolation || this.snapBuffer.length < 2) {
-      const snap = this.latestSnap;
-      return {
-        players: snap?.players ?? [],
-        projectiles: snap?.projectiles ?? [],
-      };
+  /** Remote entities interpolated around `now + clockOffset − interpDelay` (SPEC.md §10.5). */
+  getInterpolatedState(): RenderState {
+    const latest = this.latestSnap;
+    const buf = this.snapBuffer;
+    if (!this.toggles.interpolation || buf.length === 0) {
+      return { players: latest?.players ?? [], projectiles: latest?.projectiles ?? [] };
     }
 
-    const renderST = localNowMs + this.clockOffset - NET.interpDelayMs;
+    const now = this.now();
+    let renderST = now + this.clockOffset - NET.interpDelayMs;
+    const oldest = buf[0];
+    const newest = buf[buf.length - 1];
 
-    // Find surrounding snapshots
-    let lo = this.snapBuffer[0];
-    let hi = this.snapBuffer[this.snapBuffer.length - 1];
-    for (let i = 0; i < this.snapBuffer.length - 1; i++) {
-      if (this.snapBuffer[i].st <= renderST && this.snapBuffer[i + 1].st >= renderST) {
-        lo = this.snapBuffer[i];
-        hi = this.snapBuffer[i + 1];
-        break;
+    // Clock drifted far outside the buffer (e.g. after a stall): re-anchor.
+    if (renderST > newest.st + 200 || renderST < oldest.st - 200) {
+      this.clockOffset = newest.st - newest.arrivedAt;
+      renderST = now + this.clockOffset - NET.interpDelayMs;
+    }
+
+    if (renderST >= newest.st) {
+      // Extrapolate from the last two snapshots by at most extrapolateMaxMs, then freeze.
+      const prev = buf.length >= 2 ? buf[buf.length - 2] : null;
+      if (!prev || newest.st === prev.st) return { players: newest.players, projectiles: newest.projectiles };
+      const ahead = Math.min(renderST - newest.st, NET.extrapolateMaxMs);
+      return this.blend(prev, newest, 1 + ahead / (newest.st - prev.st));
+    }
+    if (renderST <= oldest.st) return { players: oldest.players, projectiles: oldest.projectiles };
+
+    for (let i = buf.length - 2; i >= 0; i--) {
+      const lo = buf[i];
+      if (lo.st <= renderST) {
+        const hi = buf[i + 1];
+        return this.blend(lo, hi, (renderST - lo.st) / (hi.st - lo.st));
       }
     }
+    return { players: newest.players, projectiles: newest.projectiles };
+  }
 
-    if (hi.st === lo.st) return { players: hi.players, projectiles: hi.projectiles };
-
-    const t = Math.min(1, Math.max(0, (renderST - lo.st) / (hi.st - lo.st)));
-
-    const interpolate = (loVal: number, hiVal: number) => loVal + (hiVal - loVal) * t;
-
-    const players = hi.players.map(hp => {
+  /** t in [0,1] interpolates; t > 1 extrapolates. */
+  private blend(lo: SnapshotEntry, hi: SnapshotEntry, t: number): RenderState {
+    const lerp = (a: number, b: number) => a + (b - a) * t;
+    const players: PlayerSnap[] = [];
+    for (const hp of hi.players) {
       const lp = lo.players.find(p => p.id === hp.id);
-      if (!lp) return hp;
-      return { ...hp, x: interpolate(lp.x, hp.x), y: interpolate(lp.y, hp.y) };
-    });
-
-    const projectiles = hi.projectiles.map(hp => {
+      if (!lp) {
+        // Not drawn until render time reaches its first snapshot
+        if (t >= 1) players.push(hp);
+        continue;
+      }
+      // Respawn teleport or death: don't slide across the arena
+      if (lp.life !== hp.life || lp.alive !== hp.alive) players.push(t < 1 ? lp : hp);
+      else players.push({ ...hp, x: lerp(lp.x, hp.x), y: lerp(lp.y, hp.y) });
+    }
+    const projectiles: ProjectileSnap[] = [];
+    for (const hp of hi.projectiles) {
       const lp = lo.projectiles.find(p => p.id === hp.id);
-      if (!lp) return hp;
-      return { ...hp, x: interpolate(lp.x, hp.x), y: interpolate(lp.y, hp.y) };
-    });
-
+      if (!lp) { if (t >= 1) projectiles.push(hp); continue; }
+      projectiles.push({ ...hp, x: lerp(lp.x, hp.x), y: lerp(lp.y, hp.y) });
+    }
     return { players, projectiles };
+  }
+
+  /**
+   * Where to draw the local player. Prediction on: predicted + smoothing
+   * offset. Prediction off: exactly like a remote player (SPEC.md §10.6).
+   */
+  getLocalRenderPos(state: RenderState): { x: number; y: number } {
+    if (this.toggles.prediction) {
+      return { x: this.predictedX + this.smoothOffsetX, y: this.predictedY + this.smoothOffsetY };
+    }
+    const me = state.players.find(p => p.id === this.playerId);
+    return me ? { x: me.x, y: me.y } : { x: this.authX, y: this.authY };
+  }
+
+  // ── Metrics (5 Hz, rolling windows) ────────────────────────
+  private updateMetrics(): void {
+    const now = this.now();
+    const m = this.metrics;
+
+    this.bwHistory.push({ t: now, up: this.bytesSent, down: this.bytesRecv });
+    this.bytesSent = 0;
+    this.bytesRecv = 0;
+    while (this.bwHistory.length > 1 && now - this.bwHistory[0].t > 1000) this.bwHistory.shift();
+    const spanSec = Math.max(METRICS_INTERVAL_MS, now - this.bwHistory[0].t + METRICS_INTERVAL_MS) / 1000;
+    m.bwUpKbps = Math.round(this.bwHistory.reduce((a, b) => a + b.up, 0) * 8 / spanSec / 1000);
+    m.bwDownKbps = Math.round(this.bwHistory.reduce((a, b) => a + b.down, 0) * 8 / spanSec / 1000);
+
+    this.snapshotTimes = this.snapshotTimes.filter(t => now - t < 1000);
+    this.correctionTimes = this.correctionTimes.filter(t => now - t < 1000);
+    m.snapshotHz = this.snapshotTimes.length;
+    m.correctionsPerSec = this.correctionTimes.length;
+
+    const windowErrors = this.correctionErrors.filter(e => now - e.t < NET.metricsWindowMs).map(e => e.px);
+    m.recentErrorPx = Math.round(Math.max(0, ...this.correctionErrors.filter(e => now - e.t < 1000).map(e => e.px)) * 10) / 10;
+    m.avgErrorPx = Math.round(mean(windowErrors) * 10) / 10;
+    m.maxErrorPx = Math.round(Math.max(0, ...windowErrors) * 10) / 10;
+
+    const recentRtt = this.rttSamples.slice(-RTT_DISPLAY_SAMPLES);
+    m.rttMs = Math.round(mean(recentRtt));
+    let jitterSum = 0;
+    for (let i = 1; i < this.rttSamples.length; i++) jitterSum += Math.abs(this.rttSamples[i] - this.rttSamples[i - 1]);
+    m.jitterMs = this.rttSamples.length > 1 ? Math.round(jitterSum / (this.rttSamples.length - 1)) : 0;
+
+    m.inputToScreenMs = Math.round(mean(this.inputToScreenSamples));
+    m.ackDelayMs = Math.round(mean(this.ackDelaySamples));
+    m.pendingInputs = this.pendingInputs.length;
+    m.snapsMissed = this.snapsMissed;
+    m.duplicatesIgnored = this.duplicatesIgnored;
+    m.reorderedIgnored = this.reorderedIgnored;
+  }
+
+  /** Reset the latency averages (e.g. after toggling prediction). */
+  resetLatencySamples(): void {
+    this.inputToScreenSamples = [];
+    this.ackDelaySamples = [];
   }
 
   get isConnected(): boolean { return this.connected; }
   get myPlayerId(): number | null { return this.playerId; }
   get latestSnapshot(): MsgSnap | null { return this.latestSnap; }
+  get connectionStatus(): ConnectionStatus { return this.status; }
+  /** Authoritative and predicted positions (for tests and debug views). */
+  get predicted(): { x: number; y: number } { return { x: this.predictedX, y: this.predictedY }; }
+  get pendingCount(): number { return this.pendingInputs.length; }
 }

@@ -38,7 +38,9 @@ export const DEFAULT_LINK_CONFIG: LinkConfig = {
   burstLen: 4,
   duplicatePct: 0,
   reorderPct: 0,
-  reorderDelayMs: 40,
+  // Must exceed the input send interval + one tick (~50 ms) for a reordered
+  // input packet to arrive after newer inputs were consumed (see netcode tests).
+  reorderDelayMs: 80,
   bandwidthKbps: 0,
   queueLimitMs: 400,
   allowJitterReorder: false,
@@ -97,8 +99,8 @@ export class LinkState {
   /** Highest delivery index seen so far. */
   private deliveryIndex = 0;
   private deliveryCounter = 0;
-  /** Rolling window: { t, bytes, delivered } */
-  private window: { t: number; bytes: number; delivered: number }[] = [];
+  /** Rolling window: { t, bytes, delivered, dropped } */
+  private window: { t: number; bytes: number; delivered: number; dropped: number }[] = [];
   private windowMs = 1000;
 
   constructor(cfg: LinkConfig) {
@@ -115,6 +117,7 @@ export class LinkState {
     const w = this.window;
     const bytesW = w.reduce((a, e) => a + e.bytes, 0);
     const deliveredW = w.reduce((a, e) => a + e.delivered, 0);
+    const droppedW = w.reduce((a, e) => a + e.dropped, 0);
     return {
       pktsIn: this.pktsIn,
       pktsDelivered: this.pktsDelivered,
@@ -123,16 +126,26 @@ export class LinkState {
       pktsDuplicated: this.pktsDuplicated,
       pktsReordered: this.pktsReordered,
       throughputKbps: Math.round(bytesW * 8 / this.windowMs),
+      /** Cumulative loss % (loss + queue drops) since the session started. */
       lossPct: this.pktsIn > 0
-        ? Math.round(this.pktsDroppedLoss / this.pktsIn * 1000) / 10
+        ? Math.round((this.pktsDroppedLoss + this.pktsDroppedQueue) / this.pktsIn * 1000) / 10
         : 0,
+      /** Loss % over the last second (SPEC.md §11.3 rolling window). */
+      lossPctWindow: w.length > 0 ? Math.round(droppedW / w.length * 1000) / 10 : 0,
+      pktsInWindow: w.length,
+      deliveredWindow: deliveredW,
     };
   }
 
   recordIn(size: number, now: number): void {
     this.pktsIn++;
     this.bytesIn += size;
-    this.window.push({ t: now, bytes: size, delivered: 0 });
+    this.window.push({ t: now, bytes: size, delivered: 0, dropped: 0 });
+  }
+
+  recordDropped(): void {
+    const last = this.window[this.window.length - 1];
+    if (last) last.dropped++;
   }
 
   recordDelivered(size: number, now: number): void {
@@ -207,6 +220,7 @@ export class Pipeline {
     }
     if (dropped) {
       link.pktsDroppedLoss++;
+      link.recordDropped();
       emitEvent('dropped-loss', 0);
       return;
     }
@@ -240,6 +254,7 @@ export class Pipeline {
       const queueDelay = start - now;
       if (queueDelay > cfg.queueLimitMs) {
         link.pktsDroppedQueue++;
+        link.recordDropped();
         emitEvent('dropped-queue', queueDelay);
         return;
       }

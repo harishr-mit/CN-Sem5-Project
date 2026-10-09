@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { NetClient } from '../net/NetClient.js';
 import { EmulatorClient } from '../net/EmulatorClient.js';
+import { bindStore } from '../net/bindStore.js';
 import { Landing } from './Landing.js';
 import { GameContainer } from '../game/GameContainer.js';
 import { Hud } from './Hud.js';
@@ -11,7 +12,8 @@ import { ABCompare } from './ABCompare.js';
 import { SettingsPanel } from './SettingsPanel.js';
 import { ControlsOverlay } from './ControlsOverlay.js';
 import { loadSettings, type UserSettings } from './settings.js';
-import { useGameStore } from './store.js';
+
+const EMULATOR_DATA_URL = 'ws://127.0.0.1:9000';
 
 export const App: React.FC = () => {
   const [view, setView] = useState<'landing' | 'game' | 'ab-compare'>('landing');
@@ -29,7 +31,7 @@ export const App: React.FC = () => {
     setPlayerName(name);
 
     // Initialize network clients
-    const net = new NetClient('ws://127.0.0.1:9000?label=' + encodeURIComponent(name), name, 'main');
+    const net = new NetClient({ url: EMULATOR_DATA_URL, name, room: 'main' });
     const emu = new EmulatorClient('ws://127.0.0.1:9001');
 
     // Apply saved ghost preference
@@ -38,8 +40,6 @@ export const App: React.FC = () => {
 
     setNetClient(net);
     setEmulatorClient(emu);
-
-    net.connect();
     emu.connect();
 
     setView('game');
@@ -71,12 +71,18 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isControlsOpen]);
 
-  // Cleanup on unmount or return to landing
+  // Bind the main client to the HUD store; clean up on unmount
   useEffect(() => {
+    if (!netClient) return;
+    const unbind = bindStore(netClient);
+    netClient.connect();
     return () => {
-      if (netClient) netClient.disconnect();
+      unbind();
+      netClient.disconnect();
     };
   }, [netClient]);
+
+  useEffect(() => () => emulatorClient?.close(), [emulatorClient]);
 
   const handleSettingsChange = (newSettings: UserSettings) => {
     if (netClient) {
@@ -122,6 +128,7 @@ export const App: React.FC = () => {
           {/* Packet Flow Strip (YOU ── [EMULATOR] ── SERVER) */}
           <PacketFlowStrip
             isInspectorOpen={isInspectorOpen}
+            sessionLabel={netClient.label}
             onToggleInspector={() => setIsInspectorOpen((open) => !open)}
           />
 

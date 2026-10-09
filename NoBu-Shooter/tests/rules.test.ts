@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { Room } from '../server/src/game/room.js';
+import GAME from '../shared/src/config/game.json';
+
+type Internals = {
+  state: {
+    matchState: string;
+    players: Map<number, { x: number; y: number; alive: boolean; bot: boolean }>;
+  };
+};
 
 describe('Gameplay Rules & Authority (SPEC.md §14.4, GAMERULES.md)', () => {
   it('adds human player and auto-populates bots up to target count', () => {
@@ -78,5 +86,47 @@ describe('Gameplay Rules & Authority (SPEC.md §14.4, GAMERULES.md)', () => {
 
     room.receivePerturb(p1, 40, 0);
     expect(player.x).toBe(startX + 40);
+  });
+
+  it('lab room is always RUNNING, even with a single player (GAMERULES.md §14)', () => {
+    const room = new Room('lab', () => {}, () => {});
+    const id = room.addPlayer('Solo', false);
+    room.tick();
+    const internals = room as unknown as Internals;
+    expect(internals.state.matchState).toBe('RUNNING');
+    expect(internals.state.players.get(id)!.alive).toBe(true);
+  });
+
+  it('perturb never pushes a player into an obstacle', () => {
+    const room = new Room('lab', () => {}, () => {});
+    const id = room.addPlayer('Nudge', false);
+    const p = (room as unknown as Internals).state.players.get(id)!;
+    const center = GAME.obstacles[0]; // { x: 600, y: 310, w: 80, h: 100 }
+    p.x = center.x - 40;
+    p.y = center.y + center.h / 2;
+    room.receivePerturb(id, 60, 0); // would land inside the block
+    const r = GAME.player.radius;
+    const insideX = p.x > center.x - r && p.x < center.x + center.w + r;
+    const insideY = p.y > center.y - r && p.y < center.y + center.h + r;
+    expect(insideX && insideY).toBe(false);
+  });
+
+  it('bots keep moving (no lock-on through walls, no getting stuck)', () => {
+    const room = new Room('main', () => {}, () => {});
+    room.addPlayer('Human', false);
+    const internals = room as unknown as Internals;
+    // Countdown (3 s) then 20 s of play
+    for (let i = 0; i < 200; i++) room.tick();
+    expect(internals.state.matchState).toBe('RUNNING');
+
+    const bots = [...internals.state.players.values()].filter(p => p.bot);
+    expect(bots.length).toBe(3);
+    for (let window = 0; window < 4; window++) {
+      const start = bots.map(b => ({ x: b.x, y: b.y, alive: b.alive }));
+      for (let i = 0; i < 300; i++) room.tick(); // 5 s
+      const moved = bots.filter((b, i) =>
+        !start[i].alive || !b.alive || Math.hypot(b.x - start[i].x, b.y - start[i].y) > 40);
+      expect(moved.length).toBe(bots.length);
+    }
   });
 });

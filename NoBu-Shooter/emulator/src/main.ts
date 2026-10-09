@@ -12,7 +12,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import { Session } from './session.js';
 import { ControlServer } from './control.js';
-import { DEFAULT_LINK_CONFIG } from './pipeline.js';
+import { exitWithParent } from './parentWatch.js';
 
 // ─── CLI args ─────────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -50,6 +50,10 @@ wss.on('connection', (clientWs: WebSocket, req) => {
     pendingEarlyMsgs.push(raw);
   };
   clientWs.on('message', earlyHandler);
+  // Client gave up before the upstream connection opened
+  clientWs.on('close', () => {
+    if (upstreamWs.readyState === WebSocket.CONNECTING) upstreamWs.terminate();
+  });
 
   upstreamWs.on('open', () => {
     clientWs.off('message', earlyHandler);
@@ -79,6 +83,11 @@ wss.on('connection', (clientWs: WebSocket, req) => {
     console.error(`[emulator] Upstream error: ${err.message}`);
     clientWs.close();
   });
+});
+
+exitWithParent(() => {
+  wss.close();
+  httpServer.close();
 });
 
 httpServer.listen(listenPort, () => {

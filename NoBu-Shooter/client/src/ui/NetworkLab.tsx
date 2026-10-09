@@ -53,37 +53,31 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
   const [metrics, setMetrics] = useState({ ...netClient.metrics });
   const [flashCorrection, setFlashCorrection] = useState(false);
 
-  // Throttle timer for config sends (10 Hz max)
+  // Throttle config sends to 10 Hz; patches made meanwhile are merged so a
+  // quick change to two sliders doesn't lose the first one.
   const pendingConfigTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPatch = useRef<Record<string, unknown>>({});
 
-  // Send config patch to emulator (throttled)
   const sendConfigPatch = (patch: Record<string, unknown>) => {
     setActivePreset('Custom');
-    if (pendingConfigTimer.current) clearTimeout(pendingConfigTimer.current);
+    pendingPatch.current = { ...pendingPatch.current, ...patch };
+    if (pendingConfigTimer.current) return;
     pendingConfigTimer.current = setTimeout(() => {
-      emulatorClient.setConfig(patch);
+      emulatorClient.setConfig(pendingPatch.current);
+      pendingPatch.current = {};
+      pendingConfigTimer.current = null;
     }, 100);
   };
 
+  // Sliders follow from the emulator's state broadcast (single source of truth).
   const handleApplyPreset = (name: string) => {
     setActivePreset(name);
     emulatorClient.applyPreset(name);
-    // Sync slider visual state to preset constants
-    if (name === 'Baseline') {
-      setLatencyMs(0); setJitterMs(0); setLossPct(0); setBandwidthKbps(0); setDupPct(0); setReorderPct(0); setBurstLoss(false);
-    } else if (name === 'Café Wi-Fi') {
-      setLatencyMs(25); setJitterMs(15); setLossPct(1); setBandwidthKbps(0); setDupPct(0); setReorderPct(0); setBurstLoss(false);
-    } else if (name === 'Mobile 4G') {
-      setLatencyMs(45); setJitterMs(25); setLossPct(2); setBandwidthKbps(5000); setDupPct(0); setReorderPct(0); setBurstLoss(false);
-    } else if (name === 'Transatlantic') {
-      setLatencyMs(90); setJitterMs(8); setLossPct(0.5); setBandwidthKbps(0); setDupPct(0); setReorderPct(0); setBurstLoss(false);
-    } else if (name === 'Nightmare') {
-      setLatencyMs(120); setJitterMs(50); setLossPct(12); setBandwidthKbps(400); setDupPct(3); setReorderPct(5); setBurstLoss(true);
-    }
   };
 
   // Sync sliders and preset when emulatorState updates (Bug 4B fix)
   const emulatorState = useGameStore((s) => s.emulatorState) as {
+    preset?: string;
     defaults?: {
       latencyMs?: number;
       jitterMs?: number;
@@ -105,18 +99,7 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
     if (typeof defaults.duplicatePct === 'number') setDupPct(defaults.duplicatePct);
     if (typeof defaults.reorderPct === 'number') setReorderPct(defaults.reorderPct);
     if (defaults.lossModel !== undefined) setBurstLoss(defaults.lossModel === 'burst');
-
-    if (defaults.latencyMs === 0 && defaults.lossPct === 0 && defaults.jitterMs === 0) {
-      setActivePreset('Baseline');
-    } else if (defaults.latencyMs === 25 && defaults.jitterMs === 15 && defaults.lossPct === 1) {
-      setActivePreset('Café Wi-Fi');
-    } else if (defaults.latencyMs === 45 && defaults.jitterMs === 25 && defaults.lossPct === 2) {
-      setActivePreset('Mobile 4G');
-    } else if (defaults.latencyMs === 90 && defaults.jitterMs === 8 && defaults.lossPct === 0.5) {
-      setActivePreset('Transatlantic');
-    } else if (defaults.latencyMs === 120 && defaults.jitterMs === 50 && defaults.lossPct === 12) {
-      setActivePreset('Nightmare');
-    }
+    if (emulatorState?.preset) setActivePreset(emulatorState.preset);
   }, [emulatorState]);
 
   // Keyboard hotkeys for presets and toggles per SPEC.md §13.2
@@ -159,42 +142,38 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
       netClient.toggles = updated;
       return updated;
     });
+    // Latency averages from the previous mode would be misleading
+    if (key === 'prediction' || key === 'interpolation') netClient.resetLatencySamples();
   };
 
-  // 5 Hz sampling for metrics and sparklines
+  // This client's own emulator session (ground-truth loss, SPEC.md §12)
+  const mySession = emulatorStats.find((s) => s.label === netClient.label);
+  const lossUp = mySession?.up['lossPctWindow'] ?? 0;
+  const lossDown = mySession?.down['lossPctWindow'] ?? 0;
+  const lossRef = useRef({ up: 0, down: 0 });
+  lossRef.current = { up: lossUp, down: lossDown };
+
+  // 5 Hz sampling for metrics and sparklines (NetClient computes the metrics)
   useEffect(() => {
     const timer = setInterval(() => {
-      netClient.updateMetrics();
       const m = { ...netClient.metrics };
       setMetrics(m);
 
-      // Flash correction tile if error > 8px
-      if (m.lastErrorPx > 8) {
+      // Flash the corrections tile on a correction larger than 8 px
+      if (m.recentErrorPx > 8) {
         setFlashCorrection(true);
         setTimeout(() => setFlashCorrection(false), 300);
       }
 
-      // Emulator ground-truth loss if available
-      let currentLoss = m.snapsMissed;
-      if (emulatorStats.length > 0) {
-        const s = emulatorStats[0];
-        const upIn = s.up['in'] || 0;
-        const upDrop = s.up['dropped'] || 0;
-        const downIn = s.down['in'] || 0;
-        const downDrop = s.down['dropped'] || 0;
-        const totalIn = upIn + downIn;
-        const totalDrop = upDrop + downDrop;
-        if (totalIn > 0) currentLoss = Math.round((totalDrop / totalIn) * 100);
-      }
-
+      const loss = Math.max(lossRef.current.up, lossRef.current.down);
       setRttHistory((h) => [...h.slice(1), m.rttMs]);
-      setLossHistory((h) => [...h.slice(1), currentLoss]);
+      setLossHistory((h) => [...h.slice(1), loss]);
       setPendingHistory((h) => [...h.slice(1), m.pendingInputs]);
-      setErrorHistory((h) => [...h.slice(1), m.lastErrorPx]);
+      setErrorHistory((h) => [...h.slice(1), m.recentErrorPx]);
     }, 200);
 
     return () => clearInterval(timer);
-  }, [netClient, emulatorStats]);
+  }, [netClient]);
 
   // Status chip styling
   const statusClass =
@@ -551,7 +530,7 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
               <div className="metric-value">
                 {metrics.inputToScreenMs.toFixed(0)} <span style={{ fontSize: '0.8rem' }}>ms</span>
               </div>
-              <div className="metric-label">INPUT → SCREEN</div>
+              <div className="metric-label">INPUT → SCREEN · ACK {metrics.ackDelayMs} ms</div>
             </div>
 
             {/* Snapshot Rate */}
@@ -568,6 +547,22 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
                 ↑{metrics.bwUpKbps} ↓{metrics.bwDownKbps} <span style={{ fontSize: '0.7rem' }}>kbps</span>
               </div>
               <div className="metric-label">BANDWIDTH</div>
+            </div>
+
+            {/* Loss up/down (emulator ground truth, last 1 s) */}
+            <div className={`metric-tile ${Math.max(lossUp, lossDown) > 5 ? 'alert' : ''}`}>
+              <div className="metric-value" style={{ fontSize: '1rem' }}>
+                ↑{lossUp} ↓{lossDown} <span style={{ fontSize: '0.7rem' }}>%</span>
+              </div>
+              <div className="metric-label">LOSS (EMULATOR)</div>
+            </div>
+
+            {/* Server tick */}
+            <div className="metric-tile">
+              <div className="metric-value" style={{ fontSize: '1rem' }}>
+                {metrics.serverTickHz} <span style={{ fontSize: '0.7rem' }}>Hz</span> · {metrics.serverTickMs.toFixed(2)} <span style={{ fontSize: '0.7rem' }}>ms</span>
+              </div>
+              <div className="metric-label">SERVER TICK</div>
             </div>
           </div>
         </div>
@@ -601,7 +596,7 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
             data={errorHistory}
             color="#ffb300"
             label="Correction Error (px)"
-            currentValue={`${metrics.lastErrorPx.toFixed(1)} px`}
+            currentValue={`${metrics.recentErrorPx.toFixed(1)} px`}
             min={0}
           />
         </div>
@@ -628,7 +623,7 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
             <strong>Note:</strong> Bots are simulated inside the server; their traffic bypasses the emulator.
           </p>
 
-          <p title="SPEC.md §4: The links between browser, emulator, and server are loopback TCP connections. The emulator is the ONLY place where messages are dropped, delayed, duplicated, or reordered per message before forwarding, providing realistic UDP datagram semantics.">
+          <p title="docs/PROTOCOL.md §1: The links between browser, emulator, and server are loopback TCP connections. The emulator is the ONLY place where messages are dropped, delayed, duplicated, or reordered per message before forwarding, providing realistic UDP datagram semantics.">
             <strong>About transport:</strong> Frames routed through standalone impairment engine acting as datagram proxy.
           </p>
         </div>

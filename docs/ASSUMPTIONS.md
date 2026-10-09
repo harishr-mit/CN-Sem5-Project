@@ -1,7 +1,6 @@
 # NoBu Shooter — Implementation Decisions & Assumptions
 
-Per `SPEC.md` §3 Rule 1:
-> "When something is unclear, choose the simplest option consistent with this spec, and record it as one line in `docs/ASSUMPTIONS.md`."
+Decisions that are not obvious from the code, one line each with the reason. Originally required by the v1 spec (`docs/archive/SPEC-v1.md` §3); kept for all later phases (`PHASES.md`).
 
 ---
 
@@ -11,7 +10,21 @@ Per `SPEC.md` §3 Rule 1:
 2. **Fixed Timestep & Determinism**: The game simulation strictly runs at 60 Hz (`dt = 1/60`) using integer key masks and normalized diagonal vectors (`Math.SQRT1_2`) without trig in the player movement path to prevent phantom prediction discrepancies.
 3. **Transport Semantics**: WebSockets transport JSON messages where each text frame is treated as an independent datagram by the network emulator pipeline, with 28 simulated header bytes added for bandwidth calculation.
 4. **Art and Asset Pipeline**: In accordance with the prompt ("do not generate textures and models, leave them as references and add comments to mark the spot"), all game visuals are rendered procedurally via Phaser 3 Graphics with explicit `/* TEXTURE: <name> */` comments marking integration points for future custom sprites.
-5. **Bot Execution Model**: Bots are simulated server-side and feed identical input structures into room authority without network latency; their traffic intentionally bypasses the external network emulator.
+5. **Bot Execution Model**: Bots are simulated server-side and feed identical input structures into room authority without network latency; their *input* bypasses the emulator, but their *state* reaches each client through it like any remote player. (Phase 5 adds UDP network players whose own traffic is impaired.)
 6. **Reconciliation Error Smoothing**: Prediction errors below `epsilonPx` (0.01 px) are ignored; errors between 0.01 px and 64 px are exponentially decayed via `smoothHalfLifeMs` (80 ms); errors exceeding 64 px execute an instantaneous snap.
 7. **Event Redundancy**: Server snapshots redundantly retransmit game events from the preceding 500 ms; clients track and deduplicate events by unique `eid`.
 8. **Browser Port Alignment**: Client Vite dev server runs on port 5173, Game Server on port 8080, Emulator Data on port 9000, and Emulator Control on port 9001.
+
+### Phase 1 decisions (2026-10-09)
+
+9. **Input sending (redundancy off)**: every input is sent exactly once, in the next 30 Hz message after it is created (2 inputs per message). Sending only the newest input — the v1 behaviour — silently dropped half the inputs and caused corrections on a perfect network.
+10. **Reorder delay default 80 ms**: a reordered input packet only acts like loss if it arrives after a newer input was already consumed, which needs a delay above the send interval + one tick (~50 ms). With the v1 default (40 ms) the server's sorted input queue absorbed reordering completely, so the effect could not be demonstrated. Covered by `tests/netcode.test.ts`.
+11. **Interpolated alive/dead state**: remote players' alive flag comes from the interpolated snapshot pair (not the latest snapshot), so a remote player doesn't vanish ~100 ms before the projectile that killed them reaches them on screen. Respawns (life change) are never interpolated across the arena.
+12. **Input → Screen definition**: prediction on = time from the input sample to the presentation of the next frame (sample → render + one frame). Prediction off = ack delay (input creation → snapshot acknowledging it) + interpolation delay (if on) + one frame. "Ack delay" is shown alongside.
+13. **Server loop on Windows**: OS timers fire every ~15.6 ms on Windows (measured for both `setTimeout` and `Atomics.wait`), so the loop sleeps one timer quantum and yields with `setImmediate` only for the final ~1 ms before each tick: ~1 % CPU instead of a fully spun core, tick rate unchanged (60–61 Hz).
+14. **Process lifetime**: services run as single node processes (`node --import tsx`, Vite via its JS API) and exit by themselves when the launcher's PID (`NOBU_PARENT_PID`) disappears, because Windows does not kill children with their parent.
+15. **Emulator session labels**: each `NetClient` connects with a unique label (`<name>-<4 random chars>`), which the UI uses to pick *its own* session from the emulator stats (loss tiles, packet strip). Session RNGs share the CLI seed, which keeps A/B panes under comparable random conditions.
+16. **Presets are complete configs**: applying a preset replaces the whole link config (missing fields take defaults), so no setting leaks from the previous preset (e.g. burst loss after Nightmare).
+17. **Lab room**: always `RUNNING` with any number of players (GAMERULES.md §14); no spawn protection because firing is disabled there.
+18. **Dev-mode warnings**: React StrictMode mounts the A/B view twice in development, producing harmless "WebSocket is closed before the connection is established" warnings; `NetClient` ignores callbacks from the discarded connection (generation counter). Production builds don't double-mount.
+

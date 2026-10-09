@@ -1,7 +1,7 @@
 /**
  * Shared sim barrel export.
  */
-export { stepPlayer, KEY, type MoveCfg } from './movement.js';
+export { stepPlayer, settlePosition, KEY, type MoveCfg } from './movement.js';
 export { mulberry32 } from './prng.js';
 export { hashState } from './hash.js';
 export {

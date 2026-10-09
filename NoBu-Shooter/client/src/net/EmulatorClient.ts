@@ -23,6 +23,8 @@ export interface LinkConfig {
 
 export interface EmulatorStats {
   id: string;
+  /** Session label (NetClient.label) — used to find "my" session. */
+  label?: string;
   up: Record<string, number>;
   down: Record<string, number>;
 }
@@ -41,6 +43,7 @@ export class EmulatorClient {
   private ws: WebSocket | null = null;
   private url: string;
   private retryCount = 0;
+  private closed = false;
 
   onStats?: (sessions: EmulatorStats[]) => void;
   onPacketEvent?: (items: PacketEvent[]) => void;
@@ -51,6 +54,7 @@ export class EmulatorClient {
   }
 
   connect(): void {
+    this.closed = false;
     this.ws = new WebSocket(this.url);
 
     this.ws.onopen = () => {
@@ -82,7 +86,7 @@ export class EmulatorClient {
     this.ws.onclose = () => {
       useGameStore.getState().setEmulatorStatus('offline');
       // Cap reconnect retries (Bug 6C fix)
-      if (this.retryCount < 5) {
+      if (!this.closed && this.retryCount < 5) {
         this.retryCount++;
         setTimeout(() => this.connect(), 3000);
       }
@@ -91,6 +95,13 @@ export class EmulatorClient {
     this.ws.onerror = () => {
       useGameStore.getState().setEmulatorStatus('error');
     };
+  }
+
+  /** Close for good (no reconnect), e.g. when leaving a view. */
+  close(): void {
+    this.closed = true;
+    this.ws?.close();
+    this.ws = null;
   }
 
   private send(msg: unknown): void {

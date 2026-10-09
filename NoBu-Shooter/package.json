@@ -2,20 +2,27 @@
   "name": "nobu-shooter",
   "version": "1.0.0",
   "private": true,
-  "workspaces": ["shared", "server", "emulator", "client"],
+  "workspaces": [
+    "shared",
+    "server",
+    "emulator",
+    "client"
+  ],
   "scripts": {
     "demo": "node scripts/demo.mjs",
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
+    "typecheck": "tsc -p tsconfig.node.json && tsc -p client/tsconfig.json --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write ."
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
-    "eslint": "^8.57.0",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
+    "eslint": "^8.57.0",
     "prettier": "^3.3.2",
+    "tsx": "4.19.2",
     "typescript": "^5.5.2",
     "vitest": "^1.6.0"
   },

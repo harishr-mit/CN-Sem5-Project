@@ -1,7 +1,7 @@
 # NoBu Shooter — Wire Protocol Specification
 
 Version: 1.0  
-Reference: `SPEC.md` §8
+Source of truth: `shared/src/protocol/messages.ts` (types + validators). Originally specified in `docs/archive/SPEC-v1.md` §8.
 
 ---
 
@@ -27,7 +27,7 @@ Resent every 250 ms until an authoritative `welcome` message is received.
 }
 ```
 - `v`: Protocol version (`number`, must be 1).
-- `name`: Callsign string (max 14 chars, sanitized).
+- `name`: Callsign string (truncated to 12 chars by the server, GAMERULES.md §4).
 - `room`: `"main"` (full match with bots) or `"lab"` (sandbox for A/B testing).
 - `nonce`: Unique client-generated session identifier for idempotent handshake retry.
 
@@ -50,7 +50,9 @@ Flushed at 30 Hz. Contains one or more 60 Hz input samples.
 - `k`: Key bitmask (`1` = UP, `2` = DOWN, `4` = LEFT, `8` = RIGHT).
 - `a`: Aim angle in radians, quantized to 0.001 rad.
 - `f`: Fire flag (`1` = fire pressed, `0` = idle).
-- *Redundancy mode*: If redundancy is active, includes all unacknowledged inputs (up to 10). If off, includes only the newest input.
+- *Redundancy off (default)*: every input is sent exactly once — the message carries all inputs created since the previous message (normally 2, since inputs are created at 60 Hz and sent at 30 Hz).
+- *Redundancy on*: the message carries all unacknowledged inputs, newest last, at most 10. Lost or late messages are then covered by the next one.
+- The server consumes one input per tick in sequence order, ignores `s <= lastConsumed` (duplicates/stale) and skips gaps; `ack` in the next snapshot is the last consumed `s`.
 
 ### 2.3 `ping` (RTT Measurement)
 Sent at 2 Hz.
@@ -182,14 +184,47 @@ Broadcast at 30 Hz.
 
 ## 4. Game Events Reference
 
-Events drive cosmetics, client audio triggers, and kill feed notifications:
+Every event also carries `eid` (unique, used for de-duplication) and `tick`. Events drive cosmetics and the kill feed only; everything that matters is also in the snapshot state:
 - `PLAYER_JOIN`: `{ type, playerId }`
 - `PLAYER_LEAVE`: `{ type, playerId }`
-- `PLAYER_FIRE`: `{ type, playerId, x, y, angle }`
-- `PROJECTILE_SPAWN`: `{ type, projectileId, ownerId, x, y }`
+- `PLAYER_FIRE`: `{ type, playerId, projectileId }`
+- `PROJECTILE_SPAWN`: `{ type, projectileId, x, y }`
 - `PROJECTILE_HIT`: `{ type, projectileId, target: "player"|"obstacle"|"boundary", x, y }`
 - `PLAYER_DEATH`: `{ type, victim, killer, x, y }`
 - `PLAYER_RESPAWN`: `{ type, playerId, x, y }`
-- `SCORE_UPDATE`: `{ type, playerId, score }`
+- `SCORE_UPDATE`: `{ type, playerId }` (scores themselves are state: `players[].score`)
 - `MATCH_START`: `{ type }`
-- `MATCH_END`: `{ type, results }`
+- `MATCH_END`: `{ type }` (results are state: `match.results` during `ENDED`)
+
+---
+
+## 5. Emulator (game-agnostic proxy)
+
+The emulator never parses game messages; each WebSocket frame is one packet (accounted as payload bytes + 28 bytes UDP/IP header).
+
+### 5.1 Data port (`ws://127.0.0.1:9000`)
+Clients connect here instead of to the server. Every connection becomes a **session** with its own upstream connection to `--target` and independent `up` (client → server) / `down` links. The query parameter `?label=` is stored as the session's display name. `NetClient` uses a unique label (`<name>-<4 chars>`) so the UI can find its own session in the stats.
+
+### 5.2 Control port (`ws://127.0.0.1:9001`, never impaired)
+
+UI → emulator:
+
+| Command | Meaning |
+|---|---|
+| `{ "cmd": "get" }` | Reply with a `state` message |
+| `{ "cmd": "set", "target", "direction", "patch" }` | Merge `patch` into the link config. `target`: `"all"` (also the default for new sessions), a session id or a label. `direction`: `"both"`, `"up"` or `"down"` |
+| `{ "cmd": "preset", "target", "name" }` | Apply a complete preset (`Baseline`, `Café Wi-Fi`, `Mobile 4G`, `Transatlantic`, `Nightmare`); fields not in the preset get defaults |
+| `{ "cmd": "reset", "target" }` | Back to zero impairment |
+| `{ "cmd": "seed", "value" }` | Reseed the RNG |
+| `{ "cmd": "subscribe", "packets": true }` | Start/stop the packet-event stream |
+
+Emulator → UI:
+
+| Event | Contents |
+|---|---|
+| `{ "evt": "state", "sessions", "defaults", "preset", "presets" }` | On connect and on every change. `preset` is the name of the preset last applied to `all`, or `"Custom"` after a manual change |
+| `{ "evt": "stats", "t", "sessions": [{ "id", "label", "up", "down" }] }` | Every 500 ms. Per direction: cumulative `pktsIn`, `pktsDelivered`, `pktsDroppedLoss`, `pktsDroppedQueue`, `pktsDuplicated`, `pktsReordered`, `lossPct`; last-second `throughputKbps`, `lossPctWindow`, `pktsInWindow`, `deliveredWindow` |
+| `{ "evt": "packets", "items": [{ "sid", "dir", "size", "preview", "fate", "delayMs", "t" }] }` | Every 100 ms while subscribed; the newest ≤ 60 events. `fate`: `delivered`, `dropped-loss`, `dropped-queue`, `duplicated` |
+
+Link config fields (defaults): `latencyMs` 0, `jitterMs` 0, `jitterDist` `"normal"`, `lossPct` 0, `lossModel` `"random"` (or `"burst"`, Gilbert-Elliott), `burstLen` 4, `duplicatePct` 0, `reorderPct` 0, `reorderDelayMs` **80**, `bandwidthKbps` 0 (unlimited), `queueLimitMs` 400, `allowJitterReorder` false. The reorder delay must exceed the input send interval + one tick (~50 ms) for reordered inputs to act like loss (see `docs/ASSUMPTIONS.md` #10).
+

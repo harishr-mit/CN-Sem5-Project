@@ -1,121 +1,69 @@
 /**
- * smoke.mjs — headless bot smoke test through the emulator.
- * SPEC.md §14.5:
- * 1. Spawns server and emulator
- * 2. Applies "Nightmare" preset to emulator via control port (9001)
- * 3. Runs headless bot for 10s through emulator data port (9000)
- * 4. Asserts snapshots arrive, ack advances, and exits cleanly.
+ * smoke.mjs — headless bot smoke test through the real emulator (SPEC.md §14.5).
+ * 1. Starts the server and emulator
+ * 2. Applies the "Nightmare" preset via the control port
+ * 3. Runs the headless bot for 10 s through the emulator data port
+ * 4. Asserts snapshots keep arriving, ack advances, tick rate ≥ 55 Hz
+ * All child processes are stopped (and ports freed) on every exit path.
  */
 
-import { spawn } from 'child_process';
 import { WebSocket } from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
+import { spawnTs, spawnNode, assertPortsFree, waitForPort, cleanupOnExit } from './lib/procs.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const rootDir = resolve(dirname(__filename), '..');
+const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 console.log('\x1b[36m%s\x1b[0m', '═══════════════════════════════════════════════════════════════');
 console.log('\x1b[36m%s\x1b[0m', '  NOBU SHOOTER — SMOKE TEST (HEADLESS BOT UNDER NIGHTMARE)    ');
 console.log('\x1b[36m%s\x1b[0m', '═══════════════════════════════════════════════════════════════\n');
 
+await assertPortsFree([8080, 9000, 9001]);
+
+const quiet = (name) => (l, isErr) => {
+  if (isErr && /Error|Unhandled/.test(l)) console.error(`[${name} ERR] ${l}`);
+};
+
 const children = [];
+const cleanup = cleanupOnExit(children);
 
-function startChild(name, cmd, args) {
-  const proc = spawn(cmd, args, {
-    cwd: rootDir,
-    stdio: 'pipe',
-    shell: true,
-  });
+console.log('[smoke] 1/4 Launching game server (port 8080)...');
+children.push(spawnTs('SERVER', 'server/src/main.ts', [], { cwd: rootDir, onLine: quiet('SERVER') }));
 
-  proc.stderr.on('data', (d) => {
-    // Only log actual fatal errors
-    const str = d.toString();
-    if (str.includes('Error:') || str.includes('Unhandled')) {
-      console.error(`[${name} ERR]`, str);
-    }
-  });
+console.log('[smoke] 2/4 Launching network emulator (ports 9000/9001)...');
+children.push(spawnTs('EMULATOR', 'emulator/src/main.ts', [
+  '--listen', '9000', '--target', 'ws://127.0.0.1:8080', '--control', '9001', '--seed', '42',
+], { cwd: rootDir, onLine: quiet('EMULATOR') }));
 
-  children.push(proc);
-  return proc;
-}
-
-function cleanup() {
-  for (const c of children) {
-    try { c.kill(); } catch { /* ignore */ }
-  }
-}
-
-process.on('SIGINT', () => { cleanup(); process.exit(1); });
-process.on('SIGTERM', () => { cleanup(); process.exit(1); });
-
-async function runSmoke() {
-  const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-
-  // 1. Start Server
-  console.log('[smoke] 1/4 Launching game server (port 8080)...');
-  startChild('SERVER', npxCmd, ['tsx', 'server/src/main.ts']);
-
-  // 2. Start Emulator
-  console.log('[smoke] 2/4 Launching network emulator (ports 9000/9001)...');
-  startChild('EMULATOR', npxCmd, [
-    'tsx',
-    'emulator/src/main.ts',
-    '--listen', '9000',
-    '--target', 'ws://127.0.0.1:8080',
-    '--control', '9001',
-    '--seed', '42',
-  ]);
-
-  // 3. Connect to Control port and apply Nightmare preset with retry
-  console.log('[smoke] 3/4 Configuring emulator with "Nightmare" preset...');
-  let configured = false;
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    try {
-      await new Promise((resolve, reject) => {
-        const ctrlWs = new WebSocket('ws://127.0.0.1:9001');
-        ctrlWs.on('open', () => {
-          ctrlWs.send(JSON.stringify({ cmd: 'preset', target: 'all', name: 'Nightmare' }));
-          setTimeout(() => {
-            ctrlWs.close();
-            resolve();
-          }, 400);
-        });
-        ctrlWs.on('error', reject);
-      });
-      configured = true;
-      break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 600));
-    }
-  }
-
-  if (!configured) {
-    throw new Error('Timed out connecting to emulator control port (9001)');
-  }
-
-  // 4. Run headless bot for 10 seconds
-  console.log('[smoke] 4/4 Starting headless bot (10s duration)...');
-  const botProc = spawn('node', ['scripts/headless-bot.mjs', '--duration', '10'], {
-    cwd: rootDir,
-    stdio: 'inherit',
-    shell: true,
-  });
-
-  botProc.on('close', (code) => {
-    cleanup();
-    if (code === 0) {
-      console.log('\n\x1b[32m✔ SMOKE TEST COMPLETE: All assertions passed under Nightmare conditions.\x1b[0m\n');
-      process.exit(0);
-    } else {
-      console.error(`\n\x1b[31m✘ SMOKE TEST FAILED: Bot exited with code ${code}.\x1b[0m\n`);
-      process.exit(code || 1);
-    }
-  });
-}
-
-runSmoke().catch((err) => {
-  console.error('[smoke] Unexpected error:', err);
+if (!(await waitForPort(8080)) || !(await waitForPort(9001)) || !(await waitForPort(9000))) {
+  console.error('[smoke] Services did not start in time');
   cleanup();
   process.exit(1);
+}
+
+console.log('[smoke] 3/4 Configuring emulator with "Nightmare" preset...');
+await new Promise((resolveP, reject) => {
+  const ctrl = new WebSocket('ws://127.0.0.1:9001');
+  ctrl.on('open', () => {
+    ctrl.send(JSON.stringify({ cmd: 'preset', target: 'all', name: 'Nightmare' }));
+    setTimeout(() => { ctrl.close(); resolveP(); }, 300);
+  });
+  ctrl.on('error', reject);
+});
+
+console.log('[smoke] 4/4 Starting headless bot (10s duration)...');
+const bot = spawnNode('BOT', ['scripts/headless-bot.mjs', '--duration', '10', '--min-tick-hz', '55'], {
+  cwd: rootDir,
+  onLine: (l) => console.log(l),
+});
+children.push(bot);
+
+bot.on('exit', (code) => {
+  cleanup();
+  if (code === 0) {
+    console.log('\n\x1b[32m✔ SMOKE TEST COMPLETE: All assertions passed under Nightmare conditions.\x1b[0m\n');
+    process.exit(0);
+  }
+  console.error(`\n\x1b[31m✘ SMOKE TEST FAILED: Bot exited with code ${code}.\x1b[0m\n`);
+  process.exit(code || 1);
 });

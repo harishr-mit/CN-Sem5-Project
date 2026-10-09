@@ -1,0 +1,181 @@
+/**
+ * core.ts — transport-agnostic game server core.
+ * SPEC.md §9.2. Owns rooms and connections; adapters (WebSocket today, UDP
+ * later) feed it raw text messages and give it a `send` callback per peer.
+ * Also used in-process by the netcode test harness.
+ */
+
+import { decodeClient, encodeServer } from '@nobu/shared/protocol';
+import type { MsgInput, ServerMsg } from '@nobu/shared/protocol';
+import NET from '@nobu/shared/config/net.js';
+import GAME from '@nobu/shared/config/game.js';
+import { Room } from './game/room.js';
+
+export interface Connection {
+  readonly id: number;
+  send: (text: string) => void;
+  close: () => void;
+  playerId: number | null;
+  room: Room | null;
+  nonce: string | null;
+  lastMsg: number;
+  msgCount: number;
+  msgCountWindow: number;
+}
+
+let nextConnId = 1;
+
+export class GameServer {
+  readonly rooms = new Map<string, Room>();
+  private readonly connections = new Set<Connection>();
+  private readonly now: () => number;
+
+  constructor(now: () => number = Date.now) {
+    this.now = now;
+    this.getRoom('main');
+    this.getRoom('lab');
+  }
+
+  getRoom(name: string): Room {
+    let room = this.rooms.get(name);
+    if (!room) {
+      room = new Room(
+        name,
+        (playerId, msg) => {
+          for (const conn of this.connections) {
+            if (conn.room === room && conn.playerId === playerId) { conn.send(msg); break; }
+          }
+        },
+        (msg) => {
+          for (const conn of this.connections) if (conn.room === room) conn.send(msg);
+        }
+      );
+      this.rooms.set(name, room);
+    }
+    return room;
+  }
+
+  addConnection(send: (text: string) => void, close: () => void): Connection {
+    const t = this.now();
+    const conn: Connection = {
+      id: nextConnId++, send, close,
+      playerId: null, room: null, nonce: null,
+      lastMsg: t, msgCount: 0, msgCountWindow: t,
+    };
+    this.connections.add(conn);
+    return conn;
+  }
+
+  /** Remove a connection (socket closed, timed out or said bye). Idempotent. */
+  removeConnection(conn: Connection): void {
+    if (!this.connections.delete(conn)) return;
+    if (conn.playerId !== null && conn.room) {
+      conn.room.removePlayer(conn.playerId);
+      console.log(`[server] Player ${conn.playerId} left ${conn.room.name}`);
+    }
+    conn.playerId = null;
+    conn.room = null;
+  }
+
+  /** One fixed simulation tick for every room. */
+  tick(): void {
+    for (const room of this.rooms.values()) room.tick();
+  }
+
+  /** Drop connections silent for longer than `timeoutMs` (SPEC.md §9.2). */
+  checkTimeouts(): void {
+    const t = this.now();
+    for (const conn of [...this.connections]) {
+      if (t - conn.lastMsg > NET.timeoutMs) {
+        console.log(`[server] Timeout: player ${conn.playerId}`);
+        this.removeConnection(conn);
+        conn.close();
+      }
+    }
+  }
+
+  handleMessage(conn: Connection, text: string): void {
+    const t = this.now();
+
+    // Rate limiting (SPEC.md §9.5)
+    conn.msgCount++;
+    if (t - conn.msgCountWindow >= 1000) {
+      conn.msgCount = 1;
+      conn.msgCountWindow = t;
+    }
+    if (conn.msgCount > NET.maxMessagesPerSecond) return;
+
+    conn.lastMsg = t;
+    const msg = decodeClient(text);
+    const reply = (m: ServerMsg) => conn.send(encodeServer(m));
+
+    if (!msg) {
+      reply({ t: 'error', code: 'BAD_MESSAGE', msg: 'Invalid message' });
+      return;
+    }
+
+    switch (msg.t) {
+      case 'hello': {
+        if (msg.v !== 1) {
+          reply({ t: 'error', code: 'BAD_VERSION', msg: 'Expected v:1' });
+          return;
+        }
+        // Repeated hello (welcome was lost): answer with the same welcome
+        if (conn.playerId !== null && conn.room) {
+          if (conn.nonce === msg.nonce) this.sendWelcome(conn, msg.nonce);
+          return;
+        }
+        const room = this.getRoom(msg.room === 'lab' ? 'lab' : 'main');
+        if (room.isFull()) {
+          reply({ t: 'error', code: 'ROOM_FULL', msg: 'Room is full' });
+          return;
+        }
+        conn.playerId = room.addPlayer(msg.name);
+        conn.room = room;
+        conn.nonce = msg.nonce;
+        this.sendWelcome(conn, msg.nonce);
+        console.log(`[server] Player ${conn.playerId} "${msg.name}" joined ${room.name}`);
+        break;
+      }
+
+      case 'input':
+        if (conn.playerId === null || !conn.room) return;
+        conn.room.receiveInput(conn.playerId, (msg as MsgInput).inputs);
+        break;
+
+      case 'ping': {
+        const perf = conn.room?.metrics.perf;
+        reply({
+          t: 'pong', id: msg.id, ct: msg.ct, st: t,
+          tickHz: perf?.achievedHz ?? 0,
+          tickMs: perf?.avgTickMs ?? 0,
+          tickMsMax: perf?.maxTickMs ?? 0,
+        });
+        break;
+      }
+
+      case 'perturb':
+        if (conn.playerId !== null && conn.room) {
+          conn.room.receivePerturb(conn.playerId, msg.dx, msg.dy);
+        }
+        break;
+
+      case 'bye':
+        this.removeConnection(conn);
+        conn.close();
+        break;
+    }
+  }
+
+  private sendWelcome(conn: Connection, nonce: string): void {
+    conn.send(encodeServer({
+      t: 'welcome', v: 1,
+      playerId: conn.playerId!,
+      room: conn.room!.name,
+      simHz: GAME.sim.hz,
+      snapshotHz: NET.snapshotHz,
+      serverTime: this.now(),
+      nonce,
+    }));
+  }
+}

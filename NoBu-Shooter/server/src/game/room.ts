@@ -4,7 +4,7 @@
  * SPEC.md §9, GAMERULES.md §2–§14.
  */
 
-import { stepPlayer, mulberry32, sweptCircleRect, sweptCircleCircle, segmentIntersectsRect } from '@nobu/shared/sim';
+import { stepPlayer, settlePosition, mulberry32, sweptCircleRect, sweptCircleCircle, segmentIntersectsRect } from '@nobu/shared/sim';
 import type { Rect, Vec2 } from '@nobu/shared/sim';
 import type {
   InputEntry, MsgSnap, PlayerSnap, ProjectileSnap,
@@ -17,12 +17,13 @@ import { BotController } from '../bots.js';
 import { pickSpawnPoint } from './spawn.js';
 import type { PlayerState, ProjectileState, RoomState } from './state.js';
 import { Metrics } from '../metrics.js';
+import { performance } from 'perf_hooks';
 
 // ─── constants ────────────────────────────────────────────────
 const SIM_HZ = GAME.sim.hz;
 const SNAP_HZ = NET.snapshotHz;
 const SNAP_EVERY = Math.round(SIM_HZ / SNAP_HZ); // 2 ticks
-const OBSTACLES = GAME.obstacles as Rect[];
+const OBSTACLES = GAME.obstacles as readonly Rect[] as Rect[];
 const ARENA_W = GAME.arena.width;
 const ARENA_H = GAME.arena.height;
 const P_RADIUS = GAME.player.radius;
@@ -38,7 +39,7 @@ const ENDED_TICKS = Math.round(GAME.match.endedMs * SIM_HZ / 1000);
 const MIN_PARTICIPANTS = GAME.match.minParticipants;
 const MAX_PARTICIPANTS = GAME.match.maxParticipants;
 const TARGET_BOTS = GAME.bots.targetParticipants;
-const BOT_NAMES: string[] = GAME.bots.names;
+const BOT_NAMES: readonly string[] = GAME.bots.names;
 const EVENT_REDUNDANCY_TICKS = Math.round(NET.eventRedundancyMs * SIM_HZ / 1000);
 const MAX_INPUTS_PER_MSG = NET.maxInputsPerMessage;
 const BACKLOG_THRESHOLD = NET.inputBacklogCatchup.threshold;
@@ -85,9 +86,9 @@ export class Room {
     this.broadcastFn = broadcastFn;
     this.botCtrl = new BotController();
 
-    const serverStartTime = Date.now();
     this.state = {
-      matchState: 'WAITING',
+      // Untimed rooms (lab) are a sandbox that is always RUNNING (GAMERULES.md §14).
+      matchState: this.roomCfg.timed ? 'WAITING' : 'RUNNING',
       tick: 0,
       serverTime: 0,
       countdownTicksLeft: 0,
@@ -100,7 +101,6 @@ export class Room {
       nextProjectileId: 1,
       leftPlayers: [],
     };
-    void serverStartTime;
   }
 
   // ── Public API ───────────────────────────────────────────────
@@ -120,7 +120,7 @@ export class Room {
       alive: this.state.matchState === 'RUNNING',
       life: 0,
       respawnTicksLeft: 0,
-      protectionTicksLeft: this.state.matchState === 'RUNNING' ? PROTECT_TICKS : 0,
+      protectionTicksLeft: this.state.matchState === 'RUNNING' && this.roomCfg.firing ? PROTECT_TICKS : 0,
       fireCooldownTicks: 0,
       score: 0,
       inputQueue: [],
@@ -183,8 +183,9 @@ export class Room {
     if (!NET.debug.allowPerturb) return;
     const p = this.state.players.get(playerId);
     if (!p || !p.alive) return;
-    p.x = Math.max(P_RADIUS, Math.min(ARENA_W - P_RADIUS, p.x + dx));
-    p.y = Math.max(P_RADIUS, Math.min(ARENA_H - P_RADIUS, p.y + dy));
+    const pos = settlePosition({ x: p.x + dx, y: p.y + dy }, MOVE_CFG);
+    p.x = pos.x;
+    p.y = pos.y;
   }
 
   buildSnapshot(playerId: number): MsgSnap {
@@ -235,7 +236,7 @@ export class Room {
    * Returns the processing time in ms.
    */
   tick(): number {
-    const t0 = Date.now();
+    const t0 = performance.now();
     this.state.tick++;
     this.state.serverTime += 1000 / SIM_HZ;
 
@@ -311,7 +312,7 @@ export class Room {
     // 8. Prune old events
     this.pruneEvents();
 
-    const elapsed = Date.now() - t0;
+    const elapsed = performance.now() - t0;
     this.metrics.recordTick(elapsed);
     return elapsed;
   }
@@ -320,10 +321,9 @@ export class Room {
 
   private emitEvent(partial: Partial<GameEvent> & { type: GameEvent['type'] }): void {
     const ev: GameEvent = {
-      eid: this.state.nextEid++,
-      type: partial.type,
-      tick: this.state.tick,
       ...partial,
+      eid: this.state.nextEid++,
+      tick: this.state.tick,
     };
     this.state.events.push(ev);
   }
@@ -573,54 +573,9 @@ export class Room {
   }
 
   private sendSnapshots(): void {
-    const { tick, serverTime, matchState, players, projectiles, events } = this.state;
-
-    const matchSnap = {
-      state: matchState as MatchState,
-      timeLeftMs: matchState === 'RUNNING'
-        ? (this.state.runningTicksLeft * 1000 / SIM_HZ)
-        : matchState === 'COUNTDOWN'
-        ? (this.state.countdownTicksLeft * 1000 / SIM_HZ)
-        : matchState === 'ENDED'
-        ? (this.state.endedTicksLeft * 1000 / SIM_HZ)
-        : 0,
-      results: matchState === 'ENDED' ? this._matchResults : null,
-    };
-
-    const projSnaps: ProjectileSnap[] = [...projectiles.values()].map(proj => ({
-      id: proj.id,
-      owner: proj.ownerId,
-      x: proj.x, y: proj.y,
-      dx: proj.dx, dy: proj.dy,
-    }));
-
-    for (const player of players.values()) {
+    for (const player of this.state.players.values()) {
       if (player.bot) continue; // bots don't need snapshots
-
-      const playerSnaps: PlayerSnap[] = [...players.values()].map(p => ({
-        id: p.id,
-        name: p.name,
-        bot: p.bot,
-        x: p.x, y: p.y,
-        alive: p.alive,
-        life: p.life,
-        protectMs: p.protectionTicksLeft * 1000 / SIM_HZ,
-        respawnMs: p.respawnTicksLeft * 1000 / SIM_HZ,
-        score: p.score,
-      }));
-
-      const snap: MsgSnap = {
-        t: 'snap',
-        tick,
-        st: serverTime,
-        ack: player.lastConsumedSeq,
-        match: matchSnap,
-        players: playerSnaps,
-        projectiles: projSnaps,
-        events,
-      };
-
-      this.sendFn(player.id, encodeServer(snap));
+      this.sendFn(player.id, encodeServer(this.buildSnapshot(player.id)));
     }
   }
 }

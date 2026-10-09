@@ -9,7 +9,7 @@ import GAME from '@nobu/shared/config/game.js';
 
 type Rng = () => number;
 
-const spawnPoints = GAME.spawnPoints as { x: number; y: number }[];
+const spawnPoints: readonly { x: number; y: number }[] = GAME.spawnPoints;
 const MIN_SEP = GAME.spawnMinSeparationPx;
 
 export function pickSpawnPoint(

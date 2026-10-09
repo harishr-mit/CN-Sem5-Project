@@ -81,3 +81,24 @@ export function stepPlayer(
 
   return { x, y };
 }
+
+/**
+ * settlePosition — push a (teleported) circle out of obstacles and into the
+ * arena. Used for perturb (SPEC.md §8.1). Not part of stepPlayer, so the
+ * golden movement vector is unaffected.
+ */
+export function settlePosition(pos: Vec2, cfg: MoveCfg): Vec2 {
+  let { x, y } = pos;
+  for (let pass = 0; pass < 2; pass++) {
+    x = clamp(x, cfg.radius, cfg.arenaW - cfg.radius);
+    y = clamp(y, cfg.radius, cfg.arenaH - cfg.radius);
+    for (const obs of cfg.obstacles) {
+      const resolved = resolveCircleRect({ x, y }, cfg.radius, obs);
+      x = resolved.x;
+      y = resolved.y;
+    }
+  }
+  x = clamp(x, cfg.radius, cfg.arenaW - cfg.radius);
+  y = clamp(y, cfg.radius, cfg.arenaH - cfg.radius);
+  return { x, y };
+}

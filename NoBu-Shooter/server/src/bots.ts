@@ -5,8 +5,9 @@
  * Bot traffic is server-local and bypasses the network emulator.
  */
 
-import { mulberry32 } from '@nobu/shared/sim';
+import { mulberry32, segmentIntersectsRect } from '@nobu/shared/sim';
 import { KEY } from '@nobu/shared/sim';
+import type { Rect } from '@nobu/shared/sim';
 import type { InputEntry } from '@nobu/shared/protocol';
 import type { PlayerState } from './game/state.js';
 import GAME from '@nobu/shared/config/game.js';
@@ -25,6 +26,9 @@ interface BotInternal {
   stuckX: number;
   stuckY: number;
   stuckTicksLeft: number;
+  /** +1 / -1: which way to circle around the current target. */
+  strafeSign: number;
+  strafeTicksLeft: number;
 }
 
 const BOT_HZ = GAME.sim.hz;
@@ -34,8 +38,42 @@ const STUCK_THRESHOLD = 20;
 const REACTION_TICKS = Math.round(GAME.bots.reactionMs * BOT_HZ / 1000);
 const AIM_ERROR_RAD = (GAME.bots.aimErrorDeg * Math.PI) / 180;
 const SIGHT_RANGE = GAME.bots.sightRange;
+/** Preferred engagement distance band while strafing a target. */
+const ENGAGE_MIN = 180;
+const ENGAGE_MAX = 380;
+const STRAFE_FLIP_TICKS = Math.round(1.2 * BOT_HZ);
 
-const spawnPoints: { x: number; y: number }[] = GAME.spawnPoints;
+/** Obstacles expanded by the projectile radius: a shot along a segment that
+ *  misses these also misses the real obstacle (GAMERULES.md §7). */
+const SHOT_BLOCKERS: Rect[] = (GAME.obstacles as readonly Rect[]).map((o) => ({
+  x: o.x - GAME.projectile.radius,
+  y: o.y - GAME.projectile.radius,
+  w: o.w + 2 * GAME.projectile.radius,
+  h: o.h + 2 * GAME.projectile.radius,
+}));
+
+function hasLineOfSight(ax: number, ay: number, bx: number, by: number): boolean {
+  const a = { x: ax, y: ay };
+  const b = { x: bx, y: by };
+  for (const r of SHOT_BLOCKERS) if (segmentIntersectsRect(a, b, r)) return false;
+  return true;
+}
+
+/** Turn a direction vector into the 8-way key bitmask. */
+function keysToward(dx: number, dy: number): number {
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 1e-6) return 0;
+  const nx = dx / len;
+  const ny = dy / len;
+  let keys = 0;
+  if (nx > 0.38) keys |= KEY.RIGHT;
+  if (nx < -0.38) keys |= KEY.LEFT;
+  if (ny > 0.38) keys |= KEY.DOWN;
+  if (ny < -0.38) keys |= KEY.UP;
+  return keys;
+}
+
+const spawnPoints: readonly { x: number; y: number }[] = GAME.spawnPoints;
 
 function randomArenaPoint(rng: Rng): { x: number; y: number } {
   // Prefer spawn points for wander targets (gives natural movement)
@@ -68,6 +106,8 @@ export class BotController {
       stuckX: 0,
       stuckY: 0,
       stuckTicksLeft: STUCK_CHECK_TICKS,
+      strafeSign: this.rng() < 0.5 ? 1 : -1,
+      strafeTicksLeft: STRAFE_FLIP_TICKS,
     });
   }
 
@@ -107,7 +147,7 @@ export class BotController {
         const dx = p.x - self.x;
         const dy = p.y - self.y;
         const d = Math.sqrt(dx * dx + dy * dy);
-        if (d < SIGHT_RANGE && d < nearestDist) {
+        if (d < SIGHT_RANGE && d < nearestDist && hasLineOfSight(self.x, self.y, p.x, p.y)) {
           nearestDist = d;
           nearestId = pid;
         }
@@ -129,12 +169,7 @@ export class BotController {
           bot.reactionTicksLeft--;
         }
 
-        if (bot.reactionTicksLeft <= 0) {
-          fireFlag = 1;
-          // Aim toward target — override wander
-          bot.targetX = target.x;
-          bot.targetY = target.y;
-        }
+        if (bot.reactionTicksLeft <= 0) fireFlag = 1;
       } else {
         bot.trackingId = null;
         bot.reactionTicksLeft = 0;
@@ -146,10 +181,11 @@ export class BotController {
         const movedX = Math.abs(self.x - bot.stuckX);
         const movedY = Math.abs(self.y - bot.stuckY);
         if (movedX + movedY < STUCK_THRESHOLD) {
-          // Pick new target
+          // Pick a new wander target and circle the other way
           const t = randomArenaPoint(this.rng);
           bot.targetX = t.x;
           bot.targetY = t.y;
+          bot.strafeSign = -bot.strafeSign;
         }
         bot.stuckX = self.x;
         bot.stuckY = self.y;
@@ -169,15 +205,26 @@ export class BotController {
       }
 
       // ── movement keys ────────────────────────────────────────
-      const dxT = bot.targetX - self.x;
-      const dyT = bot.targetY - self.y;
       let keys = 0;
-      const ARRIVE = 12;
-      if (Math.abs(dxT) > ARRIVE || Math.abs(dyT) > ARRIVE) {
-        if (dxT > ARRIVE)  keys |= KEY.RIGHT;
-        if (dxT < -ARRIVE) keys |= KEY.LEFT;
-        if (dyT > ARRIVE)  keys |= KEY.DOWN;
-        if (dyT < -ARRIVE) keys |= KEY.UP;
+      const target = bot.trackingId !== null ? players.get(bot.trackingId) : undefined;
+      if (target) {
+        // Engaged: strafe around the target, keeping a distance band.
+        bot.strafeTicksLeft--;
+        if (bot.strafeTicksLeft <= 0) {
+          if (this.rng() < 0.5) bot.strafeSign = -bot.strafeSign;
+          bot.strafeTicksLeft = Math.floor(STRAFE_FLIP_TICKS * (0.6 + this.rng() * 0.8));
+        }
+        const tx = target.x - self.x;
+        const ty = target.y - self.y;
+        const d = Math.sqrt(tx * tx + ty * ty) || 1;
+        const radial = d > ENGAGE_MAX ? 1 : d < ENGAGE_MIN ? -1 : 0;
+        const mx = (tx / d) * radial + (-ty / d) * bot.strafeSign;
+        const my = (ty / d) * radial + (tx / d) * bot.strafeSign;
+        keys = keysToward(mx, my);
+      } else {
+        const dxT = bot.targetX - self.x;
+        const dyT = bot.targetY - self.y;
+        if (Math.abs(dxT) > 12 || Math.abs(dyT) > 12) keys = keysToward(dxT, dyT);
       }
 
       const s = (seqMap.get(id) ?? 0) + 1;
