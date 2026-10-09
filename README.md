@@ -67,7 +67,7 @@ This single command checks that the ports are free and starts:
 Once started, open your browser to:
 👉 **[http://localhost:5173](http://localhost:5173)**
 
-Click **Quick Match (vs bots)** to play, or **Network Lab — A/B Compare** to compare netcode settings side by side.
+Click **Quick Match (vs bots)** to play, or **Network Lab — Compare** to compare netcode settings side by side: 2–4 panes driven by one keyboard, an optional reference pane connected straight to the server, scripted moving targets, and one-click comparisons (prediction, interpolation, redundancy).
 
 Stop everything with `Ctrl+C` — all four ports are released. (If the launcher is killed some other way, its child processes notice within ~1 s and exit by themselves.)
 
@@ -78,8 +78,9 @@ Stop everything with `Ctrl+C` — all four ports are released. (If the launcher 
 Ensure your environment passes all test suites and the headless end-to-end simulation:
 
 ```bash
-# Run unit and integration tests (27 tests: sim, protocol, emulator pipeline, game rules,
-# and an end-to-end netcode harness: real server + client + emulator pipeline on fake timers)
+# Run unit and integration tests (57 tests: sim, protocol, emulator pipeline, game rules,
+# movers/spectators, Compare layout/input/presets, and an end-to-end netcode harness:
+# real server + client + emulator pipeline on fake timers)
 npm test
 
 # Type-check server, emulator, shared code, tests and client
@@ -109,7 +110,7 @@ npm run smoke
 | **Preset 5** | Nightmare (120 ms ± 50 ms jitter, 12% burst loss, 3% dup, 5% reorder, 400 kbps) |
 
 Latencies are one-way, applied in each direction (RTT ≈ 2 × latency).
-| **A/B Compare Mode** | Click **A/B Compare** button in Network Lab header |
+| **Compare view** | **Network Lab — Compare** on the landing page. Inside: `Tab` network drawer, `1`–`5` presets, click a pane then `P` / `R` / `I` / `G` to toggle its settings, `T` truth rings |
 
 ---
 
@@ -153,7 +154,7 @@ CN-Sem5-Project/
 ┌───────────┴────────────┐                   ┌────────────────────────┐
 │ Network Lab (React HUD)│                   │   Game Server (Node.js)│
 │ Live Sliders & Presets │                   │  Authoritative 60 Hz   │
-│ Sparklines & A/B Mode  │                   │ Deterministic Sim Loop │
+│ Sparklines & Compare   │                   │ Deterministic Sim Loop │
 └────────────────────────┘                   └────────────────────────┘
 ```
 

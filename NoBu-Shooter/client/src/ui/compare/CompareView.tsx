@@ -94,6 +94,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
       return m;
     };
     const make = (dimOthers: boolean): ArenaSceneOptions => ({
+      renderAtDisplaySize: true,
       input: driver,
       playerColors: colors,
       truthClock: () => reference.serverNow(),
@@ -371,7 +372,9 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
           </div>
           <button className="btn-ghost" onClick={() => setDrawerOpen(false)} style={{ padding: '2px 10px' }}>✕</button>
         </div>
-        <EmulatorControls emulatorClient={emulator} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-m)' }}>
+          <EmulatorControls emulatorClient={emulator} />
+        </div>
       </div>
     </div>
   );

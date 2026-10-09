@@ -28,8 +28,9 @@ Resent every 250 ms until an authoritative `welcome` message is received.
 ```
 - `v`: Protocol version (`number`, must be 1).
 - `name`: Callsign string (truncated to 12 chars by the server, GAMERULES.md §4).
-- `room`: `"main"` (full match with bots) or `"lab"` (sandbox for A/B testing).
+- `room`: `"main"` (full match with bots) or `"lab"` (movement-only sandbox used by the Compare view).
 - `nonce`: Unique client-generated session identifier for idempotent handshake retry.
+- `spectate` (optional, boolean): join as a **spectator** — the connection receives snapshots but gets no player, doesn't count toward the room's player cap, and its `input`/`perturb` messages are ignored. The Compare view's reference pane uses this, connecting directly to the server (no emulator).
 
 ### 2.2 `input` (Player Movement & Fire)
 Flushed at 30 Hz. Contains one or more 60 Hz input samples.
@@ -84,6 +85,17 @@ Forces server-side misprediction to demonstrate reconciliation.
 }
 ```
 
+### 2.6 `lab` (Scripted Movers)
+Selects the active scripted movers (PHASES.md C3). Accepted only in rooms with `movers: true` in `game.json` (only `lab`); ignored elsewhere. Any connection in the room may send it, spectators included.
+```json
+{
+  "t": "lab",
+  "movers": ["circle", "zigzag", "reversal", "stopgo"]
+}
+```
+- `movers`: the complete set to show (an empty array turns them all off). Unknown names make the message invalid; duplicates are dropped.
+- Movers are cleared when the room has no players and no spectators left.
+
 ---
 
 ## 3. Server → Client Messages
@@ -101,7 +113,8 @@ Forces server-side misprediction to demonstrate reconciliation.
   "nonce": "a8f3c9b"
 }
 ```
-- `playerId`: Unique positive integer assigned to the client.
+- `playerId`: Unique positive integer assigned to the client (`0` for spectators).
+- `spectator` (only for spectators): `true`.
 - `simHz`: Authoritative simulation tick frequency (60 Hz).
 - `snapshotHz`: World state broadcast frequency (30 Hz).
 
@@ -155,7 +168,8 @@ Broadcast at 30 Hz.
 }
 ```
 - `tick`: Monotonic simulation tick. Snapshots with `tick <= lastAppliedTick` are dropped.
-- `ack`: Highest input sequence processed for the recipient client.
+- `ack`: Highest input sequence processed for the recipient client (`0` in spectator snapshots).
+- `players[].mover` (optional): set only on scripted lab movers (`"circle"`, `"zigzag"`, `"reversal"`, `"stopgo"`). Movers look like remote players (`bot: true`, `alive: true`, `life: 1`, `score: 0`) so interpolation treats them like any other remote entity. Their position is exactly `moverPath(pattern, tick / 60)` from `shared/src/sim/movers.ts`, so clients can compute the true position at any server time.
 - `events`: Array of redundant event entries covering the last 500 ms; deduplicated via `eid`.
 
 ### 3.3 `pong` (RTT Echo & Server Health)
@@ -214,6 +228,7 @@ UI → emulator:
 | `{ "cmd": "get" }` | Reply with a `state` message |
 | `{ "cmd": "set", "target", "direction", "patch" }` | Merge `patch` into the link config. `target`: `"all"` (also the default for new sessions), a session id or a label. `direction`: `"both"`, `"up"` or `"down"` |
 | `{ "cmd": "preset", "target", "name" }` | Apply a complete preset (`Baseline`, `Café Wi-Fi`, `Mobile 4G`, `Transatlantic`, `Nightmare`); fields not in the preset get defaults |
+| `{ "cmd": "preset", "target", "name", "config" }` | **Ad-hoc preset**: `config` (a partial link config) is completed from the defaults (unknown keys and wrong types are ignored) and applied like a named preset; `name` is reported as the active preset. Used by the Compare view, e.g. `{ "name": "Jitter 50±30", "config": { "latencyMs": 50, "jitterMs": 30 } }` |
 | `{ "cmd": "reset", "target" }` | Back to zero impairment |
 | `{ "cmd": "seed", "value" }` | Reseed the RNG |
 | `{ "cmd": "subscribe", "packets": true }` | Start/stop the packet-event stream |

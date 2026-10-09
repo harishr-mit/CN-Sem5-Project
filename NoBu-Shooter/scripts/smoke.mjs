@@ -4,6 +4,8 @@
  * 2. Applies the "Nightmare" preset via the control port
  * 3. Runs the headless bot for 10 s through the emulator data port
  * 4. Asserts snapshots keep arriving, ack advances, tick rate ≥ 55 Hz
+ * 5. Joins the lab room as a spectator (direct to the server), turns on the
+ *    scripted movers and checks them against moverPath (PHASES.md C2, C3)
  * All child processes are stopped (and ports freed) on every exit path.
  */
 
@@ -27,10 +29,10 @@ const quiet = (name) => (l, isErr) => {
 const children = [];
 const cleanup = cleanupOnExit(children);
 
-console.log('[smoke] 1/4 Launching game server (port 8080)...');
+console.log('[smoke] 1/5 Launching game server (port 8080)...');
 children.push(spawnTs('SERVER', 'server/src/main.ts', [], { cwd: rootDir, onLine: quiet('SERVER') }));
 
-console.log('[smoke] 2/4 Launching network emulator (ports 9000/9001)...');
+console.log('[smoke] 2/5 Launching network emulator (ports 9000/9001)...');
 children.push(spawnTs('EMULATOR', 'emulator/src/main.ts', [
   '--listen', '9000', '--target', 'ws://127.0.0.1:8080', '--control', '9001', '--seed', '42',
 ], { cwd: rootDir, onLine: quiet('EMULATOR') }));
@@ -41,7 +43,7 @@ if (!(await waitForPort(8080)) || !(await waitForPort(9001)) || !(await waitForP
   process.exit(1);
 }
 
-console.log('[smoke] 3/4 Configuring emulator with "Nightmare" preset...');
+console.log('[smoke] 3/5 Configuring emulator with "Nightmare" preset...');
 await new Promise((resolveP, reject) => {
   const ctrl = new WebSocket('ws://127.0.0.1:9001');
   ctrl.on('open', () => {
@@ -51,7 +53,7 @@ await new Promise((resolveP, reject) => {
   ctrl.on('error', reject);
 });
 
-console.log('[smoke] 4/4 Starting headless bot (10s duration)...');
+console.log('[smoke] 4/5 Starting headless bot (10s duration)...');
 const bot = spawnNode('BOT', ['scripts/headless-bot.mjs', '--duration', '10', '--min-tick-hz', '55'], {
   cwd: rootDir,
   onLine: (l) => console.log(l),
@@ -59,11 +61,21 @@ const bot = spawnNode('BOT', ['scripts/headless-bot.mjs', '--duration', '10', '-
 children.push(bot);
 
 bot.on('exit', (code) => {
-  cleanup();
-  if (code === 0) {
-    console.log('\n\x1b[32m✔ SMOKE TEST COMPLETE: All assertions passed under Nightmare conditions.\x1b[0m\n');
-    process.exit(0);
+  if (code !== 0) {
+    cleanup();
+    console.error(`\n\x1b[31m✘ SMOKE TEST FAILED: Bot exited with code ${code}.\x1b[0m\n`);
+    process.exit(code || 1);
   }
-  console.error(`\n\x1b[31m✘ SMOKE TEST FAILED: Bot exited with code ${code}.\x1b[0m\n`);
-  process.exit(code || 1);
+  console.log('[smoke] 5/5 Lab spectator + scripted movers (direct to the server)...');
+  const spectator = spawnTs('SPECTATOR', 'scripts/lab-spectator.ts', [], { cwd: rootDir, onLine: (l) => console.log(l) });
+  children.push(spectator);
+  spectator.on('exit', (scode) => {
+    cleanup();
+    if (scode === 0) {
+      console.log('\n\x1b[32m✔ SMOKE TEST COMPLETE: All assertions passed under Nightmare conditions.\x1b[0m\n');
+      process.exit(0);
+    }
+    console.error(`\n\x1b[31m✘ SMOKE TEST FAILED: Lab spectator check exited with code ${scode}.\x1b[0m\n`);
+    process.exit(scode || 1);
+  });
 });

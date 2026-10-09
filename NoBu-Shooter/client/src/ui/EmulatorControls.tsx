@@ -111,9 +111,10 @@ export const EmulatorControls: React.FC<EmulatorControlsProps> = ({ emulatorClie
             [{p.key}] {p.name}
           </button>
         ))}
-        {activePreset === 'Custom' && (
+        {/* "Custom" after a slider change, or an ad-hoc preset name (e.g. from Compare) */}
+        {!EMULATOR_PRESETS.some((p) => p.name === activePreset) && (
           <div className="preset-chip active" style={{ borderColor: 'var(--c-amber)', color: 'var(--c-amber)' }}>
-            CUSTOM
+            {activePreset.toUpperCase()}
           </div>
         )}
       </div>

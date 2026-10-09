@@ -27,12 +27,17 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, options
       width: GAME.arena.width,
       height: GAME.arena.height,
       backgroundColor: '#07070f',
-      scale: {
-        mode: Phaser.Scale.FIT,
-        autoCenter: Phaser.Scale.CENTER_BOTH,
-        width: GAME.arena.width,
-        height: GAME.arena.height,
-      },
+      // FIT renders a full 1280×720 frame and lets CSS shrink it. Compare panes
+      // instead render at their displayed size (RESIZE) and zoom the camera
+      // to fit: about 4× fewer pixels per pane, which kept 4–5 panes at 60 fps.
+      scale: options?.renderAtDisplaySize
+        ? { mode: Phaser.Scale.RESIZE }
+        : {
+            mode: Phaser.Scale.FIT,
+            autoCenter: Phaser.Scale.CENTER_BOTH,
+            width: GAME.arena.width,
+            height: GAME.arena.height,
+          },
       render: {
         pixelArt: false,
         antialias: true,

@@ -24,6 +24,11 @@ import NET from '@nobu/shared/config/net';
  * owner can flip its flags without recreating the scene.
  */
 export interface ArenaSceneOptions {
+  /**
+   * Render at the canvas's displayed size and zoom the camera to fit the
+   * arena (GameContainer uses Phaser.Scale.RESIZE). Cheaper for small panes.
+   */
+  renderAtDisplaySize?: boolean;
   /** Shared input: the scene stops polling keys and stepping the client. */
   input?: InputDriver;
   /** Colour per player id (Compare: each pane's player in its pane colour). */
@@ -91,7 +96,12 @@ interface CorrectionLine {
 export class ArenaScene extends Phaser.Scene {
   private netClient!: NetClient;
   // arenaContainer removed (Bug 3B) — graphics objects are added directly
-  private bgGraphics!: Phaser.GameObjects.Graphics;
+  /**
+   * Static layers, baked into textures once in create(): Phaser re-tessellates
+   * every Graphics object on every frame, which made five Compare panes
+   * CPU-bound. The grid's alpha still pulses.
+   */
+  private gridImage!: Phaser.GameObjects.Image;
   private playerGraphics!: Phaser.GameObjects.Graphics;
   private projGraphics!: Phaser.GameObjects.Graphics;
   private fxGraphics!: Phaser.GameObjects.Graphics;
@@ -133,8 +143,16 @@ export class ArenaScene extends Phaser.Scene {
   private unsubscribers: (() => void)[] = [];
 
   private options: ArenaSceneOptions;
-  /** Last drawn positions per mover id (newest last). */
-  private moverTrails = new Map<number, { x: number; y: number }[]>();
+  /**
+   * Mover sprites per mover id: body, truth ring and a trail of dots (newest
+   * last). Pooled Images batch far more cheaply than redrawn Graphics.
+   */
+  private moverSprites = new Map<number, {
+    body: Phaser.GameObjects.Image;
+    truth: Phaser.GameObjects.Image;
+    dots: Phaser.GameObjects.Image[];
+    trail: { x: number; y: number }[];
+  }>();
 
   constructor(config: Phaser.Types.Scenes.SettingsConfig & { netClient: NetClient; options?: ArenaSceneOptions }) {
     super({ key: 'ArenaScene', ...config });
@@ -148,9 +166,30 @@ export class ArenaScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor(C_ARENA_BG);
+    if (this.options.renderAtDisplaySize) {
+      const fit = (size: Phaser.Structs.Size) => {
+        const cam = this.cameras.main;
+        cam.setSize(size.width, size.height);
+        cam.setZoom(Math.min(size.width / ARENA_W, size.height / ARENA_H));
+        cam.centerOn(ARENA_W / 2, ARENA_H / 2);
+      };
+      fit(this.scale.gameSize);
+      this.scale.on(Phaser.Scale.Events.RESIZE, fit);
+      this.events.once('shutdown', () => this.scale.off(Phaser.Scale.Events.RESIZE, fit));
+    }
 
     // Layers (draw order)
-    this.bgGraphics    = this.add.graphics();
+    const grid = this.make.graphics({}, false);
+    const walls = this.make.graphics({}, false);
+    this.drawBackground(grid, walls);
+    this.drawObstacles(walls);
+    grid.generateTexture('arena-grid', ARENA_W, ARENA_H);
+    walls.generateTexture('arena-walls', ARENA_W, ARENA_H);
+    grid.destroy();
+    walls.destroy();
+    this.gridImage = this.add.image(0, 0, 'arena-grid').setOrigin(0, 0);
+    this.add.image(0, 0, 'arena-walls').setOrigin(0, 0);
+    this.bakeMoverTextures();
     this.ghostGraphics = this.add.graphics();
     this.projGraphics  = this.add.graphics();
     this.playerGraphics = this.add.graphics();
@@ -284,16 +323,15 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private render(): void {
-    const g = this.bgGraphics;
     const pg = this.playerGraphics;
     const projG = this.projGraphics;
     const fxG = this.fxGraphics;
     const ghost = this.ghostGraphics;
 
-    g.clear(); pg.clear(); projG.clear(); fxG.clear(); ghost.clear();
+    pg.clear(); projG.clear(); fxG.clear(); ghost.clear();
 
-    this.drawBackground(g);
-    this.drawObstacles(g);
+    // Slow grid pulse (the grid itself is static)
+    this.gridImage.setAlpha(0.04 + 0.01 * Math.sin(Date.now() / 1500));
 
     const state = this.netClient.getInterpolatedState();
     const { players, projectiles } = state;
@@ -310,7 +348,7 @@ export class ArenaScene extends Phaser.Scene {
     }
 
     // Movers: trails, truth markers, then the drones themselves
-    this.drawMovers(pg, fxG, players);
+    this.drawMovers(players);
 
     // Draw remote players (other panes' players are dimmed when asked)
     const dim = (this.options.view?.dimOthers ?? false) && myId !== null;
@@ -379,23 +417,18 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  private drawBackground(g: Phaser.GameObjects.Graphics): void {
-    // Arena floor
-    g.fillStyle(C_ARENA_BG, 1);
-    g.fillRect(0, 0, ARENA_W, ARENA_H);
-
-    // Grid floor (faint blue grid with slow pulse effect)
+  private drawBackground(grid: Phaser.GameObjects.Graphics, g: Phaser.GameObjects.Graphics): void {
+    // Grid floor (faint blue grid; its alpha pulses in render())
     /* TEXTURE: arena_floor_grid
      * Replace with a tiling texture asset.
      * Current: procedural grid lines. */
     const gridSize = 64;
-    const pulse = 0.04 + 0.01 * Math.sin(Date.now() / 1500);
-    g.lineStyle(1, C_GRID, pulse);
+    grid.lineStyle(1, C_GRID, 1);
     for (let x = 0; x <= ARENA_W; x += gridSize) {
-      g.lineBetween(x, 0, x, ARENA_H);
+      grid.lineBetween(x, 0, x, ARENA_H);
     }
     for (let y = 0; y <= ARENA_H; y += gridSize) {
-      g.lineBetween(0, y, ARENA_W, y);
+      grid.lineBetween(0, y, ARENA_W, y);
     }
 
     // Arena boundary glow
@@ -454,48 +487,76 @@ export class ArenaScene extends Phaser.Scene {
     // Score badge
   }
 
+  /** Mover body, trail dot and truth ring, drawn once into textures. */
+  private bakeMoverTextures(): void {
+    const half = P_RADIUS + 8;
+    const g = this.make.graphics({}, false);
+    /* TEXTURE: mover_drone
+     * Replace with a drone sprite. Current: hollow glowing ring. */
+    g.fillStyle(C_MOVER, 0.12);
+    g.fillCircle(half, half, P_RADIUS + 6);
+    g.lineStyle(3, C_MOVER, 0.95);
+    g.strokeCircle(half, half, P_RADIUS - 2);
+    g.fillStyle(C_MOVER, 1);
+    g.fillCircle(half, half, 4);
+    g.generateTexture('mover-drone', half * 2, half * 2);
+    g.clear();
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(3, 3, 3);
+    g.generateTexture('mover-dot', 6, 6);
+    g.clear();
+    this.drawDashedCircle(g, half, half, P_RADIUS + 2, C_TRUTH, 0.8);
+    g.generateTexture('mover-truth', half * 2, half * 2);
+    g.destroy();
+  }
+
   /**
    * Scripted lab movers (PHASES.md C3): a hollow drone ring. Optional trail
    * of recent drawn positions (evenly spaced = smooth, bunched = stutter)
    * and a dashed marker at the exact true position.
    */
-  private drawMovers(g: Phaser.GameObjects.Graphics, fx: Phaser.GameObjects.Graphics, players: PlayerSnap[]): void {
+  private drawMovers(players: PlayerSnap[]): void {
     const view = this.options.view;
+    const truth = view?.truthMarkers ? (this.options.truthClock?.() ?? null) : null;
     const seen = new Set<number>();
     for (const p of players) {
       if (!p.mover) continue;
       seen.add(p.id);
-      let trail = this.moverTrails.get(p.id);
-      if (!trail) { trail = []; this.moverTrails.set(p.id, trail); }
-      trail.push({ x: p.x, y: p.y });
-      if (trail.length > TRAIL_LEN) trail.shift();
-
-      if (view?.moverTrails) {
-        const n = trail.length;
-        trail.forEach((pt, i) => {
-          fx.fillStyle(C_MOVER, 0.15 + 0.6 * (i / n));
-          fx.fillCircle(pt.x, pt.y, 2.5);
-        });
+      let spr = this.moverSprites.get(p.id);
+      if (!spr) {
+        spr = {
+          dots: Array.from({ length: TRAIL_LEN }, () => this.add.image(0, 0, 'mover-dot').setTint(C_MOVER).setDepth(1)),
+          body: this.add.image(0, 0, 'mover-drone').setDepth(2),
+          truth: this.add.image(0, 0, 'mover-truth').setDepth(3),
+          trail: [],
+        };
+        this.moverSprites.set(p.id, spr);
       }
+      spr.body.setPosition(p.x, p.y);
 
-      /* TEXTURE: mover_drone
-       * Replace with a drone sprite. Current: hollow glowing ring. */
-      g.fillStyle(C_MOVER, 0.12);
-      g.fillCircle(p.x, p.y, P_RADIUS + 6);
-      g.lineStyle(3, C_MOVER, 0.95);
-      g.strokeCircle(p.x, p.y, P_RADIUS - 2);
-      g.fillStyle(C_MOVER, 1);
-      g.fillCircle(p.x, p.y, 4);
-    }
-    for (const id of [...this.moverTrails.keys()]) if (!seen.has(id)) this.moverTrails.delete(id);
+      spr.trail.push({ x: p.x, y: p.y });
+      if (spr.trail.length > TRAIL_LEN) spr.trail.shift();
+      const n = spr.trail.length;
+      spr.dots.forEach((dot, i) => {
+        const pt = spr!.trail[i];
+        const visible = !!view?.moverTrails && pt !== undefined;
+        dot.setVisible(visible);
+        if (visible) dot.setPosition(pt.x, pt.y).setAlpha(0.15 + 0.6 * (i / n));
+      });
 
-    const truth = view?.truthMarkers ? (this.options.truthClock?.() ?? null) : null;
-    if (truth !== null) {
-      for (const p of players) {
-        if (!p.mover) continue;
+      if (truth !== null) {
         const t = moverPath(p.mover, truth / 1000, MOVER_CFG);
-        this.drawDashedCircle(fx, t.x, t.y, P_RADIUS + 2, C_TRUTH, 0.8);
+        spr.truth.setVisible(true).setPosition(t.x, t.y);
+      } else {
+        spr.truth.setVisible(false);
       }
+    }
+    for (const [id, spr] of [...this.moverSprites]) {
+      if (seen.has(id)) continue;
+      spr.body.destroy();
+      spr.truth.destroy();
+      spr.dots.forEach((d) => d.destroy());
+      this.moverSprites.delete(id);
     }
   }
 

@@ -1,7 +1,7 @@
 # Phase 2 Implementation Plan — Compare view + scripted movers
 
 **Audience:** the project owner and the agent who implements Phase 2.
-**Status:** approved by the owner on 2026-10-09; implementation in progress (`log.md` T38–T44). Deviations found while building are recorded in §10.
+**Status:** approved by the owner on 2026-10-09 and **implemented** the same day (`log.md` T38–T44). Deviations found while building are recorded in §10; results are in `PHASES.md` → Phase 2 → Result.
 **Scope:** `PHASES.md` → Phase 2, items C1–C6. This file says *how* to build them. `PHASES.md` stays the source for *what* and the exit criteria.
 
 ---
@@ -270,3 +270,9 @@ The phase rules from `PHASES.md` apply, plus these:
 | # | Where | Change | Why |
 |---|---|---|---|
 | X1 | D3 / §4.1 / tests 5–6 | **Lag and wobble are measured as the drawn mover's effective delay in ms**, not as px distance. For each frame, τ is the delay at which the true path passes through the drawn position while heading the same way the drawn mover last moved. Lag is the median τ; wobble is the interquartile range / 1.35 (equal to the std-dev for normal noise, but not swamped by a rare glitch). The px distance is still reported (`moverErrorPx`), as is frozen %. | Raw distance depends on the shape of the path: at a stop or a reversal it swings between 0 and 30 px even with perfect interpolation, which would have hidden the network effect. Delay in ms is independent of the path and reads naturally: 50 ms network + 100 ms interpolation ≈ 150 ms. Harness at 50 ± 30 ms: interp on 158 ms ± 5.9, 30 px, 2 % frozen; off 67 ms ± 36, 14.5 px, 67 % frozen. |
+| X2 | §4.4, §8 risk 1 | **Rendering work for frame rate**: Compare panes render at their displayed size (`ArenaSceneOptions.renderAtDisplaySize` → `Phaser.Scale.RESIZE` + camera zoom), the grid and walls are baked into textures once, and mover bodies, trail dots and truth rings are pooled sprites (textures baked in `create()`). | Measured on the dev laptop's real GPU: 4 panes + REF ran at **20 fps** (Phaser re-tessellates every `Graphics` object every frame; each pane rendered a full 1280×720 frame). Now 60 fps. Quick Match keeps `FIT`. |
+| X3 | §4.4 | `GameContainer`'s ResizeObserver calls `scale.getParentBounds()` before `refresh()`. | `refresh()` reuses the cached parent size, so a canvas could shrink but never grow back (41 % letterbox after switching 3 → 2 panes). Also affects Quick Match (panel resizes). |
+| X4 | §4.5 | `EmulatorControls` owns the `1`–`5` hotkeys (moved out of `NetworkLab`), and shows an ad-hoc preset's name (e.g. "LOSS 10 %") as the active chip. The drawer is always mounted (hidden), so `1`–`5` work in Compare too. | One place for preset handling in both views. |
+| X5 | §4.5 | Top-bar preset buttons show short labels ("Prediction", full title as tooltip); movers label "MOVE"; Lab button "LAB [TAB]". When the grid has an empty cell (e.g. 2 panes + REF in 2×2), the dock fills that cell instead of the space below. | The bar overflowed at 1280 px; the empty cell was wasted space. |
+| X6 | §6 smoke | The smoke spectator step is `scripts/lab-spectator.ts` (run with tsx, so it reuses `moverPath`); `scripts/**/*.ts` was added to `tsconfig.node.json`. | `smoke.mjs` is plain JS and can't import the TypeScript path functions. |
+| X7 | §2 | `Room`'s third constructor argument is now the spectator send function; the old room-broadcast callback was never used and was removed. | Spectator snapshots need a send path; no extra parameter needed. |

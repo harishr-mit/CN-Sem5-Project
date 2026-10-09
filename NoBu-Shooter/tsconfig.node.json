@@ -14,5 +14,5 @@
     "baseUrl": ".",
     "paths": { "@nobu/shared/*": ["shared/src/*"] }
   },
-  "include": ["shared/src", "server/src", "emulator/src", "tests", "client/src/net/NetClient.ts"]
+  "include": ["shared/src", "server/src", "emulator/src", "tests", "scripts/**/*.ts", "client/src/net/NetClient.ts"]
 }
