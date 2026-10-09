@@ -21,12 +21,13 @@ Shared context for every agent working in this directory. Read this file **befor
 
 ## Current Status
 
-* **Last updated:** 2026-10-07 (Claude, initial setup)
-* **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, and a standalone network emulator (latency, jitter, packet loss, bandwidth limit, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (`main`, 3 commits at time of snapshot).
-* **Summary:** Spec/planning stage. The repo contains only `.gitignore`, `README.md`, `SPEC.md`, `GAMERULES.md`. No source code, `package.json`, or tests exist yet. `README.md` references `docs/DEMO\_SCRIPT.md` and `docs/PROTOCOL.md`, which are not yet created.
-* **Planned architecture:** Browser (Phaser + React) ⇄ Network Emulator ⇄ Authoritative Game Server, with a shared deterministic simulation. A control/stats websocket connects the Network Lab UI to the emulator.
-* **Planned commands:** `npm install`, `npm run demo`, `npm test`, `npm run smoke`.
-* **Blockers / Notes:** The task list below was seeded from `README.md` only. T01 is to reconcile it against `SPEC.md` and `GAMERULES.md`.
+* **Last updated:** 2026-10-09 (Claude Opus 5.5) — **Phase 1 of `PHASES.md` complete.** Next: Phase 2 (T31).
+* **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot-vs-state sync models, and a standalone network emulator (latency, jitter, loss, bandwidth, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (working branch `game`).
+* **Plan:** `PHASES.md` — six phases, each with a demo checkpoint and exit criteria. `GAMERULES.md` = gameplay rules. v1 spec archived at `docs/archive/SPEC-v1.md`.
+* **Architecture:** Browser (Phaser + React) ⇄ Emulator (:9000 data, :9001 control) ⇄ Authoritative server (:8080). Server core is transport-agnostic (`server/src/core.ts`); `NetClient` is headless (injectable transport/clock).
+* **Commands (from repo root or `NoBu-Shooter/`):** `npm run demo`, `npm test` (27 tests incl. end-to-end netcode harness), `npm run typecheck`, `npm run smoke`.
+* **Verification tooling:** no Playwright MCP is attached to agents; browser checks were done with `playwright-core` installed in the session scratchpad (NOT the repo) driving local Chrome (`channel: 'chrome'`). Phase 4 adds `npm run shots` to the repo.
+* **Blockers / Notes:** none. Dev-mode React StrictMode prints 3 harmless WebSocket warnings in A/B view (documented in `docs/ASSUMPTIONS.md` #18).
 
 ## Task List
 
@@ -47,6 +48,25 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T15: Update .gitignore to ignore all dependencies (node_modules, pycache, etc.), build artifacts, caches, and envs
 * [x] T16: Configure root package.json postinstall hook for seamless dependency installation
 * [x] T17: Add comprehensive Quickstart Guide block to README.md for freshly cloned machines
+* [x] T18: Fix aim angle coordinate mismatch — use `ptr.worldX/Y` instead of `ptr.x/y` in ArenaScene (Bug 2B)
+* [x] T19: Guard projectile trail against `proj.dx/dy` being undefined → NaN draw calls (Bug 3A)
+* [x] T20: Remove duplicate `updateMetrics()` call from ArenaScene game loop — let NetworkLab drive it (Bug 6A)
+* [x] T21: Fix key input stickiness — move key polling into `update()`, add `shutdown` cleanup (Bug 2A)
+* [x] T22: UI responsive resizing — `min-height:0` on arena container, `clamp()` panel width, ResizeObserver (Bugs 1A+1B)
+* [x] T23: Emulator UX + slider sync — show helpful offline message, sync sliders from emulator state events (Bugs 4A+4B)
+* [x] T24: Add SettingsPanel.tsx (Escape toggle, sensitivity, graphics quality, localStorage) (Bug 5A)
+* [x] T25: Add ControlsOverlay.tsx (F1/? toggle, in-game keybinding reference) (Bug 5B)
+* [x] T26: Analysis + improvement plan against demo goals (snapshot vs state, prediction/reconciliation, standalone emulator, polish) — Claude Opus 5.5 → `ROADMAP.md` (now `PHASES.md`)
+* [x] T27: Phase 1 netcode correctness — R1–R4 (input send bug, clock offset/interpolation, Input→Screen + ack delay, aim/prediction-off render)
+* [x] T28: NetClient headless refactor + real GameServer+NetClient+Pipeline harness (`tests/netcode.test.ts`) — R5, R6
+* [x] T29: Bots LOS/strafe/unstick, hybrid server loop (0.9 % CPU), demo.mjs process cleanup — R7–R9
+* [x] T30: Small fixes batch — R10 (presets, per-session stats, strip, slider merge, perturb, lab RUNNING, particles, typecheck)
+* [ ] T31: **Phase 2** — Compare view + reference pane + scripted movers + comparison presets (PHASES.md C1–C6)
+* [ ] T32: **Phase 3** — Sync models: full / delta / state+extrapolation, bandwidth chart (PHASES.md S0–S5)
+* [ ] T33: **Phase 4** — Presenter mode, arena/lab/strip polish, texture manifest, `npm run shots` (PHASES.md P1–P7)
+* [ ] T34: **Phase 5** — UDP adapters, emulator UDP mode, network-player swarm, emulator dashboard + README (PHASES.md U1–U7)
+* [ ] T35: **Phase 6** — Lockstep (S4), final docs, rehearsal (PHASES.md L1–L5)
+* [x] T36: Docs: archive SPEC.md → `docs/archive/SPEC-v1.md`, ROADMAP.md → `PHASES.md`, remove duplicate `NoBu-Shooter/docs/` and stale root `tests/`, update README/PROTOCOL/DEMO_SCRIPT/ASSUMPTIONS
 
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
@@ -54,6 +74,87 @@ Shared context for every agent working in this directory. Read this file **befor
 ## Change Log
 
 <!-- Newest first. Copy the template below for each entry. -->
+
+### 2026-10-09 — Claude (Opus 5.5) — Phase 1 complete (T27–T30, T36) + PHASES.md
+
+* **Task:** Implement Phase 1 (R1–R10) and split the plan into definite phases
+* **Status:** DONE — 27/27 tests, typecheck clean, smoke PASSED (Nightmare, 60 Hz), browser-verified, all ports clear
+* **Files (created):** `NoBu-Shooter/server/src/core.ts` (transport-agnostic GameServer), `server/src/loop.ts` (hybrid fixed-step loop), `server/src/parentWatch.ts`, `emulator/src/parentWatch.ts`, `client/src/net/bindStore.ts`, `scripts/lib/procs.mjs`, `scripts/vite-dev.mjs`, `tests/netcode.test.ts`, `tsconfig.node.json`, `PHASES.md`
+* **Files (edited):** `server/src/main.ts` (WS adapter only), `server/src/game/room.ts`, `server/src/bots.ts`, `server/src/game/spawn.ts`, `shared/src/sim/movement.ts` + `index.ts` (`settlePosition`), `emulator/src/{pipeline,session,control,main}.ts`, `client/src/net/{NetClient,EmulatorClient}.ts` (NetClient rewritten), `client/src/game/ArenaScene.ts`, `client/src/ui/{App,ABCompare,NetworkLab,PacketFlowStrip,store}.tsx/.ts`, `scripts/{demo,smoke,headless-bot}.mjs`, `tests/rules.test.ts`, `NoBu-Shooter/package.json` (+`tsx` 4.19.2 devDep, `typecheck` script), `package.json` (root `typecheck`), `package-lock.json`, `GAMERULES.md` (refs), `README.md`, `NoBu-Shooter/README.md`, `docs/{ASSUMPTIONS,DEMO_SCRIPT,PROTOCOL}.md`
+* **Files (moved/deleted):** `SPEC.md` → `docs/archive/SPEC-v1.md` (+archive banner); `ROADMAP.md` → `PHASES.md` (rewritten); deleted `NoBu-Shooter/docs/` (identical duplicate of `docs/`), root `tests/` (stale copy, never ran), `NoBu-Shooter/tests/reconciliation.test.ts` (tautological; superseded by `netcode.test.ts`)
+* **Details / measured:**
+  - Baseline corrections 6/s → 0/s (B1: redundancy-off sent only newest input). Harness verified to catch it (old code → 169 corrections).
+  - Interpolation now real (clock-offset EMA); test asserts remote drawn 8–40 px behind latest snapshot.
+  - Input→Screen: 17 ms (prediction) vs ~340 ms (prediction off, 90 ms one-way); A/B 236 vs 17 ms.
+  - Server CPU 100 % core → 0.9 % (Windows timers ~15.6 ms; hybrid sleep + final-ms yield).
+  - Launcher: hard-killing `demo.mjs` → children exit by themselves within ~1 s (verified).
+  - Reorder default 40 → 80 ms (40 ms reordering is fully absorbed by the server's sorted input queue; see ASSUMPTIONS #10).
+* **Notes / Errors:** `npm install` warns that esbuild's postinstall is blocked by npm allow-scripts; tsx works regardless (verified). Node 26 prints a `module.register()` deprecation from tsx; suppressed with `--no-deprecation` in launched children.
+
+### 2026-10-09 — Claude (Opus 5.5) — T26: Project analysis and Roadmap v2
+
+* **Task:** Analyse project against demo goals; plan improvements
+* **Status:** DONE (analysis/plan only — no source files changed)
+* **Files:** `ROADMAP.md` (created), `log.md` (tasks T26–T36)
+* **Details:**
+  - Read all server/client/emulator/test sources; ran `npm run demo` and drove it with playwright-core (installed in the session scratchpad, NOT the repo) using local Chrome (`channel: 'chrome'`).
+  - Verified live: Baseline preset shows 6 corrections/s, 3.3 px error (B1 — redundancy-off sends only newest input; half of inputs never sent). Interpolation is a no-op (B2 — clockOffset never set, server `st` is room-relative). Input→Screen always 0 (B3). Bots freeze against pillars (no LOS). Death particles last 40 ms. Server busy-spins via setImmediate. Tests in `tests/reconciliation.test.ts` never exercise NetClient/Room.
+  - Owner decisions: implement ALL sync models (full snapshot, delta, state+extrapolation, lockstep) as selectable modes; transport realism via UDP (server+emulator+Node net-players) plus WS for the browser; no TCP mode.
+  - Full findings + phased plan in `ROADMAP.md`.
+* **Notes / Errors:** No Playwright MCP tool was available to the agent; used playwright-core from scratchpad instead. `scripts/demo.mjs` orphans child processes on Windows when stopped — had to kill PIDs on 8080/9000/9001/5173 manually. All ports verified clear at end.
+
+### 2026-10-08 20:54 — Gemini — Terminated all running demo & server instances
+
+* **Task:** Terminate all running instances
+* **Status:** DONE
+* **Files:** None (Process management)
+* **Details:**
+  - Cancelled and killed background daemon task `task-265` (`node scripts/demo.mjs`).
+  - Confirmed all child processes and listeners on ports 5173 (client), 8080 (game server), 9000 (emulator data), and 9001 (emulator control) exited cleanly.
+  - Verified 0 background tasks and 0 open sockets remaining.
+
+### 2026-10-08 20:25 — Gemini — Completed T22–T25: Responsive layout, Emulator sync, Settings & Controls modals
+
+* **Task:** Finish remaining planned bugs from commit message and audit (T22–T25, 4A, 4B, 5A, 5B, 6B)
+* **Status:** DONE
+* **Files:** `global.css`, `GameContainer.tsx`, `App.tsx`, `Hud.tsx`, `NetworkLab.tsx`, `ABCompare.tsx`, `settings.ts`, `SettingsPanel.tsx`, `ControlsOverlay.tsx`, `log.md`
+* **Details:**
+  - T22 (Bugs 1A, 1B): Set `--panel-w: clamp(280px, 26vw, 420px)`, added `min-height: 0` and `min-width: 0` to `.arena-canvas-container`, added ResizeObserver in GameContainer.tsx to trigger `scale.refresh()`. Responsive panel auto-collapse on narrow viewports in App.tsx.
+  - T23 (Bugs 4A, 4B): Added helpful timeout/offline error guidance in Hud.tsx informing the user to launch `npm run demo`. Synced NetworkLab sliders and preset selector to `emulatorState` events from emulator websocket.
+  - T24 (Bug 5A): Implemented `settings.ts` with `localStorage` persistence and `SettingsPanel.tsx` modal (mouse sensitivity, graphics quality, ghost toggle, audio volume, Esc shortcut).
+  - T25 (Bug 5B): Implemented `ControlsOverlay.tsx` with all flight, combat, emulator presets (1-5), and netcode toggles (P/R/I/G). Added quick launcher buttons in Hud.tsx and F1 / Esc hotkeys in App.tsx.
+  - Bug 6B: Suppressed global store overwrite in `ABCompare.tsx` when running side-by-side clients.
+  - Verification: Vitest passes 18/18; headless smoke bot completed 227 snapshots at 60 Hz under Nightmare preset with 0 errors; client builds cleanly with Vite.
+
+### 2026-10-08 20:15 — Gemini — Fixed client build types, Bug 2B, 3A, 6A, 2A, 4C, 6C, 6D
+
+* **Task:** Client compiler fix and bug fixes T18–T21, 4C, 6C, 6D
+* **Status:** WORKING (T22 next)
+* **Files:** `ArenaScene.ts`, `NetClient.ts`, `EmulatorClient.ts`, `log.md`
+* **Details:**
+  - Fixed readonly array casting in ArenaScene.ts and NetClient.ts.
+  - Defined LinkConfig in EmulatorClient.ts and capped reconnect retries at 5 with exponential backoff / state fetch on open.
+  - Implemented reorderedIgnored vs duplicatesIgnored tracking in NetClient.ts.
+  - Fixed aim coordinates to worldX/Y, guarded projectile trails against NaN dx/dy, removed duplicate updateMetrics in ArenaScene.ts, moved key polling into update().
+  - Client compiles cleanly with `npm run build` and tests pass 18/18.
+
+### 2026-10-08 19:50 — Claude (Sonnet 4.6) — Bug audit: identified 16 bugs, planned fixes T18–T25
+
+* **Task:** Identify bugs in NoBu-Shooter and plan fixes per commit message
+* **Status:** DONE (analysis only — no files changed)
+* **Files:** `log.md` (updated tasks)
+* **Details:**
+  - Read all source files: ArenaScene.ts, GameContainer.tsx, NetClient.ts, EmulatorClient.ts, NetworkLab.tsx, App.tsx, ABCompare.tsx, Hud.tsx, store.ts, global.css, emulator/src/* (pipeline, session, control, main)
+  - Found 16 bugs across 5 categories matching commit message + 6 additional
+  - Critical: aim angle uses screen-space coords vs arena-space (Bug 2B) — one-line fix with `ptr.worldX/Y`
+  - High: projectile trail renders NaN from `proj.dx/dy=undefined` causing persistent GPU artifacts (Bug 3A)
+  - High: `updateMetrics()` double-called from both ArenaScene and NetworkLab, resetting counters mid-window → bandwidth always ~0 (Bug 6A)
+  - High: key polling in `events.on('update')` duplicates `update()` callback; stale key objects on scene restart (Bug 2A)
+  - Medium: panel fixed 360px, arena container missing `min-height:0` (Bugs 1A+1B)
+  - Emulator architecture is correct (standalone proxy on :9000/:9001); issues are UX only (Bugs 4A+4B)
+  - Feature gaps: no settings panel, no in-game controls reference (Bugs 5A+5B)
+  - Full analysis with root causes, file line references, and fix code in `brain/bug_analysis.md`
+  - Recommended fix order: 2B → 3A → 6A → 2A → 1A+1B → 4A+4B → 5A+5B → remaining
 
 ### 2026-10-08 00:16 — Gemini — Comprehensive .gitignore and Quickstart Guide block
 

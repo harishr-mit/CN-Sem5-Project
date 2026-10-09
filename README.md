@@ -4,6 +4,8 @@ A real-time multiplayer arena shooter demonstrating client-side prediction, serv
 
 > The game is the demo application; the networking is the point.
 
+**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases, each ending with a demoable checkpoint. Phase 1 (correct core netcode) is complete.
+
 ---
 
 ## 🚀 Quickstart Guide (Fresh Clone Setup)
@@ -57,7 +59,7 @@ Run the orchestrator script to concurrently start the Game Server, Network Emula
 npm run demo
 ```
 
-This single command starts:
+This single command checks that the ports are free and starts:
 - **Game Server** on `ws://localhost:8080` (authoritative physics & tick loop)
 - **Network Emulator** on `ws://localhost:9000` (proxy) and `ws://localhost:9001` (control/telemetry)
 - **Vite Web Client** on `http://localhost:5173`
@@ -65,7 +67,9 @@ This single command starts:
 Once started, open your browser to:
 👉 **[http://localhost:5173](http://localhost:5173)**
 
-Click **Quick Match** or **Practice vs Bots** to jump into the arena!
+Click **Quick Match (vs bots)** to play, or **Network Lab — A/B Compare** to compare netcode settings side by side.
+
+Stop everything with `Ctrl+C` — all four ports are released. (If the launcher is killed some other way, its child processes notice within ~1 s and exit by themselves.)
 
 ---
 
@@ -74,8 +78,12 @@ Click **Quick Match** or **Practice vs Bots** to jump into the arena!
 Ensure your environment passes all test suites and the headless end-to-end simulation:
 
 ```bash
-# Run unit and integration tests (18 tests across sim, protocol, reconciliation, emulator, rules)
+# Run unit and integration tests (27 tests: sim, protocol, emulator pipeline, game rules,
+# and an end-to-end netcode harness: real server + client + emulator pipeline on fake timers)
 npm test
+
+# Type-check server, emulator, shared code, tests and client
+npm run typecheck
 
 # Run the automated headless bot smoke test through the emulator under Nightmare preset
 npm run smoke
@@ -91,12 +99,16 @@ npm run smoke
 | **Aim** | Mouse cursor |
 | **Shoot** | Hold Left Click |
 | **Toggle Network Lab** | `Tab` |
+| **Netcode toggles** | `P` prediction, `R` reconciliation, `I` interpolation, `G` ghost |
+| **Controls / Settings** | `F1` / `Esc` |
 | **Network Presets** | Keys `1` through `5` |
-| **Preset 1** | Perfect LAN (0 ms latency, 0% loss) |
-| **Preset 2** | Good Broadband (35 ms, 0% loss) |
-| **Preset 3** | Bad Wi-Fi (85 ms ± 20 ms jitter, 2% loss) |
-| **Preset 4** | Congested 4G (180 ms ± 40 ms jitter, 6% loss) |
-| **Preset 5** | Nightmare (320 ms ± 100 ms jitter, 15% loss, 3% dup, reorder) |
+| **Preset 1** | Baseline (no impairment) |
+| **Preset 2** | Café Wi-Fi (25 ms ± 15 ms jitter, 1% loss) |
+| **Preset 3** | Mobile 4G (45 ms ± 25 ms jitter, 2% loss, 5 Mbps) |
+| **Preset 4** | Transatlantic (90 ms ± 8 ms jitter, 0.5% loss) |
+| **Preset 5** | Nightmare (120 ms ± 50 ms jitter, 12% burst loss, 3% dup, 5% reorder, 400 kbps) |
+
+Latencies are one-way, applied in each direction (RTT ≈ 2 × latency).
 | **A/B Compare Mode** | Click **A/B Compare** button in Network Lab header |
 
 ---
@@ -107,19 +119,22 @@ npm run smoke
 CN-Sem5-Project/
 ├── .gitignore              # Ignores all node_modules, build artifacts, envs, caches
 ├── README.md               # Quickstart guide & documentation overview
+├── PHASES.md               # Project goals and phased plan (current status)
+├── GAMERULES.md            # Gameplay rules and game constants
 ├── package.json            # Root workspace scripts & postinstall hook
-├── log.md                  # Development & task tracking log
-├── docs/                   # Specifications and protocol documentation
-│   ├── PROTOCOL.md         # Wire protocol specifications (binary format, opcodes)
-│   ├── DEMO_SCRIPT.md      # Step-by-step walkthrough for project demonstrations
-│   └── ASSUMPTIONS.md      # Architecture design decisions & assumptions
+├── log.md                  # Development & task tracking log (agents)
+├── docs/
+│   ├── PROTOCOL.md         # Wire protocol (JSON messages) and emulator control API
+│   ├── DEMO_SCRIPT.md      # Step-by-step walkthrough with expected numbers
+│   ├── ASSUMPTIONS.md      # Design decisions and their reasons
+│   └── archive/SPEC-v1.md  # Original v1 build spec (archived)
 └── NoBu-Shooter/           # Primary application workspace
     ├── client/             # Phaser 3 + React HUD & Network Lab UI (Vite)
     ├── emulator/           # Standalone bidirectional network impairment proxy
     ├── server/             # Authoritative 60 Hz headless WebSocket game server
     ├── shared/             # Deterministic simulation, math, and protocol codec
-    ├── scripts/            # Demo launcher and headless bot smoke test
-    └── tests/              # Vitest unit & integration test suites
+    ├── scripts/            # Demo launcher, smoke test, headless bot
+    └── tests/              # Vitest suites incl. the end-to-end netcode harness
 ```
 
 ---
@@ -146,8 +161,8 @@ CN-Sem5-Project/
 
 ## 🛠️ Troubleshooting & FAQ
 
-- **Port in use (`EADDRINUSE: 8080` / `9000` / `9001` / `5173`)**:
-  Ensure any prior demo process was stopped. You can find and terminate processes holding these ports (e.g., in Windows PowerShell: `Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Stop-Process -Force`).
+- **"Port(s) already in use" on start**:
+  `npm run demo` checks ports 5173/8080/9000/9001 first and prints the command to free them. Usually a previous demo is still running. You can find and terminate processes holding these ports (e.g., in Windows PowerShell: `Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Stop-Process -Force`).
 - **Dependencies not found after pulling**:
   Run `npm install` at root, or run `cd NoBu-Shooter && npm install`.
 - **Canvas render error or blank page**:

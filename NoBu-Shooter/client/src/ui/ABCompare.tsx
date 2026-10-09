@@ -1,8 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NetClient } from '../net/NetClient.js';
 import { EmulatorClient } from '../net/EmulatorClient.js';
 import { GameContainer } from '../game/GameContainer.js';
 import { NetworkLab } from './NetworkLab.js';
+
+const EMULATOR_DATA_URL = 'ws://127.0.0.1:9000';
 
 interface ABCompareProps {
   playerName: string;
@@ -11,7 +13,7 @@ interface ABCompareProps {
 
 export const ABCompare: React.FC<ABCompareProps> = ({ playerName, onExit }) => {
   const [netClientA] = useState(() => {
-    const cli = new NetClient('ws://127.0.0.1:9000?label=Client_A', `${playerName}_A`, 'lab');
+    const cli = new NetClient({ url: EMULATOR_DATA_URL, name: `${playerName}_A`, room: 'lab', labelPrefix: 'A' });
     cli.toggles.prediction = false;
     cli.toggles.interpolation = false;
     cli.toggles.reconciliation = false;
@@ -20,7 +22,7 @@ export const ABCompare: React.FC<ABCompareProps> = ({ playerName, onExit }) => {
   });
 
   const [netClientB] = useState(() => {
-    const cli = new NetClient('ws://127.0.0.1:9000?label=Client_B', `${playerName}_B`, 'lab');
+    const cli = new NetClient({ url: EMULATOR_DATA_URL, name: `${playerName}_B`, room: 'lab', labelPrefix: 'B' });
     cli.toggles.prediction = true;
     cli.toggles.interpolation = true;
     cli.toggles.reconciliation = true;
@@ -35,7 +37,7 @@ export const ABCompare: React.FC<ABCompareProps> = ({ playerName, onExit }) => {
   const [metricsA, setMetricsA] = useState({ ...netClientA.metrics });
   const [metricsB, setMetricsB] = useState({ ...netClientB.metrics });
 
-  // Connect clients
+  // Connect clients. A/B panes are deliberately NOT bound to the global store.
   useEffect(() => {
     netClientA.connect();
     netClientB.connect();
@@ -44,69 +46,39 @@ export const ABCompare: React.FC<ABCompareProps> = ({ playerName, onExit }) => {
     return () => {
       netClientA.disconnect();
       netClientB.disconnect();
+      emulatorClient.close();
     };
   }, [netClientA, netClientB, emulatorClient]);
 
-  // Synchronize inputs across both clients
+  // Keyboard is polled by each pane's Phaser scene; the mouse button is
+  // shared here so firing/aim intent reaches both clients.
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
-      let k = 0;
-      if (e.code === 'KeyW' || e.code === 'ArrowUp') k |= 1;
-      if (e.code === 'KeyS' || e.code === 'ArrowDown') k |= 2;
-      if (e.code === 'KeyA' || e.code === 'ArrowLeft') k |= 4;
-      if (e.code === 'KeyD' || e.code === 'ArrowRight') k |= 8;
-      netClientA.keys |= k;
-      netClientB.keys |= k;
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
-      let mask = ~0;
-      if (e.code === 'KeyW' || e.code === 'ArrowUp') mask &= ~1;
-      if (e.code === 'KeyS' || e.code === 'ArrowDown') mask &= ~2;
-      if (e.code === 'KeyA' || e.code === 'ArrowLeft') mask &= ~4;
-      if (e.code === 'KeyD' || e.code === 'ArrowRight') mask &= ~8;
-      netClientA.keys &= mask;
-      netClientB.keys &= mask;
-    };
-
     const handleMouseDown = (e: MouseEvent) => {
       if (e.button === 0) {
         netClientA.fireDown = true;
         netClientB.fireDown = true;
       }
     };
-
     const handleMouseUp = (e: MouseEvent) => {
       if (e.button === 0) {
         netClientA.fireDown = false;
         netClientB.fireDown = false;
       }
     };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mouseup', handleMouseUp);
-
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [netClientA, netClientB]);
 
-  // Sample metrics for comparison readout
+  // Sample metrics for the comparison readout (NetClient computes them at 5 Hz)
   useEffect(() => {
     const timer = setInterval(() => {
-      netClientA.updateMetrics();
-      netClientB.updateMetrics();
       setMetricsA({ ...netClientA.metrics });
       setMetricsB({ ...netClientB.metrics });
     }, 200);
-
     return () => clearInterval(timer);
   }, [netClientA, netClientB]);
 

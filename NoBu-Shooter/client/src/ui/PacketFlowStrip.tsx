@@ -5,6 +5,26 @@ import type { PacketEvent } from '../net/EmulatorClient.js';
 interface PacketFlowStripProps {
   onToggleInspector?: () => void;
   isInspectorOpen?: boolean;
+  /** Emulator session label of the viewing client (NetClient.label); only its packets are drawn. */
+  sessionLabel?: string;
+}
+
+interface LinkDefaults {
+  latencyMs?: number; jitterMs?: number; lossPct?: number; bandwidthKbps?: number;
+  duplicatePct?: number; reorderPct?: number; lossModel?: string;
+}
+
+/** Short chips describing the active impairments, e.g. "LAT 120" "LOSS 12%". */
+function impairmentChips(d: LinkDefaults | undefined): string[] {
+  if (!d) return [];
+  const chips: string[] = [];
+  if (d.latencyMs) chips.push(`LAT ${d.latencyMs}`);
+  if (d.jitterMs) chips.push(`JIT ±${d.jitterMs}`);
+  if (d.lossPct) chips.push(`LOSS ${d.lossPct}%${d.lossModel === 'burst' ? ' B' : ''}`);
+  if (d.bandwidthKbps) chips.push(`BW ${d.bandwidthKbps >= 1000 ? `${d.bandwidthKbps / 1000}M` : `${d.bandwidthKbps}k`}`);
+  if (d.duplicatePct) chips.push(`DUP ${d.duplicatePct}%`);
+  if (d.reorderPct) chips.push(`REORD ${d.reorderPct}%`);
+  return chips;
 }
 
 interface AnimatedDot {
@@ -21,26 +41,33 @@ interface AnimatedDot {
 export const PacketFlowStrip: React.FC<PacketFlowStripProps> = ({
   onToggleInspector,
   isInspectorOpen = false,
+  sessionLabel,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const packetEvents = useGameStore((s) => s.packetEvents);
+  const packetTotal = useGameStore((s) => s.packetTotal);
   const emulatorStats = useGameStore((s) => s.emulatorStats);
+  const emulatorState = useGameStore((s) => s.emulatorState) as { defaults?: LinkDefaults } | null;
 
   const dotsRef = useRef<AnimatedDot[]>([]);
   const nextDotId = useRef(1);
-  const lastProcessedIdx = useRef(0);
+  const lastProcessedTotal = useRef(0);
+  const chipsRef = useRef<string[]>([]);
+  chipsRef.current = impairmentChips(emulatorState?.defaults);
 
-  // Read active impairments from emulatorStats or state
-  const upStats = emulatorStats[0]?.up;
-  const downStats = emulatorStats[0]?.down;
+  const mySid = sessionLabel ? emulatorStats.find((s) => s.label === sessionLabel)?.id : undefined;
 
-  // Process incoming packet events into animated dots
+  // Process incoming packet events into animated dots. The store keeps only
+  // the last 300 events, so new ones are found via the monotonic total.
   useEffect(() => {
-    if (packetEvents.length === 0) return;
-    const newEvents = packetEvents.slice(lastProcessedIdx.current);
-    lastProcessedIdx.current = packetEvents.length;
+    const fresh = Math.min(packetTotal - lastProcessedTotal.current, packetEvents.length);
+    lastProcessedTotal.current = packetTotal;
+    if (fresh <= 0) return;
+    const newEvents = packetEvents
+      .slice(packetEvents.length - fresh)
+      .filter((ev) => !sessionLabel || ev.sid === mySid);
 
-    // Limit intake to prevent dot flooding (at most 20 dots added per batch)
+    // Limit intake to prevent dot flooding
     const sampled = newEvents.slice(-15);
     for (const ev of sampled) {
       const color =
@@ -82,7 +109,7 @@ export const PacketFlowStrip: React.FC<PacketFlowStripProps> = ({
     if (dotsRef.current.length > 80) {
       dotsRef.current = dotsRef.current.slice(-60);
     }
-  }, [packetEvents]);
+  }, [packetEvents, packetTotal, sessionLabel, mySid]);
 
   // Main canvas animation loop (60 FPS)
   useEffect(() => {
@@ -95,17 +122,26 @@ export const PacketFlowStrip: React.FC<PacketFlowStripProps> = ({
 
       const canvas = canvasRef.current;
       if (canvas) {
+        // Match the backing store to the displayed size so text isn't stretched
+        const dpr = window.devicePixelRatio || 1;
+        const cssW = canvas.clientWidth || 1280;
+        const cssH = canvas.clientHeight || 72;
+        if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
+          canvas.width = Math.round(cssW * dpr);
+          canvas.height = Math.round(cssH * dpr);
+        }
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          const w = canvas.width;
-          const h = canvas.height;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          const w = cssW;
+          const h = cssH;
 
           ctx.clearRect(0, 0, w, h);
 
-          // Geometry
-          const leftNodeX = 60;
-          const rightNodeX = w - 60;
-          const boxW = 160;
+          // Geometry (right side leaves room for the inspector button)
+          const leftNodeX = 70;
+          const rightNodeX = w - 230;
+          const boxW = 270;
           const boxH = 52;
           const boxX = w / 2 - boxW / 2;
           const boxY = (h - boxH) / 2;
@@ -137,10 +173,10 @@ export const PacketFlowStrip: React.FC<PacketFlowStripProps> = ({
           ctx.beginPath();
           ctx.arc(leftNodeX, upLaneY, 5, 0, Math.PI * 2);
           ctx.fill();
-          ctx.font = '10px "Rajdhani", sans-serif';
+          ctx.font = '600 12px "Rajdhani", sans-serif';
           ctx.fillStyle = '#e8eaf6';
           ctx.textAlign = 'right';
-          ctx.fillText('YOU', leftNodeX - 10, h / 2 + 4);
+          ctx.fillText('YOU', leftNodeX - 12, h / 2 + 4);
 
           // Draw SERVER node (right)
           ctx.fillStyle = '#b6ff3b';
@@ -148,7 +184,7 @@ export const PacketFlowStrip: React.FC<PacketFlowStripProps> = ({
           ctx.arc(rightNodeX, downLaneY, 5, 0, Math.PI * 2);
           ctx.fill();
           ctx.textAlign = 'left';
-          ctx.fillText('SERVER', rightNodeX + 10, h / 2 + 4);
+          ctx.fillText('SERVER', rightNodeX + 12, h / 2 + 4);
 
           // Draw EMULATOR center box
           ctx.fillStyle = 'rgba(10, 8, 26, 0.9)';
@@ -158,13 +194,15 @@ export const PacketFlowStrip: React.FC<PacketFlowStripProps> = ({
           ctx.strokeRect(boxX, boxY, boxW, boxH);
 
           ctx.textAlign = 'center';
-          ctx.fillStyle = 'var(--c-text)';
+          ctx.fillStyle = '#e8eaf6';
           ctx.font = '11px "Orbitron", sans-serif';
           ctx.fillText('EMULATOR', w / 2, boxY + 16);
 
+          const chips = chipsRef.current;
           ctx.font = '9px "JetBrains Mono", monospace';
-          ctx.fillStyle = 'rgba(232, 234, 246, 0.6)';
-          ctx.fillText('IMPAIRMENT ENGINE', w / 2, boxY + 30);
+          ctx.fillStyle = chips.length ? '#ffb300' : 'rgba(232, 234, 246, 0.6)';
+          const chipText = chips.length ? chips.join(' · ') : 'NO IMPAIRMENT';
+          ctx.fillText(chipText.length > 46 ? chipText.slice(0, 45) + '…' : chipText, w / 2, boxY + 32);
 
           // Animate and draw dots
           const aliveDots: AnimatedDot[] = [];

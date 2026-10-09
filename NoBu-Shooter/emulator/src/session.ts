@@ -10,6 +10,9 @@ import type { Packet, LinkConfig, PacketEvent } from './pipeline.js';
 
 let nextSessionId = 1;
 
+/** Each frame is accounted as if it were a UDP datagram (SPEC.md §11.2). */
+const UDP_IP_HEADER_BYTES = 28;
+
 export class Session {
   readonly id: string;
   readonly label: string;
@@ -45,7 +48,7 @@ export class Session {
 
   handleClientMessage(raw: Buffer | string): void {
     const data = raw.toString();
-    const pkt: Packet = { data, size: data.length + 28 };
+    const pkt: Packet = { data, size: Buffer.byteLength(data) + UDP_IP_HEADER_BYTES };
     this.pipeline.process(
       pkt, this.upLink,
       (p) => {
@@ -67,7 +70,7 @@ export class Session {
     // Server → Client (downstream)
     this.upstreamWs.on('message', (raw: Buffer | string) => {
       const data = raw.toString();
-      const pkt: Packet = { data, size: data.length + 28 };
+      const pkt: Packet = { data, size: Buffer.byteLength(data) + UDP_IP_HEADER_BYTES };
       this.pipeline.process(
         pkt, this.downLink,
         (p) => {

@@ -14,6 +14,7 @@ function getArg(name, def) {
 const targetUrl = getArg('--url', 'ws://127.0.0.1:9000?label=HeadlessBot');
 const durationSec = parseInt(getArg('--duration', '10'), 10);
 const botName = getArg('--name', 'SMOKE_BOT');
+const minTickHz = Number(getArg('--min-tick-hz', '0'));
 
 console.log(`[bot] Connecting to ${targetUrl} (duration: ${durationSec}s)...`);
 
@@ -51,6 +52,7 @@ ws.on('message', (raw) => {
   try {
     const msg = JSON.parse(raw.toString());
     if (msg.t === 'welcome') {
+      if (playerId !== null) return; // duplicated welcome (emulator duplication)
       if (helloInterval) {
         clearInterval(helloInterval);
         helloInterval = null;
@@ -86,15 +88,15 @@ function startInputLoop() {
     send({ t: 'ping', id: 1, ct: Date.now() });
   }, 500);
 
-  // Inputs at 30 Hz
+  // 60 inputs/s sent as 2 per message at 30 Hz, like the real client
   inputInterval = setInterval(() => {
-    seq++;
-    // Move in a small circular pattern
-    const k = [1, 8, 2, 4][seq % 4];
-    send({
-      t: 'input',
-      inputs: [{ s: seq, k, a: 0, f: 0 }],
-    });
+    const inputs = [];
+    for (let i = 0; i < 2; i++) {
+      seq++;
+      const k = [1, 8, 2, 4][Math.floor(seq / 30) % 4]; // small square
+      inputs.push({ s: seq, k, a: 0, f: 0 });
+    }
+    send({ t: 'input', inputs });
   }, 1000 / 30);
 }
 
@@ -109,12 +111,14 @@ setTimeout(() => {
   console.log(`  Last snapshot tick: ${lastSnapTick}`);
   console.log(`  Server tick rate:   ${serverTickHz} Hz`);
 
-  const ok = snapshotsReceived > 50 && highestAck > 0;
+  const tickOk = serverTickHz >= minTickHz;
+  if (!tickOk) console.error(`[bot] Server tick rate ${serverTickHz} Hz is below ${minTickHz} Hz`);
+  const ok = snapshotsReceived > 50 && highestAck > 0 && tickOk;
   if (ok) {
     console.log('\x1b[32m[bot] SMOKE TEST PASSED\x1b[0m');
     process.exit(0);
   } else {
-    console.error('\x1b[31m[bot] SMOKE TEST FAILED (insufficient snapshots or acks)\x1b[0m');
+    console.error('\x1b[31m[bot] SMOKE TEST FAILED (insufficient snapshots, acks or tick rate)\x1b[0m');
     process.exit(1);
   }
 }, durationSec * 1000);

@@ -6,8 +6,9 @@
 import { create } from 'zustand';
 import type { MsgSnap, GameEvent } from '@nobu/shared/protocol';
 import type { EmulatorStats, PacketEvent } from '../net/EmulatorClient.js';
+import type { ConnectionStatus } from '../net/NetClient.js';
 
-export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'timeout' | 'error';
+export type { ConnectionStatus };
 export type EmulatorStatus = 'offline' | 'connecting' | 'connected' | 'error';
 
 export interface KillFeedEntry {
@@ -25,9 +26,10 @@ interface GameState {
   emulatorStats: EmulatorStats[];
   emulatorState: unknown;
   packetEvents: PacketEvent[];
+  /** Total packet events ever received (monotonic), so consumers can find new ones. */
+  packetTotal: number;
   killFeed: KillFeedEntry[];
   events: GameEvent[];
-  seenEventIds: Set<number>;
   nextKillId: number;
 
   // Actions
@@ -49,9 +51,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   emulatorStats: [],
   emulatorState: null,
   packetEvents: [],
+  packetTotal: 0,
   killFeed: [],
   events: [],
-  seenEventIds: new Set(),
   nextKillId: 1,
 
   setConnectionStatus: (s) => set({ connectionStatus: s }),
@@ -62,7 +64,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setEmulatorState: (state) => set({ emulatorState: state }),
 
   addPacketEvents: (evs) => set(state => ({
-    packetEvents: [...state.packetEvents.slice(-300), ...evs],
+    packetEvents: [...state.packetEvents, ...evs].slice(-300),
+    packetTotal: state.packetTotal + evs.length,
   })),
 
   addEvent: (ev) => {

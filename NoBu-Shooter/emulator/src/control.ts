@@ -11,27 +11,19 @@ import type { LinkConfig, PacketEvent } from './pipeline.js';
 import { DEFAULT_LINK_CONFIG } from './pipeline.js';
 
 // ── Presets per SPEC.md §11.5 ────────────────────────────────
-export const PRESETS: Record<string, Partial<LinkConfig>> = {
-  Baseline: {
-    latencyMs: 0, jitterMs: 0, lossPct: 0, duplicatePct: 0,
-    reorderPct: 0, bandwidthKbps: 0,
-  },
-  'Café Wi-Fi': {
-    latencyMs: 25, jitterMs: 15, lossPct: 1, duplicatePct: 0,
-    reorderPct: 0, bandwidthKbps: 0,
-  },
-  'Mobile 4G': {
-    latencyMs: 45, jitterMs: 25, lossPct: 2, duplicatePct: 0,
-    reorderPct: 0, bandwidthKbps: 5000,
-  },
-  Transatlantic: {
-    latencyMs: 90, jitterMs: 8, lossPct: 0.5, duplicatePct: 0,
-    reorderPct: 0, bandwidthKbps: 0,
-  },
-  Nightmare: {
+// Every preset is a complete LinkConfig so switching presets never leaves
+// settings from the previous one behind (e.g. burst loss after Nightmare).
+const preset = (p: Partial<LinkConfig>): LinkConfig => ({ ...DEFAULT_LINK_CONFIG, ...p });
+
+export const PRESETS: Record<string, LinkConfig> = {
+  Baseline: preset({}),
+  'Café Wi-Fi': preset({ latencyMs: 25, jitterMs: 15, lossPct: 1 }),
+  'Mobile 4G': preset({ latencyMs: 45, jitterMs: 25, lossPct: 2, bandwidthKbps: 5000 }),
+  Transatlantic: preset({ latencyMs: 90, jitterMs: 8, lossPct: 0.5 }),
+  Nightmare: preset({
     latencyMs: 120, jitterMs: 50, lossPct: 12, lossModel: 'burst', burstLen: 4,
     duplicatePct: 3, reorderPct: 5, bandwidthKbps: 400,
-  },
+  }),
 };
 
 // ─── Control server ───────────────────────────────────────────
@@ -39,6 +31,8 @@ export class ControlServer {
   private wss: WebSocketServer;
   private sessions: Map<string, Session>;
   private defaults: LinkConfig = { ...DEFAULT_LINK_CONFIG };
+  /** Name of the preset last applied to "all", or "Custom" after a manual change. */
+  private activePreset = 'Baseline';
   private controlClients = new Set<WebSocket>();
 
   getDefaults(): LinkConfig {
@@ -89,8 +83,10 @@ export class ControlServer {
 
   private flushPacketEvents(): void {
     if (this.packetSubscribers.size === 0 || this.packetBuffer.length === 0) return;
-    // Sample at most 60 items
-    const items = this.packetBuffer.splice(0, 60);
+    // At most 60 items per batch; keep the newest so the UI shows what is
+    // happening now rather than a growing backlog.
+    const items = this.packetBuffer.slice(-60);
+    this.packetBuffer = [];
     const msg = JSON.stringify({ evt: 'packets', items });
     for (const ws of this.packetSubscribers) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
@@ -110,6 +106,7 @@ export class ControlServer {
 
         if (target === 'all') {
           Object.assign(this.defaults, patch);
+          this.activePreset = 'Custom';
           for (const session of this.sessions.values()) {
             session.applyConfig(direction, patch);
           }
@@ -128,7 +125,8 @@ export class ControlServer {
         const target = cmd['target'] as string ?? 'all';
 
         if (target === 'all') {
-          Object.assign(this.defaults, preset);
+          this.defaults = { ...preset };
+          this.activePreset = name;
           for (const session of this.sessions.values()) {
             session.applyConfig('both', preset);
           }
@@ -145,6 +143,7 @@ export class ControlServer {
         const baseConfig = { ...DEFAULT_LINK_CONFIG };
         if (target === 'all') {
           this.defaults = { ...DEFAULT_LINK_CONFIG };
+          this.activePreset = 'Baseline';
           for (const session of this.sessions.values()) {
             session.applyConfig('both', baseConfig);
           }
@@ -178,23 +177,22 @@ export class ControlServer {
       [...this.sessions.values()].find(s => s.label === target);
   }
 
-  private sendState(ws: WebSocket): void {
-    const msg = JSON.stringify({
+  private stateMessage(): string {
+    return JSON.stringify({
       evt: 'state',
       sessions: [...this.sessions.values()].map(s => s.getState()),
       defaults: this.defaults,
+      preset: this.activePreset,
       presets: Object.keys(PRESETS),
     });
-    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+  }
+
+  private sendState(ws: WebSocket): void {
+    if (ws.readyState === WebSocket.OPEN) ws.send(this.stateMessage());
   }
 
   private broadcastState(): void {
-    const msg = JSON.stringify({
-      evt: 'state',
-      sessions: [...this.sessions.values()].map(s => s.getState()),
-      defaults: this.defaults,
-      presets: Object.keys(PRESETS),
-    });
+    const msg = this.stateMessage();
     for (const ws of this.controlClients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
     }
@@ -207,6 +205,7 @@ export class ControlServer {
       t: now,
       sessions: [...this.sessions.values()].map(s => ({
         id: s.id,
+        label: s.label,
         up: s.upLink.getStats(now),
         down: s.downLink.getStats(now),
       })),

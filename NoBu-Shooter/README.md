@@ -16,6 +16,11 @@ npm run demo
 # Run all test suites
 npm test
 
-# Run headless bot smoke test
+# Type-check server, emulator, shared, tests and client
+npm run typecheck
+
+# Run headless bot smoke test (through the emulator, Nightmare preset)
 npm run smoke
 ```
+
+Project phases and status: [`../PHASES.md`](../PHASES.md).

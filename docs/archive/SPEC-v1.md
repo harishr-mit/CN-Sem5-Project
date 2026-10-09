@@ -1,3 +1,5 @@
+> **ARCHIVED (2026-10-09).** This is the v1 build specification the project was first built from. It is kept for reference only. Current goals and phases: `PHASES.md`. Gameplay rules: `GAMERULES.md`. Where this file and the code disagree, the code and `docs/` win.
+
 # NoBu Shooter — Build Specification
 
 **Audience:** the implementing agent. Read this file and `GAMERULES.md` completely before writing code.

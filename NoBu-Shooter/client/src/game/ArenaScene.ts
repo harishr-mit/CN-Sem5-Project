@@ -14,6 +14,7 @@ import Phaser from 'phaser';
 import type { NetClient, CorrectionEvent } from '../net/NetClient.js';
 import type { PlayerSnap, ProjectileSnap, GameEvent } from '@nobu/shared/protocol';
 import GAME from '@nobu/shared/config/game';
+import NET from '@nobu/shared/config/net';
 
 // ─── Palette (SPEC.md §13.1) ──────────────────────────────────
 const C_LOCAL_PLAYER   = 0x00e5ff; // cyan
@@ -31,7 +32,7 @@ const PLAYER_COLORS = [
   0xff2bd6, // magenta
   0xb6ff3b, // lime
   0xff6b00, // orange
-  0x00e5ff, // cyan (fallback only — local player uses this)
+  0xffe14d, // yellow (cyan is reserved for the local player)
   0xff3b5c, // red
   0xffb300, // amber
   0x7c4dff, // violet
@@ -40,10 +41,10 @@ const PLAYER_COLORS = [
 
 const ARENA_W = GAME.arena.width;
 const ARENA_H = GAME.arena.height;
-const OBSTACLES = GAME.obstacles as { id: string; x: number; y: number; w: number; h: number }[];
+const OBSTACLES = GAME.obstacles as unknown as { id: string; x: number; y: number; w: number; h: number }[];
 const P_RADIUS = GAME.player.radius;
 const PROJ_RADIUS = GAME.projectile.radius;
-const SPAWN_POINTS = GAME.spawnPoints as { x: number; y: number }[];
+const SPAWN_POINTS = GAME.spawnPoints as unknown as { x: number; y: number }[];
 
 interface ParticleEffect {
   x: number; y: number;
@@ -60,18 +61,28 @@ interface CorrectionLine {
 
 export class ArenaScene extends Phaser.Scene {
   private netClient!: NetClient;
-  private arenaContainer!: Phaser.GameObjects.Container;
+  // arenaContainer removed (Bug 3B) — graphics objects are added directly
   private bgGraphics!: Phaser.GameObjects.Graphics;
   private playerGraphics!: Phaser.GameObjects.Graphics;
   private projGraphics!: Phaser.GameObjects.Graphics;
   private fxGraphics!: Phaser.GameObjects.Graphics;
   private ghostGraphics!: Phaser.GameObjects.Graphics;
 
+  // Keyboard keys (Bug 2A fix — stored as class fields, polled in update())
+  private keyW!: Phaser.Input.Keyboard.Key;
+  private keyA!: Phaser.Input.Keyboard.Key;
+  private keyS!: Phaser.Input.Keyboard.Key;
+  private keyD!: Phaser.Input.Keyboard.Key;
+  private keyUp!: Phaser.Input.Keyboard.Key;
+  private keyDown!: Phaser.Input.Keyboard.Key;
+  private keyLeft!: Phaser.Input.Keyboard.Key;
+  private keyRight!: Phaser.Input.Keyboard.Key;
+
   // Particle system
   private particles: ParticleEffect[] = [];
   private correctionLines: CorrectionLine[] = [];
 
-  // Muzzle flash
+  // Muzzle flash (timer is now in milliseconds, Bug 6D fix)
   private muzzleFlashTimer = 0;
   private muzzleFlashX = 0;
   private muzzleFlashY = 0;
@@ -82,9 +93,15 @@ export class ArenaScene extends Phaser.Scene {
 
   // Fixed sim accumulator
   private accumMs = 0;
-  private lastTickMs = 0;
   private inputSendAccum = 0;
-  private metricsAccum = 0;
+
+  // Last pointer position in arena space; aim is recomputed every frame from
+  // the *rendered* local position so it stays correct while moving.
+  private pointerX: number | null = null;
+  private pointerY: number | null = null;
+  private localX = 0;
+  private localY = 0;
+  private unsubscribers: (() => void)[] = [];
 
   constructor(config: Phaser.Types.Scenes.SettingsConfig & { netClient: NetClient }) {
     super({ key: 'ArenaScene', ...config });
@@ -105,104 +122,92 @@ export class ArenaScene extends Phaser.Scene {
     this.playerGraphics = this.add.graphics();
     this.fxGraphics    = this.add.graphics();
 
-    // Input
+    // Input — pointer worldX/Y is already in arena space at any scale
     this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => {
-      // Convert screen coords to arena coords
-      const rx = ptr.x;
-      const ry = ptr.y;
-      const me = this.netClient.latestSnapshot?.players.find(
-        p => p.id === this.netClient.myPlayerId
-      );
-      if (me) {
-        this.netClient.aimAngle = Math.atan2(ry - me.y, rx - me.x);
-      }
+      this.pointerX = ptr.worldX;
+      this.pointerY = ptr.worldY;
     });
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
       if (ptr.leftButtonDown()) this.netClient.fireDown = true;
     });
     this.input.on('pointerup', () => { this.netClient.fireDown = false; });
 
-    // Keyboard
+    // Keyboard — store refs so we can poll them inside update() (Bug 2A fix)
     const kb = this.input.keyboard!;
-    const W = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-    const A = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-    const S = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-    const D = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
-    const UP    = kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
-    const DOWN  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
-    const LEFT  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
-    const RIGHT = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
+    this.keyW     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+    this.keyA     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+    this.keyS     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+    this.keyD     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.keyUp    = kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
+    this.keyDown  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
+    this.keyLeft  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
+    this.keyRight = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
 
-    this.events.on('update', () => {
-      let keys = 0;
-      if (W.isDown || UP.isDown)    keys |= 1; // UP
-      if (S.isDown || DOWN.isDown)  keys |= 2; // DOWN
-      if (A.isDown || LEFT.isDown)  keys |= 4; // LEFT
-      if (D.isDown || RIGHT.isDown) keys |= 8; // RIGHT
-      this.netClient.keys = keys;
-    });
-
-    // Correction callback
-    this.netClient.onCorrection = (ev: CorrectionEvent) => {
-      this.correctionLines.push({
-        fx: ev.fromX, fy: ev.fromY,
-        tx: ev.toX, ty: ev.toY,
-        life: 60, errorPx: ev.errorPx,
-      });
+    // Clean up keys and NetClient subscriptions when the scene stops or the
+    // whole game is destroyed (React StrictMode mounts the container twice).
+    const cleanup = () => {
+      kb.removeAllKeys(true);
+      this.unsubscribers.forEach((off) => off());
+      this.unsubscribers = [];
     };
+    this.events.once('shutdown', cleanup);
+    this.events.once('destroy', cleanup);
 
-    // Muzzle flash callback
-    this.netClient.onFire = () => {
-      const me = this.netClient.latestSnapshot?.players.find(
-        p => p.id === this.netClient.myPlayerId
-      );
-      if (me) {
-        this.muzzleFlashTimer = 6;
-        this.muzzleFlashX = me.x + Math.cos(this.netClient.aimAngle) * (P_RADIUS + 10);
-        this.muzzleFlashY = me.y + Math.sin(this.netClient.aimAngle) * (P_RADIUS + 10);
-      }
-    };
-
-    // Game events
-    this.netClient.onEvent = (ev: GameEvent) => {
-      if (ev.type === 'PLAYER_DEATH' && ev.x !== undefined && ev.y !== undefined) {
-        this.spawnDeathParticles(ev.x, ev.y);
-        // Camera shake on own death
-        if (ev.victim === this.netClient.myPlayerId) {
-          this.cameras.main.shake(150, 0.006);
+    this.unsubscribers.push(
+      this.netClient.on('correction', (ev: CorrectionEvent) => {
+        this.correctionLines.push({
+          fx: ev.fromX, fy: ev.fromY, tx: ev.toX, ty: ev.toY,
+          life: 1000, errorPx: ev.errorPx,
+        });
+      }),
+      // Local muzzle flash at the rendered (predicted) position (SPEC.md §10.8)
+      this.netClient.on('fire', () => {
+        this.muzzleFlashTimer = 100;
+        this.muzzleFlashX = this.localX + Math.cos(this.netClient.aimAngle) * (P_RADIUS + 10);
+        this.muzzleFlashY = this.localY + Math.sin(this.netClient.aimAngle) * (P_RADIUS + 10);
+      }),
+      this.netClient.on('event', (ev: GameEvent) => {
+        if (ev.type === 'PLAYER_DEATH' && ev.x !== undefined && ev.y !== undefined) {
+          const isMe = ev.victim === this.netClient.myPlayerId;
+          this.spawnDeathParticles(ev.x, ev.y, isMe ? C_LOCAL_PLAYER : this.colorFor(ev.victim ?? 0));
+          if (isMe) this.cameras?.main?.shake(150, 0.006);
         }
-      }
-      if (ev.type === 'PROJECTILE_HIT' && ev.x !== undefined && ev.y !== undefined) {
-        this.spawnHitSparks(ev.x, ev.y);
-      }
-    };
-
-    this.lastTickMs = this.time.now;
+        if (ev.type === 'PROJECTILE_HIT' && ev.x !== undefined && ev.y !== undefined) {
+          this.spawnHitSparks(ev.x, ev.y);
+        }
+      }),
+    );
   }
 
-  update(time: number, delta: number): void {
-    const nowMs = time;
+  private colorFor(id: number): number {
+    return PLAYER_COLORS[id % PLAYER_COLORS.length];
+  }
+
+  update(_time: number, delta: number): void {
     const dt = delta;
 
+    // ── Poll keyboard (Bug 2A fix: moved here from events.on('update')) ────
+    let keys = 0;
+    if (this.keyW?.isDown  || this.keyUp?.isDown)    keys |= 1; // UP
+    if (this.keyS?.isDown  || this.keyDown?.isDown)  keys |= 2; // DOWN
+    if (this.keyA?.isDown  || this.keyLeft?.isDown)  keys |= 4; // LEFT
+    if (this.keyD?.isDown  || this.keyRight?.isDown) keys |= 8; // RIGHT
+    this.netClient.keys = keys;
+
     // ── Fixed sim accumulator (60 Hz) ────────────────────────
+    const stepMs = 1000 / GAME.sim.hz;
     this.accumMs += dt;
-    while (this.accumMs >= (1000 / GAME.sim.hz)) {
-      this.netClient.simStep(nowMs);
-      this.accumMs -= (1000 / GAME.sim.hz);
+    while (this.accumMs >= stepMs) {
+      this.netClient.simStep();
+      this.accumMs -= stepMs;
     }
 
-    // ── Input send (30 Hz) ───────────────────────────────────
+    // ── Input send (inputSendHz) ─────────────────────────────
+    const sendMs = 1000 / NET.inputSendHz;
     this.inputSendAccum += dt;
-    if (this.inputSendAccum >= (1000 / 30)) {
+    if (this.inputSendAccum >= sendMs) {
       this.netClient.sendInputs();
-      this.inputSendAccum -= (1000 / 30);
-    }
-
-    // ── Metrics update (5 Hz) ────────────────────────────────
-    this.metricsAccum += dt;
-    if (this.metricsAccum >= 200) {
-      this.netClient.updateMetrics();
-      this.metricsAccum -= 200;
+      this.inputSendAccum %= sendMs;
     }
 
     // ── FPS auto-degrade ─────────────────────────────────────
@@ -217,21 +222,24 @@ export class ArenaScene extends Phaser.Scene {
     }
 
     // ── Render ───────────────────────────────────────────────
-    this.render(nowMs);
+    this.render();
+    this.netClient.framePresented(dt);
 
-    // ── Decay effects ────────────────────────────────────────
-    if (this.muzzleFlashTimer > 0) this.muzzleFlashTimer--;
+    // ── Decay effects (Bug 6D fix: use delta ms, not frame count) ────────
+    if (this.muzzleFlashTimer > 0) this.muzzleFlashTimer = Math.max(0, this.muzzleFlashTimer - dt);
     this.particles = this.particles.filter(p => p.life > 0);
     this.correctionLines = this.correctionLines.filter(l => l.life > 0);
+    const frames = dt / (1000 / 60); // velocities are in px per 60 Hz frame
+    const drag = Math.pow(0.92, frames);
     for (const p of this.particles) {
-      p.x += p.vx; p.y += p.vy;
-      p.vx *= 0.92; p.vy *= 0.92;
-      p.life--;
+      p.x += p.vx * frames; p.y += p.vy * frames;
+      p.vx *= drag; p.vy *= drag;
+      p.life -= dt;
     }
-    for (const l of this.correctionLines) l.life--;
+    for (const l of this.correctionLines) l.life -= dt; // ms-based
   }
 
-  private render(nowMs: number): void {
+  private render(): void {
     const g = this.bgGraphics;
     const pg = this.playerGraphics;
     const projG = this.projGraphics;
@@ -243,9 +251,17 @@ export class ArenaScene extends Phaser.Scene {
     this.drawBackground(g);
     this.drawObstacles(g);
 
-    const { players, projectiles } = this.netClient.getInterpolatedState(nowMs);
+    const state = this.netClient.getInterpolatedState();
+    const { players, projectiles } = state;
     const snap = this.netClient.latestSnapshot;
     const myId = this.netClient.myPlayerId;
+
+    const local = this.netClient.getLocalRenderPos(state);
+    this.localX = local.x;
+    this.localY = local.y;
+    if (this.pointerX !== null && this.pointerY !== null) {
+      this.netClient.aimAngle = Math.atan2(this.pointerY - local.y, this.pointerX - local.x);
+    }
 
     // Draw remote players
     for (const p of players) {
@@ -259,8 +275,8 @@ export class ArenaScene extends Phaser.Scene {
       this.drawLocalPlayer(pg, me);
     }
 
-    // Draw ghost (SPEC.md §13.4)
-    if (this.netClient.toggles.ghost && myId !== null) {
+    // Draw ghost (SPEC.md §13.4) — hidden with prediction off, where it would coincide
+    if (this.netClient.toggles.ghost && this.netClient.toggles.prediction && myId !== null && me?.alive) {
       ghost.lineStyle(2, C_GHOST, 0.7);
       ghost.strokeCircle(this.netClient.authX, this.netClient.authY, P_RADIUS + 3);
       // Draw dashes manually for dashed circle effect
@@ -270,7 +286,7 @@ export class ArenaScene extends Phaser.Scene {
     // Draw correction lines
     fxG.lineStyle(2, C_GHOST, 0.8);
     for (const line of this.correctionLines) {
-      const alpha = line.life / 60;
+      const alpha = Math.min(1, line.life / 1000); // ms-based alpha (Bug 6D fix)
       fxG.lineStyle(2, C_GHOST, alpha);
       fxG.lineBetween(line.fx, line.fy, line.tx, line.ty);
       // Ring pulse
@@ -285,11 +301,17 @@ export class ArenaScene extends Phaser.Scene {
     for (const proj of projectiles) {
       projG.fillStyle(C_PROJECTILE, 1);
       projG.fillCircle(proj.x, proj.y, PROJ_RADIUS);
-      // Fading trail
-      const trailX = proj.x - proj.dx * 12;
-      const trailY = proj.y - proj.dy * 12;
-      projG.lineStyle(2, C_PROJECTILE, 0.3);
-      projG.lineBetween(trailX, trailY, proj.x, proj.y);
+      // Fading trail — guard against undefined dx/dy (Bug 3A fix)
+      const dx = (proj as unknown as Record<string, number>).dx;
+      const dy = (proj as unknown as Record<string, number>).dy;
+      if (Number.isFinite(dx) && Number.isFinite(dy)) {
+        const trailX = proj.x - dx * 12;
+        const trailY = proj.y - dy * 12;
+        if (Number.isFinite(trailX) && Number.isFinite(trailY)) {
+          projG.lineStyle(2, C_PROJECTILE, 0.3);
+          projG.lineBetween(trailX, trailY, proj.x, proj.y);
+        }
+      }
     }
 
     // Draw particles
@@ -300,8 +322,8 @@ export class ArenaScene extends Phaser.Scene {
     }
 
     // Muzzle flash
-    if (this.muzzleFlashTimer > 0 && me) {
-      const alpha = this.muzzleFlashTimer / 6;
+    if (this.muzzleFlashTimer > 0) {
+      const alpha = Math.min(1, this.muzzleFlashTimer / 100); // ms-based alpha (Bug 6D fix)
       fxG.fillStyle(0xffffff, alpha);
       fxG.fillCircle(this.muzzleFlashX, this.muzzleFlashY, 8 * alpha);
     }
@@ -353,7 +375,7 @@ export class ArenaScene extends Phaser.Scene {
   private drawRemotePlayer(g: Phaser.GameObjects.Graphics, p: PlayerSnap): void {
     if (!p.alive) return;
 
-    const color = PLAYER_COLORS[p.id % PLAYER_COLORS.length];
+    const color = this.colorFor(p.id);
 
     if (p.protectMs > 0) {
       this.drawShieldRing(g, p.x, p.y, color);
@@ -383,8 +405,8 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private drawLocalPlayer(g: Phaser.GameObjects.Graphics, me: PlayerSnap): void {
-    const rx = this.netClient.renderX;
-    const ry = this.netClient.renderY;
+    const rx = this.localX;
+    const ry = this.localY;
 
     if (!me.alive) {
       // Respawn ring pulse
@@ -430,7 +452,7 @@ export class ArenaScene extends Phaser.Scene {
     g.fillTriangle(tx, ty, lx, ly, rx2, ry2);
 
     // Pending inputs bar (below player)
-    const pending = this.netClient.metrics.pendingInputs;
+    const pending = this.netClient.pendingCount;
     if (pending > 0) {
       const barW = Math.min(pending * 3, 40);
       const barH = 4;
@@ -481,16 +503,17 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  private spawnDeathParticles(x: number, y: number): void {
-    for (let i = 0; i < 24; i++) {
-      const angle = (i / 24) * Math.PI * 2;
+  private spawnDeathParticles(x: number, y: number, color: number): void {
+    for (let i = 0; i < 28; i++) {
+      const angle = (i / 28) * Math.PI * 2 + Math.random() * 0.2;
       const speed = 2 + Math.random() * 4;
+      const life = 450 + Math.random() * 350; // ms
       this.particles.push({
         x, y,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        life: 40, maxLife: 40,
-        color: C_LOCAL_PLAYER,
+        life, maxLife: life,
+        color,
         size: 3 + Math.random() * 3,
       });
     }
@@ -504,7 +527,7 @@ export class ArenaScene extends Phaser.Scene {
         x, y,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        life: 20, maxLife: 20,
+        life: 220, maxLife: 220, // ms
         color: 0xffffff,
         size: 2,
       });

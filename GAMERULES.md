@@ -1,6 +1,6 @@
 # NoBu Shooter — Game Rules
 
-**Audience:** the implementing agent. This file is the **single source of truth for gameplay rules and game constants**. `SPEC.md` is the source of truth for architecture, protocol, netcode, emulator and UI. Every rule below is a decision, not a suggestion. Do not add mechanics that are not listed here (see §16).
+**Audience:** the implementing agent. This file is the **single source of truth for gameplay rules and game constants**. Architecture, protocol, netcode, emulator and UI were specified in `docs/archive/SPEC-v1.md` (v1 build spec, archived); current goals and phases are in `PHASES.md`. Every rule below is a decision, not a suggestion. Do not add mechanics that are not listed here (see §16).
 
 Constants live in one file, `shared/src/config/game.json` (§15), imported by client, server and tests. Never hard-code a number from this document in game logic.
 
@@ -88,7 +88,7 @@ The client sends **inputs**, never state. The server decides all resulting state
 - Diagonal movement is normalized (multiply both components by `Math.SQRT1_2`) so diagonal speed equals axis speed.
 - Collision shapes: player = circle, projectile = small circle (radius 4), obstacle = rectangle.
 - Players cannot leave the arena: the center is clamped to `[radius, width − radius]` × `[radius, height − radius]`.
-- Players cannot pass through obstacles: after moving on each axis, push the circle out of any overlapping rectangle. The exact algorithm is in `SPEC.md` §7 and is implemented once, in `shared/src/sim`, and used by both client and server.
+- Players cannot pass through obstacles: after moving on each axis, push the circle out of any overlapping rectangle. The exact algorithm is in `docs/archive/SPEC-v1.md` §7 and is implemented once, in `shared/src/sim`, and used by both client and server.
 - Dead players do not move, collide or block anything.
 
 ---
@@ -101,7 +101,7 @@ The client sends **inputs**, never state. The server decides all resulting state
 - Fire cooldown: 300 ms (18 ticks), counted in server ticks.
 - On an accepted shot the projectile spawns at `playerCenter + dir × (playerRadius + projectileRadius + 1)`, where `dir = (cos aim, sin aim)`. Speed is 600 px/s. If the straight segment from the player center to the spawn point crosses an obstacle, the projectile is destroyed immediately (it hit the obstacle).
 - Projectiles are linear. No gravity, acceleration, bounce or homing.
-- **Lag compensation is not implemented.** The projectile starts from the shooter's *server* position and hits what is at the *server* positions. This is a documented limitation (`SPEC.md` §16).
+- **Lag compensation is not implemented.** The projectile starts from the shooter's *server* position and hits what is at the *server* positions. This is a documented limitation (`docs/archive/SPEC-v1.md` §16).
 
 ---
 
@@ -206,7 +206,7 @@ The server is the final authority over positions, collisions, projectiles, hits,
 { "t": "input", "inputs": [ { "s": 42, "k": 8, "a": 0.785, "f": 1 } ] }
 ```
 
-`s` is the input sequence number, `k` the movement key bitmask, `a` the aim angle and `f` the fire flag. The client never sends a position, a hit, a score or a time as a command. The full protocol is in `SPEC.md` §8.
+`s` is the input sequence number, `k` the movement key bitmask, `a` the aim angle and `f` the fire flag. The client never sends a position, a hit, a score or a time as a command. The full protocol is in `docs/PROTOCOL.md`.
 
 ---
 
@@ -215,7 +215,7 @@ The server is the final authority over positions, collisions, projectiles, hits,
 | Room | Purpose | Bots | Firing | Timer / scoring |
 |---|---|---|---|---|
 | `main` | The game | per §12 | on | per §2 |
-| `lab` | Movement-only sandbox used by A/B compare mode (`SPEC.md` §13.8) | off | rejected | state is always `RUNNING`; no timer, no deaths |
+| `lab` | Movement-only sandbox used by A/B compare mode (`docs/archive/SPEC-v1.md` §13.8) | off | rejected | state is always `RUNNING`; no timer, no deaths |
 
 ---
 
