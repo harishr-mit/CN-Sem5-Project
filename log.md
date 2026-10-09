@@ -21,13 +21,13 @@ Shared context for every agent working in this directory. Read this file **befor
 
 ## Current Status
 
-* **Last updated:** 2026-10-09 (Claude Opus 5.5) — **Phases 1 and 2 of `PHASES.md` complete.** Next: Phase 3 (T32). Phase 2 plan, decisions and deviations: `docs/PHASE2_PLAN.md`.
-* **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot-vs-state sync models, and a standalone network emulator (latency, jitter, loss, bandwidth, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (working branch `game`).
+* **Last updated:** 2026-10-10 (Claude Opus 5.5) — **Phases 1 and 2 of `PHASES.md` complete**; the never-merged `game` bug fixes (T46–T48) are merged into `main` with T45 (T49). Next: Phase 3 (T32). Phase 2 plan, decisions and deviations: `docs/PHASE2_PLAN.md`.
+* **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot-vs-state sync models, and a standalone network emulator (latency, jitter, loss, bandwidth, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (`main` holds everything as of T49; earlier work branches: `game`, `game-phase2plus`).
 * **Plan:** `PHASES.md` — six phases, each with a demo checkpoint and exit criteria. `GAMERULES.md` = gameplay rules. v1 spec archived at `docs/archive/SPEC-v1.md`.
 * **Architecture:** Browser (Phaser + React) ⇄ Emulator (:9000 data, :9001 control) ⇄ Authoritative server (:8080). Server core is transport-agnostic (`server/src/core.ts`); `NetClient` is headless (injectable transport/clock).
-* **Commands (from repo root or `NoBu-Shooter/`):** `npm run demo`, `npm test` (57 tests incl. end-to-end netcode harness), `npm run typecheck`, `npm run smoke` (bot under Nightmare + lab spectator/movers check).
+* **Commands (from repo root or `NoBu-Shooter/`):** `npm run demo`, `npm test` (64 tests incl. end-to-end netcode harness), `npm run typecheck`, `npm run smoke` (bot under Nightmare + lab spectator/movers check).
 * **Verification tooling:** no Playwright MCP is attached to agents; browser checks were done with `playwright-core` installed in the session scratchpad (NOT the repo) driving local Chrome (`channel: 'chrome'`). Phase 4 adds `npm run shots` to the repo.
-* **Blockers / Notes:** none. Dev-mode React StrictMode prints harmless "closed before established" WebSocket warnings in the Compare view (documented in `docs/ASSUMPTIONS.md` #18). The owner committed mid-Phase-2 work as `127fc29` ("credit exhausted - broken commit"); the Phase 2 work after it is uncommitted at the end of this run.
+* **Blockers / Notes:** none. Dev-mode React StrictMode prints harmless "closed before established" WebSocket warnings in the Compare view (documented in `docs/ASSUMPTIONS.md` #18). Task IDs T37–T39 were used twice (Phase 2 on `game-phase2plus`, bug fixes on `game`); the bug fixes are listed as T46–T48.
 
 ## Task List
 
@@ -67,7 +67,6 @@ Shared context for every agent working in this directory. Read this file **befor
 * [ ] T34: **Phase 5** — UDP adapters, emulator UDP mode, network-player swarm, emulator dashboard + README (PHASES.md U1–U7)
 * [ ] T35: **Phase 6** — Lockstep (S4), final docs, rehearsal (PHASES.md L1–L5)
 * [x] T36: Docs: archive SPEC.md → `docs/archive/SPEC-v1.md`, ROADMAP.md → `PHASES.md`, remove duplicate `NoBu-Shooter/docs/` and stale root `tests/`, update README/PROTOCOL/DEMO_SCRIPT/ASSUMPTIONS
-
 * [x] T37: Quick Phase 1 verification + Phase 2 implementation plan (`docs/PHASE2_PLAN.md`)
 * [x] T38: Phase 2 docs — PHASES.md / PHASE2_PLAN.md reflect the approved decisions D1–D7
 * [x] T39: Phase 2 step 1 — shared movers, Room movers + spectators, `lab` message, protocol validators (plan tests 1–4)
@@ -77,12 +76,38 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T43: Phase 2 step 5 — UI: EmulatorControls extraction, CompareView/ComparePane/PaneMetricsBar/CompareDock, App/Landing, delete ABCompare
 * [x] T44: Phase 2 step 6 — smoke extension, browser check (1280×720, 1920×1080), docs (PROTOCOL, DEMO_SCRIPT, ASSUMPTIONS, GAMERULES, README), exit
 
+* [x] T45: Esc/F1 menus didn't scroll (inherited `pointer-events: none`); add Back to main menu to the Esc menu
+* [x] T46 (`T37` on branch `game`): Bug — `D` key does not move right (arrow keys work). Root cause on this machine: Vimium (Chrome Profile 15) maps `d`; game input hardened anyway (page-level `KeyboardEvent.code` tracker)
+* [x] T47 (`T38` on branch `game`): Bug — no way back to the landing page once a match has started (+ HUD buttons and Settings/Controls modals were unclickable)
+* [x] T48 (`T39` on branch `game`): Bug — A/B compare panes don't mirror each other; emulator parameters not applied correctly to both panes
+* [x] T49: Merge `origin/game` (bug fixes T46–T48, never merged) into `main` (Phase 2 + T45); reconcile overlaps, verify startup/tests/smoke/browser, commit
+
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
 
 ## Change Log
 
 <!-- Newest first. Copy the template below for each entry. -->
+
+### 2026-10-10 — Claude (Opus 5.5) — T49: Merge branch `game` (bug fixes T46–T48) into `main`
+
+* **Task:** Owner: the bug-fix commit `818e7c4` on `game` ("bug fix run 09-10-2026") was never merged; Phase 2 (`game-phase2plus`, PR #3) and T45 were built without it. Fetch, merge `game` into `main`, make the overlaps coherent, verify startup, commit.
+* **Status:** DONE — typecheck clean, **64/64 tests**, smoke PASSED (Nightmare 61 Hz; 4 movers exactly on their paths), `npm run demo` starts all four services, browser check 23/23 (scratchpad `playwright-core` 1.48.2 + local Chrome, NOT in the repo) + Esc menu scroll at 1280×380. Demo stopped; ports 5173/8080/9000/9001 clear; no node / headless Chrome left.
+* **Git:** `git fetch --all --prune`; T45 (uncommitted on `game-phase2plus`) stashed (`stash@{0}`, also saved as a patch in the session scratchpad); local `main` fast-forwarded 31ba8fe → 18a29b0 (= `origin/main`); `git merge --no-ff --no-commit origin/game` → 14 conflicts, resolved by hand; T45 folded back in; one merge commit on local `main` (not pushed).
+* **Resolution (what was kept from `game`):**
+  - T46 keys: `client/src/game/input.ts` (page-level tracker by `KeyboardEvent.code`) now drives Quick Match in `ArenaScene`; Phaser keyboard disabled in `GameContainer` (`input: { keyboard: false }`); `pointerupoutside` releases fire. The A/B-only parts (shared `PointerState`, `hidePlayersOf`, absolute-rAF tick stepping) were dropped: Phase 2's `InputDriver` + `dimOthers` already cover them. `InputDriver` now reuses `movementCode` / `keysFromCodes` / `isTypingTarget`.
+  - Hotkeys in `NetworkLab`, `EmulatorControls`, `CompareView` (and movement in `InputDriver`) use `isTypingTarget`: a focused slider/checkbox no longer swallows `Tab`, `1`–`5`, `P`/`R`/`I`/`G` or movement (arrows no longer nudge the slider). Main still had this bug.
+  - T47 leave: `Hud` ◄ LEAVE MATCH + clickable action bar + ◄ BACK TO MENU on the connection overlay; `store.resetSession()`; Esc/F1 only in the match view. Merged with T45: one handler (`handleLeaveMatch`, T45's duplicate `handleExitToMenu` dropped), one prop (`onLeave`), one Esc-menu button **◄ LEAVE MATCH — BACK TO MAIN MENU** at the end of the menu (T45 placement), T45's fixed/scrollable modal layout in `SettingsPanel` and `ControlsOverlay`.
+  - T48: `EmulatorClient` stale-socket guard (StrictMode) kept as is. Lab fixed spawn kept but **moved (640, 520) → (880, 360)**: the old point lies on Phase 2's zigzag mover lane (≈ 32 px); the new one is ≥ 108 px from every mover path and clear of obstacles (new test in `tests/movers.test.ts`). `RoomCfg` now has `movers` + `spawn`. `ABCompare.tsx` stays deleted; `NetworkLab`'s `compareClients` mode dropped (Compare has its own dock).
+* **Files:** `NoBu-Shooter/client/src/game/{ArenaScene.ts,GameContainer.tsx,input.ts}` (input.ts: `PointerState` removed, header updated), `client/src/compare/InputDriver.ts`, `client/src/net/EmulatorClient.ts`, `client/src/ui/{App,ControlsOverlay,EmulatorControls,Hud,NetworkLab,SettingsPanel}.tsx`, `client/src/ui/compare/CompareView.tsx`, `client/src/ui/store.ts`, `server/src/game/room.ts`, `shared/src/config/game.{json,ts}`, tests `input.test.ts` (new from `game`), `movers.test.ts` (+lab spawn clearance), `netcode.test.ts` (twin tests renamed for Compare), `rules.test.ts`; docs `README.md` (64 tests, leave row, Compare row moved back inside the controls table — it sat after the "Latencies" line and rendered as stray text), `GAMERULES.md` §14 + §15 (rooms block synced with `game.json`: movers, `lab` block, spawn), `PHASES.md` (stray `@@` in the title from `818e7c4`; status + Phase 2 row → done), `docs/ASSUMPTIONS.md` (#18 + new #28–#30), `docs/DEMO_SCRIPT.md` §8, `docs/PROTOCOL.md` (lab spawn), `docs/PHASE2_PLAN.md` §9, `log.md` (T45 entry restored from the stash, T46–T48 renumbered, this entry).
+* **Notes:** The browser probe must send `ping`s — the server drops silent connections after 5 s (`NET.timeoutMs`); the first run's failures were the probe, not the game. The Phase 2 entry below mentions a PHASES.md "Result table"; it was never committed (not in `127fc29`, `7ff1aaa` or `origin/main`) and was not reconstructed.
+
+### 2026-10-10 — Claude (Opus 5.5) — T45: Esc/F1 menus didn't scroll; add Back to main menu
+
+* **Task:** Owner report: no way back to the main menu from Quick Match; the Esc and F1 menus couldn't be scrolled
+* **Status:** DONE — client typecheck clean, 57/57 tests, browser-verified at 1280×600 (F1 scrolls 0 → 168 px with the wheel; the Esc menu shows the new button; clicking it returns to the landing page, the server logs the player leaving, and a second Quick Match starts normally; no console errors). Demo stopped, ports clear.
+* **Cause:** both modals use the `.overlay` class, which sets `pointer-events: none` (meant for HUD text overlays). It is inherited, so wheel events went through the modal to the game. The Settings modal also had no height limit or scroll. There was no back-to-menu button anywhere in Quick Match (none had been removed).
+* **Files:** `NoBu-Shooter/client/src/ui/SettingsPanel.tsx` (overlay `pointerEvents: 'auto'`, `position: fixed`, modal `maxHeight: 100%` + `overflowY: auto`; new `onExitToMenu` prop and **◄ BACK TO MAIN MENU** button), `NoBu-Shooter/client/src/ui/ControlsOverlay.tsx` (same overlay/scroll fix), `NoBu-Shooter/client/src/ui/App.tsx` (`handleExitToMenu`: closes modals, drops the clients, whose effect cleanups disconnect them, then shows the landing page), `docs/DEMO_SCRIPT.md` §8 step 1, `README.md` controls table.
 
 ### 2026-10-09 — Claude (Opus 5.5) — Phase 2 implementation (T31, T38–T44)
 
@@ -110,6 +135,31 @@ Shared context for every agent working in this directory. Read this file **befor
   - Plan decisions D1–D7: movers as `PlayerSnap` with `mover` field (outside `state.players`); mover paths pure functions of server time (`shared/src/sim/movers.ts`); remote error = lag / wobble / frozen % against the exact true position (a single mean error would rate interpolation worse: ≈ 30 px vs ≈ 13 px at 50 ± 30 ms); reference pane = spectator (`hello.spectate`), always connected as the server clock; one shared `InputDriver` for all panes; one-setting comparison presets (Prediction preset now ≈ 340 ms vs 17 ms, not 236 ms); 16:9-exact pane layout + dock.
   - Mover paths and pane layouts checked with a scratchpad script against `game.json` (clearance ≥ 20 px; layouts at 1280×720 / 1920×1080).
 * **Notes / Errors:** none. The startup git snapshot listed untracked `client/src/game/input.ts` / `tests/input.test.ts`; they do not exist on this branch (snapshot was stale).
+
+### 2026-10-09 — Claude (Opus 5.5) — Bug fixes T37–T39 (outside the phase plan)
+
+* **Task:** `D` key not moving right; no way back to the landing page; A/B panes not mirrored / emulator settings not applied to both panes
+* **Status:** DONE — 33/33 tests, typecheck clean, smoke PASSED (Nightmare, 60 Hz), browser-verified in Chrome (scratchpad Playwright script, 26 checks pass), all ports clear
+* **Findings:**
+  - T37: in headless Chrome `D` already worked; the user's Chrome Profile 15 has **Vimium 2.4.2**, which maps `d` (and `r` reload, `p`, digits) and swallows the keydown before any page code. Not fixable from the page → README troubleshooting. Independently, Phaser's keyboard manager `preventDefault`s captured keys and skips already-prevented events, so a second canvas never got WASD/arrows (pane B in A/B sent only `k=0`).
+  - T38: no leave control existed; also `.hud`/`.overlay` have `pointer-events: none`, so the HUD CONTROLS/SETTINGS buttons and the Settings/Controls modals were never clickable.
+  - T39: A/B players spawned at opposite spawn points and each pane drew the other twin as a remote; pane B got no keys; aim came only from the hovered canvas; the Lab's P/R/I/G/nudge silently acted on pane B only; `EmulatorClient` under StrictMode leaked a 2nd control socket (stale onclose → reconnect) and flashed "EMULATOR OFF"; with 10 % loss and no redundancy the twins drift ~40 px apart.
+* **Files (created):** `NoBu-Shooter/client/src/game/input.ts` (page-level movement keys by `KeyboardEvent.code`, capture phase, blur release; shared `PointerState`), `NoBu-Shooter/tests/input.test.ts`
+* **Files (edited):**
+  - `client/src/game/ArenaScene.ts` — uses `input.ts`; 60 Hz sim + 30 Hz send on absolute rAF tick boundaries (A/B panes step together; ≤ 6 ticks catch-up); `hidePlayersOf`; `pointerupoutside` releases fire
+  - `client/src/game/GameContainer.tsx` — `pointer`/`hidePlayersOf` props; Phaser `input.keyboard: false`
+  - `client/src/net/EmulatorClient.ts` — stale-socket guard, retry timer cleared on close, status `connecting`/`offline`
+  - `client/src/ui/App.tsx` — `handleLeaveMatch`; store reset on client teardown; Esc/F1 only in match view; `?` key fixed
+  - `client/src/ui/Hud.tsx` — ◄ LEAVE MATCH, clickable action bar, ◄ BACK TO MENU in the connection overlay
+  - `client/src/ui/SettingsPanel.tsx`, `ControlsOverlay.tsx` — leave button; modals take clicks (`pointerEvents: 'auto'`)
+  - `client/src/ui/store.ts` — `resetSession()`
+  - `client/src/ui/NetworkLab.tsx` — `compareClients` mode (fixed per-pane netcode, redundancy + nudge to both panes, P/R/I/G off); hotkeys ignore only text fields
+  - `client/src/ui/ABCompare.tsx` — twins (shared pointer, hidden twin, redundancy on), ⟲ RE-SYNC TWINS, per-pane metrics bar (+ack, loss ↑↓ per session, bw)
+  - `server/src/game/room.ts` — `spawnFor()`: fixed `rooms.lab.spawn` for lab
+  - `shared/src/config/game.ts` + `game.json` — `rooms.lab.spawn = (640, 520)`
+  - `tests/rules.test.ts` (+lab twin spawn), `tests/netcode.test.ts` (+2 A/B twin tests; verified the loss one fails with redundancy off: 518.6 vs 559.9 px)
+  - Docs: `README.md` (controls, A/B, Vimium troubleshooting, 33 tests), `GAMERULES.md` §9/§14/§15, `docs/ASSUMPTIONS.md` #18–20, `docs/DEMO_SCRIPT.md` §8, `docs/PROTOCOL.md` (lab spawn), `PHASES.md` (Phase 2 groundwork note)
+* **Measured (browser, A/B at Transatlantic):** both panes RTT ≈ 196–198 ms; Input → Screen 237 ms (A) vs 17 ms (B); both emulator sessions at 90/90 ms; twin positions identical after movement (0 px gap, also after Nightmare + redundancy); exactly 1 control socket.
 
 ### 2026-10-09 — Claude (Opus 5.5) — Phase 1 complete (T27–T30, T36) + PHASES.md
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { EmulatorClient } from '../net/EmulatorClient.js';
 import { useGameStore } from './store.js';
+import { isTypingTarget } from '../game/input.js';
 
 export const EMULATOR_PRESETS = [
   { name: 'Baseline', key: '1' },
@@ -87,7 +88,7 @@ export const EmulatorControls: React.FC<EmulatorControlsProps> = ({ emulatorClie
   useEffect(() => {
     if (!hotkeys) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (isTypingTarget(e.target)) return;
       const preset = EMULATOR_PRESETS.find((p) => p.key === e.key);
       if (preset) handleApplyPreset(preset.name);
     };

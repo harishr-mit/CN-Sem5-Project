@@ -50,7 +50,7 @@
   },
   "rooms": {
     "main": { "bots": true,  "firing": true,  "timed": true,  "movers": false },
-    "lab":  { "bots": false, "firing": false, "timed": false, "movers": true  }
+    "lab":  { "bots": false, "firing": false, "timed": false, "movers": true, "spawn": { "x": 880, "y": 360 } }
   },
   "lab": {
     "moverSpeed": 200,

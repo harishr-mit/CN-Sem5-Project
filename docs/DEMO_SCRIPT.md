@@ -79,8 +79,8 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
 4. Switch **Input Redundancy ON**: corrections from upstream loss mostly disappear, although the queueing delay remains.
 
 ### 8. Compare View
-1. Click the home button or reload to return to the landing page.
-2. Click **NETWORK LAB — COMPARE**. Every pane is driven by the same keyboard (one shared input loop), so all panes send identical inputs. Each comparison preset changes exactly **one** setting.
+1. Click **◄ LEAVE MATCH** (bottom-left of the arena), or press `Esc` and click **◄ LEAVE MATCH — BACK TO MAIN MENU** (end of the settings menu), to return to the landing page.
+2. Click **NETWORK LAB — COMPARE**. Every pane is driven by the same keyboard (one shared input loop), so all panes send identical inputs, and every pane's player spawns at the same point (`rooms.lab.spawn`). Each comparison preset changes exactly **one** setting.
 3. **Prediction** (default; Transatlantic, 90 ms one-way). Move with WASD.
    - **Pane A (prediction off)** waits for the server; **pane B (prediction on)** moves at once with the amber ghost trailing.
    - **Expect** Input → Screen ≈ 350 ms (A) vs ≈ 18 ms (B). (Interpolation stays on in both panes now; the old A/B view also turned it off in A, which gave ≈ 236 ms.)
@@ -88,7 +88,7 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
    - **Pane A (interpolation off)** draws each snapshot as it lands: the drones stutter and their trail dots bunch up.
    - **Pane B (interpolation on)** draws ~100 ms in the past: the drones glide with evenly spaced trail dots, but sit visibly behind their dashed **truth ring** (press `T` to toggle the rings).
    - **Expect** in the dock: mover lag ≈ 75 ± 26 ms, frozen frames ≈ 60–70 % (A) vs ≈ 160 ± 3 ms, ≈ 2 % (B). Talking point: 160 ms ≈ 50 ms network + 100 ms interpolation delay — interpolation buys smoothness with a fixed, predictable lag. (Distance alone would mislead: ≈ 15 px vs ≈ 30 px.)
-   - The **REF** pane is a spectator connected straight to the server: it shows where every pane's player and every drone really is.
+   - The **REF** pane is a spectator connected straight to the server: it shows where every pane's player and every drone really is. The panes' players sit on top of each other there: the server received the same inputs from every pane, so prediction, reconciliation and interpolation change only what each pane *draws*. (Under loss without redundancy they can drift apart: that is the Redundancy preset.)
 5. **Redundancy** (50 ms, 10 % loss). **Expect** ≈ 2–4 corrections/s (A, redundancy off) vs 0 (B).
 6. **Custom**: choose 2–4 panes, click a pane to select it and toggle `P` / `R` / `I` / `G` (or the chips in its header). `Tab` opens the network drawer; `1`–`5` still apply the emulator presets to every emulated pane.
 

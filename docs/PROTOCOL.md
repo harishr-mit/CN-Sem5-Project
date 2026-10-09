@@ -28,7 +28,7 @@ Resent every 250 ms until an authoritative `welcome` message is received.
 ```
 - `v`: Protocol version (`number`, must be 1).
 - `name`: Callsign string (truncated to 12 chars by the server, GAMERULES.md §4).
-- `room`: `"main"` (full match with bots) or `"lab"` (movement-only sandbox used by the Compare view).
+- `room`: `"main"` (full match with bots) or `"lab"` (movement-only sandbox used by the Compare view; every lab player spawns at the same point, `rooms.lab.spawn`, so all panes' players start together).
 - `nonce`: Unique client-generated session identifier for idempotent handshake retry.
 - `spectate` (optional, boolean): join as a **spectator** — the connection receives snapshots but gets no player, doesn't count toward the room's player cap, and its `input`/`perturb` messages are ignored. The Compare view's reference pane uses this, connecting directly to the server (no emulator).
 

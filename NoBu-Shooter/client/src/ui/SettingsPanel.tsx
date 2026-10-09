@@ -5,12 +5,15 @@ interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onSettingsChange?: (settings: UserSettings) => void;
+  /** Leave the match and return to the landing page. */
+  onLeave?: () => void;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   isOpen,
   onClose,
   onSettingsChange,
+  onLeave,
 }) => {
   const [settings, setSettings] = useState<UserSettings>(() => loadSettings());
 
@@ -39,6 +42,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     <div
       className="overlay"
       style={{
+        // .overlay is click-through (pointer-events: none, inherited) for HUD
+        // text; a modal must take clicks and wheel events, or they reach the game
+        pointerEvents: 'auto',
+        position: 'fixed',
+        padding: 'var(--sp-l)',
         zIndex: 1000,
         backgroundColor: 'rgba(5, 5, 15, 0.82)',
         backdropFilter: 'blur(8px)',
@@ -59,6 +67,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           boxShadow: '0 0 25px rgba(124, 77, 255, 0.4), inset 0 0 15px rgba(0, 229, 255, 0.05)',
           borderRadius: 'var(--panel-radius)',
           width: 'clamp(320px, 90vw, 480px)',
+          maxHeight: '100%',
+          overflowY: 'auto',
+          overscrollBehavior: 'contain',
           padding: 'var(--sp-xl)',
           display: 'flex',
           flexDirection: 'column',
@@ -204,6 +215,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             SAVE & CLOSE [ESC]
           </button>
         </div>
+
+        {onLeave && (
+          <button
+            id="settings-leave-btn"
+            onClick={onLeave}
+            style={{
+              background: 'rgba(255, 59, 92, 0.08)',
+              border: '1px solid var(--c-red)',
+              color: 'var(--c-red)',
+              borderRadius: '4px',
+              padding: '8px 12px',
+              fontSize: '0.85rem',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              cursor: 'pointer',
+            }}
+          >
+            ◄ LEAVE MATCH — BACK TO MAIN MENU
+          </button>
+        )}
       </div>
     </div>
   );

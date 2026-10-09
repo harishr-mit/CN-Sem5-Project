@@ -78,9 +78,9 @@ Stop everything with `Ctrl+C` — all four ports are released. (If the launcher 
 Ensure your environment passes all test suites and the headless end-to-end simulation:
 
 ```bash
-# Run unit and integration tests (57 tests: sim, protocol, emulator pipeline, game rules,
-# movers/spectators, Compare layout/input/presets, and an end-to-end netcode harness:
-# real server + client + emulator pipeline on fake timers)
+# Run unit and integration tests (64 tests: sim, protocol, emulator pipeline, game rules,
+# movement keys, movers/spectators, Compare layout/input/presets, and an end-to-end netcode
+# harness: real server + client + emulator pipeline on fake timers, incl. the twin-pane check)
 npm test
 
 # Type-check server, emulator, shared code, tests and client
@@ -96,21 +96,22 @@ npm run smoke
 
 | Action | Control |
 |---|---|
-| **Movement** | `W`, `A`, `S`, `D` or Arrow Keys |
+| **Movement** | `W`, `A`, `S`, `D` (by physical key position, any layout) or Arrow Keys |
 | **Aim** | Mouse cursor |
 | **Shoot** | Hold Left Click |
 | **Toggle Network Lab** | `Tab` |
 | **Netcode toggles** | `P` prediction, `R` reconciliation, `I` interpolation, `G` ghost |
 | **Controls / Settings** | `F1` / `Esc` |
+| **Leave match** | **◄ LEAVE MATCH** (bottom-left of the arena), or `Esc` → **◄ LEAVE MATCH — BACK TO MAIN MENU** (end of the settings menu). Compare: **◄ EXIT** (top bar) |
 | **Network Presets** | Keys `1` through `5` |
 | **Preset 1** | Baseline (no impairment) |
 | **Preset 2** | Café Wi-Fi (25 ms ± 15 ms jitter, 1% loss) |
 | **Preset 3** | Mobile 4G (45 ms ± 25 ms jitter, 2% loss, 5 Mbps) |
 | **Preset 4** | Transatlantic (90 ms ± 8 ms jitter, 0.5% loss) |
 | **Preset 5** | Nightmare (120 ms ± 50 ms jitter, 12% burst loss, 3% dup, 5% reorder, 400 kbps) |
+| **Compare view** | **Network Lab — Compare** on the landing page. Inside: `Tab` network drawer, `1`–`5` presets, click a pane then `P` / `R` / `I` / `G` to toggle its settings, `T` truth rings |
 
 Latencies are one-way, applied in each direction (RTT ≈ 2 × latency).
-| **Compare view** | **Network Lab — Compare** on the landing page. Inside: `Tab` network drawer, `1`–`5` presets, click a pane then `P` / `R` / `I` / `G` to toggle its settings, `T` truth rings |
 
 ---
 
@@ -166,5 +167,7 @@ CN-Sem5-Project/
   `npm run demo` checks ports 5173/8080/9000/9001 first and prints the command to free them. Usually a previous demo is still running. You can find and terminate processes holding these ports (e.g., in Windows PowerShell: `Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Stop-Process -Force`).
 - **Dependencies not found after pulling**:
   Run `npm install` at root, or run `cd NoBu-Shooter && npm install`.
+- **`D` (or `P`, `R`, `1`–`5`) does nothing, while the arrow keys work**:
+  A browser extension is consuming the key before the page sees it. **Vimium** does exactly this: it maps `d` (scroll half page down), `r` (reload!), `p` (open clipboard URL) and digits (count prefix). Exclude the demo in Vimium: click the Vimium toolbar icon on the demo tab and choose *Exclude*, or add `http://localhost:5173/*` with an empty key list under Vimium Options → *Excluded URLs and keys*. A browser profile without such extensions works too.
 - **Canvas render error or blank page**:
   Hard refresh the browser (`Ctrl + F5`) to clear Vite cache. Ensure your browser supports WebGL / HTML5 Canvas.

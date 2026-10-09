@@ -40,7 +40,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
     {
       category: 'SYSTEM SHORTCUTS',
       items: [
-        { keys: ['ESC'], desc: 'Open System Settings' },
+        { keys: ['ESC'], desc: 'Open System Settings (includes Leave Match)' },
         { keys: ['F1', '?'], desc: 'Toggle this Controls Guide' },
       ],
     },
@@ -50,6 +50,11 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
     <div
       className="overlay"
       style={{
+        // .overlay is click-through (pointer-events: none, inherited) for HUD
+        // text; a modal must take clicks and wheel events, or they reach the game
+        pointerEvents: 'auto',
+        position: 'fixed',
+        padding: 'var(--sp-l)',
         zIndex: 1000,
         backgroundColor: 'rgba(5, 5, 15, 0.82)',
         backdropFilter: 'blur(8px)',
@@ -70,8 +75,9 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
           boxShadow: '0 0 25px rgba(0, 229, 255, 0.35), inset 0 0 15px rgba(124, 77, 255, 0.05)',
           borderRadius: 'var(--panel-radius)',
           width: 'clamp(340px, 92vw, 560px)',
-          maxHeight: '90vh',
+          maxHeight: '100%',
           overflowY: 'auto',
+          overscrollBehavior: 'contain',
           padding: 'var(--sp-xl)',
           display: 'flex',
           flexDirection: 'column',

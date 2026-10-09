@@ -17,6 +17,7 @@ import type { PlayerSnap, ProjectileSnap, GameEvent } from '@nobu/shared/protoco
 import { moverPath, type MoverCfg } from '@nobu/shared/sim';
 import GAME from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
+import { acquireKeyboard, movementKeys } from './input.js';
 
 /**
  * Compare-view rendering options (PHASES.md C1-C4). Without them the scene
@@ -107,16 +108,6 @@ export class ArenaScene extends Phaser.Scene {
   private fxGraphics!: Phaser.GameObjects.Graphics;
   private ghostGraphics!: Phaser.GameObjects.Graphics;
 
-  // Keyboard keys (Bug 2A fix — stored as class fields, polled in update())
-  private keyW!: Phaser.Input.Keyboard.Key;
-  private keyA!: Phaser.Input.Keyboard.Key;
-  private keyS!: Phaser.Input.Keyboard.Key;
-  private keyD!: Phaser.Input.Keyboard.Key;
-  private keyUp!: Phaser.Input.Keyboard.Key;
-  private keyDown!: Phaser.Input.Keyboard.Key;
-  private keyLeft!: Phaser.Input.Keyboard.Key;
-  private keyRight!: Phaser.Input.Keyboard.Key;
-
   // Particle system
   private particles: ParticleEffect[] = [];
   private correctionLines: CorrectionLine[] = [];
@@ -206,27 +197,20 @@ export class ArenaScene extends Phaser.Scene {
       this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
         if (ptr.leftButtonDown()) this.netClient.fireDown = true;
       });
-      this.input.on('pointerup', () => { this.netClient.fireDown = false; });
+      const release = () => { this.netClient.fireDown = false; };
+      this.input.on('pointerup', release);
+      this.input.on('pointerupoutside', release);
     }
 
-    // Keyboard — store refs so we can poll them inside update() (Bug 2A fix).
-    // With a shared InputDriver the driver owns the keyboard instead.
-    const kb = this.input.keyboard!;
-    if (!driver) {
-      this.keyW     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-      this.keyA     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-      this.keyS     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-      this.keyD     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
-      this.keyUp    = kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
-      this.keyDown  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
-      this.keyLeft  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
-      this.keyRight = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
-    }
+    // Keyboard — the page-level tracker in input.ts (Phaser's keyboard is
+    // disabled in GameContainer). With a shared InputDriver the driver owns
+    // the keyboard instead.
+    const releaseKeyboard = driver ? () => {} : acquireKeyboard();
 
-    // Clean up keys and NetClient subscriptions when the scene stops or the
-    // whole game is destroyed (React StrictMode mounts the container twice).
+    // Clean up the keyboard and NetClient subscriptions when the scene stops or
+    // the whole game is destroyed (React StrictMode mounts the container twice).
     const cleanup = () => {
-      kb.removeAllKeys(true);
+      releaseKeyboard();
       this.unsubscribers.forEach((off) => off());
       this.unsubscribers = [];
     };
@@ -268,13 +252,8 @@ export class ArenaScene extends Phaser.Scene {
 
     // With a shared InputDriver, it samples keys and steps the client.
     if (!this.options.input) {
-      // ── Poll keyboard (Bug 2A fix: moved here from events.on('update')) ────
-      let keys = 0;
-      if (this.keyW?.isDown  || this.keyUp?.isDown)    keys |= 1; // UP
-      if (this.keyS?.isDown  || this.keyDown?.isDown)  keys |= 2; // DOWN
-      if (this.keyA?.isDown  || this.keyLeft?.isDown)  keys |= 4; // LEFT
-      if (this.keyD?.isDown  || this.keyRight?.isDown) keys |= 8; // RIGHT
-      this.netClient.keys = keys;
+      // ── Movement keys (page-level tracker, input.ts) ────────
+      this.netClient.keys = movementKeys();
 
       // ── Fixed sim accumulator (60 Hz) ────────────────────────
       const stepMs = 1000 / GAME.sim.hz;

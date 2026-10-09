@@ -1,7 +1,7 @@
 # NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
-**Status:** Phase 1 done (2026-10-09). Phase 2 in progress — implementation plan `docs/PHASE2_PLAN.md`, decisions D1–D7 approved by the owner on 2026-10-09.
+**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Next: Phase 3.
 **Replaces:** `ROADMAP.md` (draft of 2026-10-09). The v1 build spec is archived at `docs/archive/SPEC-v1.md`. `GAMERULES.md` remains the source of truth for gameplay.
 
 The project moves in six phases. Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
@@ -23,7 +23,7 @@ The project moves in six phases. Each phase ends with something you can **show**
 |---|---|---|---|---|
 | 0 | v1 build | Game, emulator and Network Lab boot; visually good, but key numbers are wrong | — | done (before 2026-10-09) |
 | 1 | **Correct core netcode** | Prediction/reconciliation demo with honest numbers: 0 corrections on a clean network, corrections under loss, A/B shows 17 ms vs 236 ms | G2 | **done 2026-10-09** |
-| 2 | **Compare view + scripted movers** | 2–4 synchronised panes plus a ground-truth reference pane, with moving targets that make interpolation visible | G1 foundation, G2 | in progress |
+| 2 | **Compare view + scripted movers** | 2–4 synchronised panes plus a ground-truth reference pane, with moving targets that make interpolation visible | G1 foundation, G2 | **done 2026-10-09** |
 | 3 | **Sync models: snapshot vs state** | Full snapshots vs delta snapshots vs state sync with extrapolation, side by side, with a live bandwidth chart | G1 | planned |
 | 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena, texture-ready assets | G4 | planned |
 | 5 | **Realistic transport + standalone emulator** | Real UDP between Node "network players", emulator and server. The emulator dashboard works with no game running | G3 | planned |

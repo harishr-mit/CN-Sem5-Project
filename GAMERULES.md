@@ -145,7 +145,7 @@ While dead, a player cannot move, fire, score or be hit.
 
 ## 9. Spawn selection
 
-The same rule applies to the initial spawn, countdown placement and respawn.
+The same rule applies to the initial spawn, countdown placement and respawn. (The `lab` room uses one fixed spawn point instead; see §14.)
 
 1. Candidates are the 8 spawn points.
 2. Discard any candidate within 64 px of any other participant that is alive.
@@ -217,6 +217,8 @@ The server is the final authority over positions, collisions, projectiles, hits,
 | `main` | The game | per §12 | on | per §2 |
 | `lab` | Movement-only sandbox used by the Compare view (`PHASES.md` Phase 2). Also holds the **scripted movers** (circle, zigzag, reversal, stop–go; selected with the `lab` message, not players, no player cap) and accepts **spectators** (snapshots only, no player) | off | rejected | state is always `RUNNING`; no timer, no deaths |
 
+In `lab`, §9 does not apply: every player spawns at `rooms.lab.spawn` (880, 360), clear of the mover lanes. The Compare panes' players are driven by the same input, so they must start from the same place (players don't collide with each other).
+
 ---
 
 ## 15. Game constants (`shared/src/config/game.json`)
@@ -275,8 +277,12 @@ Save this block verbatim. Derived tick counts use `ticks = Math.round(ms × sim.
     "seed": 1337
   },
   "rooms": {
-    "main": { "bots": true,  "firing": true,  "timed": true  },
-    "lab":  { "bots": false, "firing": false, "timed": false }
+    "main": { "bots": true,  "firing": true,  "timed": true,  "movers": false },
+    "lab":  { "bots": false, "firing": false, "timed": false, "movers": true, "spawn": { "x": 880, "y": 360 } }
+  },
+  "lab": {
+    "moverSpeed": 200,
+    "stopGo": { "moveMs": 1000, "stopMs": 750 }
   }
 }
 ```

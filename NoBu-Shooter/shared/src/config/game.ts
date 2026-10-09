@@ -50,7 +50,10 @@ export const GAME = {
   },
   rooms: {
     main: { bots: true,  firing: true,  timed: true,  movers: false },
-    lab:  { bots: false, firing: false, timed: false, movers: true  },
+    // Every lab player spawns at `spawn`: Compare panes are driven by the same
+    // input, so they must start from the same place (GAMERULES.md §14). It is
+    // clear of the mover lanes and obstacles (tests/movers.test.ts).
+    lab:  { bots: false, firing: false, timed: false, movers: true, spawn: { x: 880, y: 360 } },
   },
   lab: {
     moverSpeed: 200,

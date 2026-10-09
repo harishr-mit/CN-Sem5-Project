@@ -4,6 +4,7 @@ import type { EmulatorClient } from '../net/EmulatorClient.js';
 import { useGameStore } from './store.js';
 import { Sparkline } from './Sparkline.js';
 import { EmulatorControls } from './EmulatorControls.js';
+import { isTypingTarget } from '../game/input.js';
 
 interface NetworkLabProps {
   netClient: NetClient;
@@ -38,8 +39,8 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
   // Keyboard hotkeys for presets and toggles per SPEC.md §13.2
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger when typing in inputs
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Don't trigger while typing in a text field (sliders and checkboxes are fine)
+      if (isTypingTarget(e.target)) return;
 
       if (e.key === 'Tab') {
         e.preventDefault();

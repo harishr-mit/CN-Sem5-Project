@@ -38,6 +38,10 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, options
             width: GAME.arena.width,
             height: GAME.arena.height,
           },
+      // Movement keys come from the page-level tracker in input.ts (Quick Match)
+      // or the InputDriver (Compare). Phaser's keyboard manager would
+      // preventDefault captured keys, hiding them from any other listener.
+      input: { keyboard: false },
       render: {
         pixelArt: false,
         antialias: true,

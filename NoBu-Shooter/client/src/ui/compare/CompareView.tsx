@@ -15,6 +15,7 @@ import { NetClient, type LocalMetrics, type PredictionToggle } from '../../net/N
 import { EmulatorClient } from '../../net/EmulatorClient.js';
 import type { ArenaSceneOptions } from '../../game/ArenaScene.js';
 import { InputDriver } from '../../compare/InputDriver.js';
+import { isTypingTarget } from '../../game/input.js';
 import { COMPARE_PRESETS, customPreset } from '../../compare/presets.js';
 import { layoutPanes } from '../../compare/layout.js';
 import { PANE_COLORS, REFERENCE_COLOR } from '../../compare/colors.js';
@@ -226,7 +227,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
   // Hotkeys: Tab = drawer; P/R/I/G = toggle on the selected pane; T = truth rings
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (isTypingTarget(e.target)) return;
       const k = e.key.toLowerCase();
       if (e.key === 'Tab') { e.preventDefault(); setDrawerOpen((o) => !o); }
       else if (k === 'p') toggleSetting(selected, 'prediction');
