@@ -10,13 +10,15 @@
  */
 
 import { encodeClient, decodeServer } from '@nobu/shared/protocol';
-import { stepPlayer } from '@nobu/shared/sim';
+import { stepPlayer, moverPath } from '@nobu/shared/sim';
+import type { MoverCfg } from '@nobu/shared/sim';
 import type {
   MsgSnap, PlayerSnap, ProjectileSnap, InputEntry,
-  MsgWelcome, MsgPong, GameEvent, ClientMsg,
+  MsgWelcome, MsgPong, GameEvent, ClientMsg, MoverPattern,
 } from '@nobu/shared/protocol';
 import GAME from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
+import { RemoteErrorTracker, type DrawnEntity } from './remoteError.js';
 
 // ── Types ──────────────────────────────────────────────────────
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'timeout' | 'error';
@@ -57,6 +59,14 @@ export interface LocalMetrics {
   reorderedIgnored: number;
   serverTickHz: number;
   serverTickMs: number;
+  /** Lab movers vs their exact true path (needs a truth clock, see setTruthClock):
+   *  median delay, its spread (IQR / 1.35), mean distance and frozen frames. */
+  moverLagMs: number;
+  moverWobbleMs: number;
+  moverErrorPx: number;
+  moverFrozenPct: number;
+  /** Delay samples behind the mover metrics (0 = no data). */
+  moverSamples: number;
 }
 
 export interface CorrectionEvent {
@@ -105,6 +115,8 @@ export interface NetClientOptions {
   transport?: TransportFactory;
   /** Monotonic local clock in ms. */
   now?: () => number;
+  /** Join as a spectator: snapshots only, no player (Compare reference pane). */
+  spectate?: boolean;
 }
 
 interface Listeners {
@@ -124,6 +136,8 @@ const MOVE_CFG = {
   obstacles: GAME.obstacles as unknown as { x: number; y: number; w: number; h: number }[],
   hz: GAME.sim.hz,
 };
+
+const MOVER_CFG: MoverCfg = { speed: GAME.lab.moverSpeed, stopGo: GAME.lab.stopGo };
 
 const SIM_STEP_MS = 1000 / GAME.sim.hz;
 const SNAP_EVERY_TICKS = Math.round(GAME.sim.hz / NET.snapshotHz);
@@ -146,6 +160,7 @@ export class NetClient {
   private readonly url: string;
   private readonly playerName: string;
   private readonly roomName: 'main' | 'lab';
+  private readonly spectating: boolean;
   private readonly nonce: string;
   private readonly transportFactory: TransportFactory;
   private readonly now: () => number;
@@ -203,6 +218,12 @@ export class NetClient {
   private inputToScreenSamples: number[] = [];
   private ackDelaySamples: number[] = [];
 
+  // Remote error vs the movers' true path (PHASES.md C4)
+  private truthClock: (() => number | null) | null = null;
+  private remoteError = new RemoteErrorTracker();
+  private lastRender: RenderState | null = null;
+  private lastRenderAt = 0;
+
   toggles: PredictionToggle = {
     prediction: true,
     reconciliation: true,
@@ -232,12 +253,14 @@ export class NetClient {
     correctionsPerSec: 0, lastErrorPx: 0, recentErrorPx: 0, avgErrorPx: 0, maxErrorPx: 0,
     inputToScreenMs: 0, ackDelayMs: 0, bwUpKbps: 0, bwDownKbps: 0, snapsMissed: 0,
     duplicatesIgnored: 0, reorderedIgnored: 0, serverTickHz: 0, serverTickMs: 0,
+    moverLagMs: 0, moverWobbleMs: 0, moverErrorPx: 0, moverFrozenPct: 0, moverSamples: 0,
   };
 
   constructor(opts: NetClientOptions) {
     this.url = opts.url;
     this.playerName = opts.name;
     this.roomName = opts.room ?? 'main';
+    this.spectating = opts.spectate ?? false;
     this.transportFactory = opts.transport ?? browserWebSocketTransport;
     this.now = opts.now ?? (() => performance.now());
     this.nonce = Math.random().toString(36).slice(2);
@@ -309,6 +332,8 @@ export class NetClient {
     this.latestSnap = null;
     this.latestAppliedTick = -1;
     this.clockInitialized = false;
+    this.lastRender = null;
+    this.remoteError.reset();
   }
 
   private send(msg: ClientMsg): void {
@@ -321,6 +346,7 @@ export class NetClient {
   private startHello(): void {
     const sendHello = () => this.send({
       t: 'hello', v: 1, name: this.playerName, room: this.roomName, nonce: this.nonce,
+      ...(this.spectating ? { spectate: true } : {}),
     });
     sendHello();
     this.helloTimer = setInterval(sendHello, NET.helloRetryMs);
@@ -356,7 +382,7 @@ export class NetClient {
     if (this.giveUpTimer) clearTimeout(this.giveUpTimer);
     this.helloTimer = this.giveUpTimer = null;
     this.connected = true;
-    this.playerId = msg.playerId;
+    this.playerId = msg.spectator ? null : msg.playerId;
 
     this.pingTimer = setInterval(() => {
       const id = this.pingId++;
@@ -564,6 +590,25 @@ export class NetClient {
     this.send({ t: 'perturb', dx, dy });
   }
 
+  /** Select the active scripted movers (lab room only). */
+  setMovers(movers: MoverPattern[]): void {
+    this.send({ t: 'lab', movers });
+  }
+
+  /** Estimated current server time (ms), or null before the first snapshot. */
+  serverNow(): number | null {
+    return this.clockInitialized ? this.now() + this.clockOffset : null;
+  }
+
+  /**
+   * Source of the true server time for the mover metrics — normally the
+   * spectator's serverNow(), whose direct connection makes it accurate.
+   */
+  setTruthClock(clock: (() => number | null) | null): void {
+    this.truthClock = clock;
+    this.remoteError.reset();
+  }
+
   // ── Rendering helpers ──────────────────────────────────────
   /**
    * Call once per rendered frame. With prediction on, Input → Screen is the
@@ -572,6 +617,7 @@ export class NetClient {
    */
   framePresented(frameMs: number): void {
     this.lastFrameMs = frameMs;
+    this.sampleRemoteError();
     if (this.unpresentedInputAt === null) return;
     if (this.toggles.prediction) {
       pushCapped(this.inputToScreenSamples, this.now() - this.unpresentedInputAt + frameMs, LATENCY_SAMPLES);
@@ -581,6 +627,30 @@ export class NetClient {
 
   /** Remote entities interpolated around `now + clockOffset − interpDelay` (SPEC.md §10.5). */
   getInterpolatedState(): RenderState {
+    const state = this.computeRenderState();
+    this.lastRender = state;
+    this.lastRenderAt = this.now();
+    return state;
+  }
+
+  /** Compare the movers in the last rendered state with their true path. */
+  private sampleRemoteError(): void {
+    const state = this.lastRender;
+    const truth = this.truthClock?.() ?? null;
+    if (!state || truth === null) return;
+    const now = this.now();
+    // The truth clock reads "now"; the state was computed at lastRenderAt.
+    const serverMs = truth - (now - this.lastRenderAt);
+    const drawn: DrawnEntity[] = [];
+    for (const p of state.players) {
+      if (!p.mover || !p.alive) continue;
+      const pattern = p.mover;
+      drawn.push({ id: p.id, x: p.x, y: p.y, path: (ms) => moverPath(pattern, ms / 1000, MOVER_CFG) });
+    }
+    if (drawn.length) this.remoteError.sample(this.lastRenderAt, serverMs, drawn);
+  }
+
+  private computeRenderState(): RenderState {
     const latest = this.latestSnap;
     const buf = this.snapBuffer;
     if (!this.toggles.interpolation || buf.length === 0) {
@@ -688,15 +758,24 @@ export class NetClient {
     m.snapsMissed = this.snapsMissed;
     m.duplicatesIgnored = this.duplicatesIgnored;
     m.reorderedIgnored = this.reorderedIgnored;
+
+    const re = this.remoteError.stats(now);
+    m.moverLagMs = re.lagMs;
+    m.moverWobbleMs = re.wobbleMs;
+    m.moverErrorPx = re.errorPx;
+    m.moverFrozenPct = re.frozenPct;
+    m.moverSamples = re.samples;
   }
 
   /** Reset the latency averages (e.g. after toggling prediction). */
   resetLatencySamples(): void {
     this.inputToScreenSamples = [];
     this.ackDelaySamples = [];
+    this.remoteError.reset();
   }
 
   get isConnected(): boolean { return this.connected; }
+  get isSpectator(): boolean { return this.spectating; }
   get myPlayerId(): number | null { return this.playerId; }
   get latestSnapshot(): MsgSnap | null { return this.latestSnap; }
   get connectionStatus(): ConnectionStatus { return this.status; }

@@ -1,7 +1,7 @@
 # NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
-**Status:** Phase 1 done (2026-10-09). Next: Phase 2.
+**Status:** Phase 1 done (2026-10-09). Phase 2 in progress — implementation plan `docs/PHASE2_PLAN.md`, decisions D1–D7 approved by the owner on 2026-10-09.
 **Replaces:** `ROADMAP.md` (draft of 2026-10-09). The v1 build spec is archived at `docs/archive/SPEC-v1.md`. `GAMERULES.md` remains the source of truth for gameplay.
 
 The project moves in six phases. Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
@@ -23,7 +23,7 @@ The project moves in six phases. Each phase ends with something you can **show**
 |---|---|---|---|---|
 | 0 | v1 build | Game, emulator and Network Lab boot; visually good, but key numbers are wrong | — | done (before 2026-10-09) |
 | 1 | **Correct core netcode** | Prediction/reconciliation demo with honest numbers: 0 corrections on a clean network, corrections under loss, A/B shows 17 ms vs 236 ms | G2 | **done 2026-10-09** |
-| 2 | **Compare view + scripted movers** | 2–4 synchronised panes plus a ground-truth reference pane, with moving targets that make interpolation visible | G1 foundation, G2 | next |
+| 2 | **Compare view + scripted movers** | 2–4 synchronised panes plus a ground-truth reference pane, with moving targets that make interpolation visible | G1 foundation, G2 | in progress |
 | 3 | **Sync models: snapshot vs state** | Full snapshots vs delta snapshots vs state sync with extrapolation, side by side, with a live bandwidth chart | G1 | planned |
 | 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena, texture-ready assets | G4 | planned |
 | 5 | **Realistic transport + standalone emulator** | Real UDP between Node "network players", emulator and server. The emulator dashboard works with no game running | G3 | planned |
@@ -120,20 +120,22 @@ R10 covered:
 
 **Goal:** a flexible side-by-side comparison screen. It is the stage on which every later comparison (sync models, toggles, transports) is shown.
 
+**Implementation plan:** `docs/PHASE2_PLAN.md` (decisions D1–D7 approved 2026-10-09). The table below reflects those decisions.
+
 ### Scope
 
 | ID | Task |
 |---|---|
-| C1 | **Compare view** (replaces A/B): 2–4 panes. Each pane has its own `NetClient` and emulator session, plus a per-pane config of toggles (and the sync model from Phase 3). Panes fill the space without letterboxing. Keyboard and mouse drive all panes. |
-| C2 | **Reference pane** (optional): connects *directly* to the server (bypassing the emulator), so the ground truth is on screen. |
-| C3 | **Scripted movers** in the `lab` room: server entities with patterns (circle, zigzag, sudden reversal, stop–go). Their state reaches every pane through the emulator, so the differences between interpolation and extrapolation are obvious. Patterns and on/off are selectable from the Compare view. |
-| C4 | **Per-pane metrics bar**: Input → Screen, ack delay, RTT, corrections/s, bandwidth ↓, and **remote error in px** (rendered mover position vs the reference pane's position at the same moment). |
-| C5 | **Comparison presets** (one click): "Prediction off vs on", "Interpolation off vs on", "Redundancy off vs on", each with the right emulator preset. The old A/B view becomes the first of these. |
-| C6 | Tests: the movers are deterministic; the reference pane matches server positions exactly. |
+| C1 | **Compare view** (replaces A/B): 2–4 panes. Each pane has its own `NetClient` and emulator session, plus a per-pane config of toggles (and, from Phase 3, a sync model). **One shared input driver** steps every pane with the same keys on the same tick, so all panes send identical input sequences. Each canvas is sized to exactly 16:9 in the grid that makes panes largest, so there is no letterboxing; the leftover space becomes a **compare dock** (comparison table, sparklines, later the Phase 3 bandwidth chart). The Network Lab opens as an overlay drawer (`Tab`). |
+| C2 | **Reference pane**: a *spectator* connection (`hello.spectate`) made *directly* to the server, bypassing the emulator. It joins no player and draws the newest snapshot as-is, so the ground truth for every pane's player and every mover is on screen. Compare always opens this connection, because it also serves as the server clock for C4; the switch only shows or hides the pane. |
+| C3 | **Scripted movers** in the `lab` room: circle, zigzag, sudden reversal, stop–go. Their paths are pure functions of server time (`shared/src/sim/movers.ts`), so they are deterministic and any client can compute their exact true position. They are sent as ordinary `PlayerSnap` entries with a `mover` field, so interpolation (and Phase 3's encoders) treat them like any remote player; they don't count toward the player cap. A `lab` message selects the active patterns from the Compare view. |
+| C4 | **Per-pane metrics bar**: Input → Screen, ack delay, RTT, corrections/s, bandwidth ↓, and **remote error** measured against the movers' exact true position: **lag** (how old the drawn position is, median ms), **wobble** (spread of that delay, ms), distance (px) and **frozen frames** (%). A single mean distance would rate interpolation as *worse* (≈ 30 px vs ≈ 14 px at 50 ± 30 ms), although it is visibly smoother — what interpolation buys is smoothness at the price of a fixed lag (harness: 158 ms ± 6 with it, 67 ms ± 36 and 67 % frozen frames without). See `docs/PHASE2_PLAN.md` §10 X1. |
+| C5 | **Comparison presets** (one click), each changing **one** setting: "Prediction off vs on" (Transatlantic; interpolation stays on in both panes, so pane A shows ≈ 340 ms Input → Screen vs ≈ 17 ms), "Interpolation off vs on" (50 ms ± 30 ms jitter, all movers, reference pane shown), "Redundancy off vs on" (50 ms, 10 % loss), and Custom. Their network conditions are applied as complete emulator configs (ad-hoc named presets), so nothing carries over from the previous preset. |
+| C6 | Tests: movers are deterministic, continuous and clear of obstacles; the spectator/reference matches server positions exactly; the lag/wobble/frozen metrics behave as described in C4 (the demo checkpoint as a test); pane layout has no letterboxing; the input driver feeds every pane identically; the smoke test sees movers over a real WebSocket. |
 
-**Demo checkpoint:** open Compare and choose "Interpolation off vs on" at 50 ms ± 30 ms jitter. The movers stutter in the left pane and glide in the right one, and the remote-error number tells the same story.
+**Demo checkpoint:** open Compare and choose "Interpolation off vs on" at 50 ms ± 30 ms jitter. The movers stutter in the left pane and glide in the right one: their trails are bunched on the left and evenly spaced on the right, frozen frames read ≥ 50 % vs ≈ 0 %, wobble is high vs low (≈ 36 ms vs ≈ 6 ms) — and the lag is larger on the right (≈ 150 ms = 50 ms network + 100 ms interpolation delay), which is the price of that smoothness.
 
-**Exit criteria:** the phase rules above; at 1280×720 and 1920×1080 no pane has empty letterbox bars larger than 10 % of the pane.
+**Exit criteria:** the phase rules above; at 1280×720 and 1920×1080 no pane has empty letterbox bars larger than 10 % of the pane; Compare with 4 panes runs at ≥ 55 fps on the dev laptop.
 
 ---
 
@@ -157,7 +159,7 @@ R10 covered:
 | S1 | Protocol messages `snapDelta`, `state` and client `snapAck`, with validators. Documented in `docs/PROTOCOL.md`. |
 | S2 | Delta encoder/decoder with baseline tracking and a full-snapshot fallback. |
 | S3 | State encoder (position + velocity, configurable rate) and an extrapolating client renderer with error blending. |
-| S4 | Compare view: a sync model per pane, plus a **live bandwidth chart** comparing panes (↓ kbps over time). |
+| S4 | Compare view: a sync model per pane (`PaneSpec.sync`, reserved in Phase 2), plus a **live bandwidth chart** comparing panes (↓ kbps over time) in the compare dock. |
 | S5 | Tests: a delta round-trip equals the full snapshot (including under loss with the fallback); extrapolation error is 0 on straight lines and bounded on reversals; per-model bandwidth falls within an expected range. |
 
 **Demo checkpoint:** three panes (Full / Delta / State) at the Nightmare preset. Delta stays responsive where Full builds a queue, and State reacts instantly but rubber-bands on the zigzag mover. The bandwidth chart shows the difference.
@@ -172,7 +174,7 @@ R10 covered:
 
 | ID | Task |
 |---|---|
-| P1 | **Presenter mode**: a scripted sequence of steps (data file mirroring `docs/DEMO_SCRIPT.md`). Each step sets presets, toggles, the Compare layout and the sync model automatically, and shows a caption ("Watch the amber ghost lag behind…"). `N` / `B` move to the next or previous step; `H` hides the captions. |
+| P1 | **Presenter mode**: a scripted sequence of steps (data file mirroring `docs/DEMO_SCRIPT.md`). Each step sets presets, toggles, the Compare layout and the sync model automatically, and shows a caption ("Watch the amber ghost lag behind…"). `N` / `B` move to the next or previous step; `H` hides the captions. Optional: different network conditions per pane (the emulator already targets sessions by label). |
 | P2 | Arena: name tags, remote aim chevrons, death markers, a respawn pulse, glow/bloom (Phaser FX) with automatic degrade, and consistent player colours across the scoreboard and arena. |
 | P3 | **Texture-ready assets**: a `preload()` manifest (`client/public/assets/manifest.json`). Each sprite key falls back to the current procedural drawing when its file is missing, so new textures drop in without code changes. The `// TEXTURE:` markers stay. |
 | P4 | Lab panel: collapsible sections, no scroll at 1920×1080, compact at 1280×720, and a projector font-scale setting. |

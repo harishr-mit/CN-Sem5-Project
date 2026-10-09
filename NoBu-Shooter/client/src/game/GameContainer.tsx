@@ -1,23 +1,25 @@
 import React, { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
-import { ArenaScene } from './ArenaScene.js';
+import { ArenaScene, type ArenaSceneOptions } from './ArenaScene.js';
 import type { NetClient } from '../net/NetClient.js';
 import GAME from '@nobu/shared/config/game';
 
 interface GameContainerProps {
   netClient: NetClient;
+  /** Compare-view rendering options; read once at scene creation (its fields may be mutated later). */
+  options?: ArenaSceneOptions;
   className?: string;
   id?: string;
 }
 
-export const GameContainer: React.FC<GameContainerProps> = ({ netClient, className, id }) => {
+export const GameContainer: React.FC<GameContainerProps> = ({ netClient, options, className, id }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const scene = new ArenaScene({ netClient });
+    const scene = new ArenaScene({ netClient, options });
 
     const config: Phaser.Types.Core.GameConfig = {
       type: Phaser.AUTO,
@@ -25,12 +27,17 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, classNa
       width: GAME.arena.width,
       height: GAME.arena.height,
       backgroundColor: '#07070f',
-      scale: {
-        mode: Phaser.Scale.FIT,
-        autoCenter: Phaser.Scale.CENTER_BOTH,
-        width: GAME.arena.width,
-        height: GAME.arena.height,
-      },
+      // FIT renders a full 1280×720 frame and lets CSS shrink it. Compare panes
+      // instead render at their displayed size (RESIZE) and zoom the camera
+      // to fit: about 4× fewer pixels per pane, which kept 4–5 panes at 60 fps.
+      scale: options?.renderAtDisplaySize
+        ? { mode: Phaser.Scale.RESIZE }
+        : {
+            mode: Phaser.Scale.FIT,
+            autoCenter: Phaser.Scale.CENTER_BOTH,
+            width: GAME.arena.width,
+            height: GAME.arena.height,
+          },
       render: {
         pixelArt: false,
         antialias: true,
@@ -46,6 +53,9 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, classNa
     if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
       resizeObserver = new ResizeObserver(() => {
         if (gameRef.current?.isBooted && gameRef.current?.scale) {
+          // refresh() reuses the cached parent size; re-measure first so the
+          // canvas also grows (not only shrinks) when its host gets bigger.
+          gameRef.current.scale.getParentBounds();
           gameRef.current.scale.refresh();
         }
       });

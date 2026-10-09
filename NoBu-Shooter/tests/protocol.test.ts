@@ -80,4 +80,18 @@ describe('Wire Protocol Serialization & Validation (SPEC.md §8)', () => {
     expect(decodeClient(JSON.stringify({ t: 'hello', v: 999 }))).toBeNull();
     expect(decodeClient(JSON.stringify({ t: 'input', inputs: 'not-an-array' }))).toBeNull();
   });
+
+  it('validates hello.spectate and the lab message (PHASES.md C2, C3)', () => {
+    const hello = { t: 'hello', v: 1, name: 'REF', room: 'lab', nonce: 'n' };
+    expect(decodeClient(JSON.stringify({ ...hello, spectate: true }))).not.toBeNull();
+    expect(decodeClient(JSON.stringify(hello))).not.toBeNull();
+    expect(decodeClient(JSON.stringify({ ...hello, spectate: 'yes' }))).toBeNull();
+
+    const lab = decodeClient(JSON.stringify({ t: 'lab', movers: ['circle', 'zigzag', 'circle'] }));
+    expect(lab).toEqual({ t: 'lab', movers: ['circle', 'zigzag'] }); // duplicates dropped
+    expect(decodeClient(JSON.stringify({ t: 'lab', movers: [] }))).toEqual({ t: 'lab', movers: [] });
+    expect(decodeClient(JSON.stringify({ t: 'lab', movers: ['spiral'] }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'lab', movers: 'circle' }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'lab' }))).toBeNull();
+  });
 });

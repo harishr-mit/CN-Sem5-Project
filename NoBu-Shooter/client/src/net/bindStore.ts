@@ -1,6 +1,6 @@
 /**
  * bindStore.ts — connects a headless NetClient to the zustand UI store.
- * Only the "main" client of a view is bound; A/B panes are not, so they
+ * Only the "main" client of a view is bound; Compare panes are not, so they
  * don't overwrite each other's HUD state.
  */
 

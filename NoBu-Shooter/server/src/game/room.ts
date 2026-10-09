@@ -4,8 +4,8 @@
  * SPEC.md §9, GAMERULES.md §2–§14.
  */
 
-import { stepPlayer, settlePosition, mulberry32, sweptCircleRect, sweptCircleCircle, segmentIntersectsRect } from '@nobu/shared/sim';
-import type { Rect, Vec2 } from '@nobu/shared/sim';
+import { stepPlayer, settlePosition, mulberry32, sweptCircleRect, sweptCircleCircle, segmentIntersectsRect, moverPath, MOVER_PATTERNS } from '@nobu/shared/sim';
+import type { Rect, Vec2, MoverPattern, MoverCfg } from '@nobu/shared/sim';
 import type {
   InputEntry, MsgSnap, PlayerSnap, ProjectileSnap,
   MatchState, GameEvent, MatchResults, ScoreEntry,
@@ -54,14 +54,25 @@ const MOVE_CFG = {
   hz: SIM_HZ,
 };
 
+const MOVER_CFG: MoverCfg = { speed: GAME.lab.moverSpeed, stopGo: GAME.lab.stopGo };
+
 type SendFn = (playerId: number, msg: string) => void;
-type BroadcastFn = (msg: string) => void;
+/** Sends to every spectator connection in the room. */
+type SpectatorFn = (msg: string) => void;
+
+/** A scripted lab mover (PHASES.md C3). Position = moverPath(pattern, tick / SIM_HZ). */
+interface MoverState {
+  id: number;
+  pattern: MoverPattern;
+  x: number;
+  y: number;
+}
 
 let nextPlayerId = 1;
 
 export class Room {
   readonly name: string;
-  readonly roomCfg: { bots: boolean; firing: boolean; timed: boolean };
+  readonly roomCfg: { bots: boolean; firing: boolean; timed: boolean; movers: boolean };
 
   private state: RoomState;
   private botCtrl: BotController;
@@ -69,21 +80,25 @@ export class Room {
   private rng = mulberry32(GAME.bots.seed + 1); // separate from bot rng
   readonly metrics = new Metrics();
 
-  // Send callback injected at construction
+  /** Scripted movers, keyed by pattern. Kept out of `players` (no player cap, no inputs). */
+  private movers = new Map<MoverPattern, MoverState>();
+  private spectators = 0;
+
+  // Send callbacks injected at construction
   private sendFn: SendFn;
-  private broadcastFn: BroadcastFn;
+  private spectatorFn: SpectatorFn;
 
   constructor(
     name: string,
     sendFn: SendFn,
-    broadcastFn: BroadcastFn
+    spectatorFn: SpectatorFn
   ) {
     this.name = name;
     this.roomCfg = (GAME.rooms as Record<string, typeof this.roomCfg>)[name] ?? {
-      bots: false, firing: false, timed: false,
+      bots: false, firing: false, timed: false, movers: false,
     };
     this.sendFn = sendFn;
-    this.broadcastFn = broadcastFn;
+    this.spectatorFn = spectatorFn;
     this.botCtrl = new BotController();
 
     this.state = {
@@ -106,6 +121,35 @@ export class Room {
   // ── Public API ───────────────────────────────────────────────
 
   get playerCount(): number { return this.state.players.size; }
+  get spectatorCount(): number { return this.spectators; }
+  get activeMovers(): MoverPattern[] { return [...this.movers.keys()]; }
+
+  addSpectator(): void { this.spectators++; }
+
+  removeSpectator(): void {
+    this.spectators = Math.max(0, this.spectators - 1);
+    this.clearMoversIfEmpty();
+  }
+
+  /**
+   * Replace the set of active movers (lab rooms only). Returns false when the
+   * room doesn't allow movers. New movers take ids from the player id counter
+   * so they never clash with players.
+   */
+  setMovers(patterns: readonly MoverPattern[]): boolean {
+    if (!this.roomCfg.movers) return false;
+    const wanted = new Set(patterns);
+    for (const pattern of [...this.movers.keys()]) {
+      if (!wanted.has(pattern)) this.movers.delete(pattern);
+    }
+    for (const pattern of MOVER_PATTERNS) {
+      if (wanted.has(pattern) && !this.movers.has(pattern)) {
+        this.movers.set(pattern, { id: nextPlayerId++, pattern, x: 0, y: 0 });
+      }
+    }
+    this.stepMovers();
+    return true;
+  }
 
   isFull(): boolean {
     return this.state.players.size >= MAX_PARTICIPANTS;
@@ -162,6 +206,12 @@ export class Room {
       }
       this.state.matchState = 'WAITING';
     }
+    this.clearMoversIfEmpty();
+  }
+
+  /** Nobody left to watch: start the next session with movers off. */
+  private clearMoversIfEmpty(): void {
+    if (this.state.players.size === 0 && this.spectators === 0) this.movers.clear();
   }
 
   receiveInput(playerId: number, inputs: InputEntry[]): void {
@@ -188,9 +238,10 @@ export class Room {
     p.y = pos.y;
   }
 
-  buildSnapshot(playerId: number): MsgSnap {
+  /** `playerId` null builds a spectator snapshot (ack 0). */
+  buildSnapshot(playerId: number | null): MsgSnap {
     const { tick, serverTime, matchState, players, projectiles, events } = this.state;
-    const player = players.get(playerId);
+    const player = playerId === null ? undefined : players.get(playerId);
     const matchSnap = {
       state: matchState as MatchState,
       timeLeftMs: matchState === 'RUNNING'
@@ -219,6 +270,15 @@ export class Room {
       respawnMs: p.respawnTicksLeft * 1000 / SIM_HZ,
       score: p.score,
     }));
+    // Movers look like remote players to clients, so interpolation (and later
+    // sync models) handle them without special cases.
+    for (const m of this.movers.values()) {
+      playerSnaps.push({
+        id: m.id, name: m.pattern.toUpperCase(), bot: true,
+        x: m.x, y: m.y, alive: true, life: 1,
+        protectMs: 0, respawnMs: 0, score: 0, mover: m.pattern,
+      });
+    }
     return {
       t: 'snap',
       tick,
@@ -286,6 +346,9 @@ export class Room {
       if (p.fireCooldownTicks > 0) p.fireCooldownTicks--;
     }
 
+    // 2b. Scripted movers follow their path in server time
+    this.stepMovers();
+
     // 3. Step projectiles (swept collision)
     this.stepProjectiles();
 
@@ -326,6 +389,15 @@ export class Room {
       tick: this.state.tick,
     };
     this.state.events.push(ev);
+  }
+
+  private stepMovers(): void {
+    const tSec = this.state.tick / SIM_HZ;
+    for (const m of this.movers.values()) {
+      const pos = moverPath(m.pattern, tSec, MOVER_CFG);
+      m.x = pos.x;
+      m.y = pos.y;
+    }
   }
 
   private pruneEvents(): void {
@@ -577,5 +649,6 @@ export class Room {
       if (player.bot) continue; // bots don't need snapshots
       this.sendFn(player.id, encodeServer(this.buildSnapshot(player.id)));
     }
+    if (this.spectators > 0) this.spectatorFn(encodeServer(this.buildSnapshot(null)));
   }
 }

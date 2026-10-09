@@ -78,13 +78,19 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
 3. Note the **bufferbloat**: the 400 kbps cap is below what full snapshots need (~380–450 kbps), so the emulator queue fills, ack delay climbs to ~700 ms and the orange queue-drop count rises. (Phase 3's delta snapshots fix exactly this.)
 4. Switch **Input Redundancy ON**: corrections from upstream loss mostly disappear, although the queueing delay remains.
 
-### 8. A/B Compare Mode
+### 8. Compare View
 1. Click the home button or reload to return to the landing page.
-2. Click **NETWORK LAB — A/B COMPARE**.
-3. **Observation**: Two identical game viewports render side-by-side receiving synchronized keyboard inputs:
-   - **Pane A (Server-Only)**: Delayed, sluggish, showing true lag.
-   - **Pane B (Predict + Reconcile)**: Crisp, instant, silky smooth.
-   - Under each pane, live readouts contrast *Input → Screen* latency. Press `4` (Transatlantic, 90 ms one-way): expect ≈ 236 ms (A) vs ≈ 17 ms (B).
+2. Click **NETWORK LAB — COMPARE**. Every pane is driven by the same keyboard (one shared input loop), so all panes send identical inputs. Each comparison preset changes exactly **one** setting.
+3. **Prediction** (default; Transatlantic, 90 ms one-way). Move with WASD.
+   - **Pane A (prediction off)** waits for the server; **pane B (prediction on)** moves at once with the amber ghost trailing.
+   - **Expect** Input → Screen ≈ 350 ms (A) vs ≈ 18 ms (B). (Interpolation stays on in both panes now; the old A/B view also turned it off in A, which gave ≈ 236 ms.)
+4. **Interpolation** (50 ms ± 30 ms jitter, all four movers, reference pane on). This is the Phase 2 demo checkpoint. Watch the violet drones:
+   - **Pane A (interpolation off)** draws each snapshot as it lands: the drones stutter and their trail dots bunch up.
+   - **Pane B (interpolation on)** draws ~100 ms in the past: the drones glide with evenly spaced trail dots, but sit visibly behind their dashed **truth ring** (press `T` to toggle the rings).
+   - **Expect** in the dock: mover lag ≈ 75 ± 26 ms, frozen frames ≈ 60–70 % (A) vs ≈ 160 ± 3 ms, ≈ 2 % (B). Talking point: 160 ms ≈ 50 ms network + 100 ms interpolation delay — interpolation buys smoothness with a fixed, predictable lag. (Distance alone would mislead: ≈ 15 px vs ≈ 30 px.)
+   - The **REF** pane is a spectator connected straight to the server: it shows where every pane's player and every drone really is.
+5. **Redundancy** (50 ms, 10 % loss). **Expect** ≈ 2–4 corrections/s (A, redundancy off) vs 0 (B).
+6. **Custom**: choose 2–4 panes, click a pane to select it and toggle `P` / `R` / `I` / `G` (or the chips in its header). `Tab` opens the network drawer; `1`–`5` still apply the emulator presets to every emulated pane.
 
 ### 9. Real-Time Metrics & Inspector
 1. Click **▼ INSPECT PACKETS** on the packet strip to open the packet drawer.

@@ -110,8 +110,9 @@ export class EmulatorClient {
     }
   }
 
-  applyPreset(name: string, target = 'all'): void {
-    this.send({ cmd: 'preset', target, name });
+  /** A named emulator preset, or an ad-hoc one when `config` is given (completed from the defaults). */
+  applyPreset(name: string, target = 'all', config?: Partial<LinkConfig>): void {
+    this.send({ cmd: 'preset', target, name, ...(config ? { config } : {}) });
   }
 
   setConfig(patch: Partial<LinkConfig>, direction: 'up' | 'down' | 'both' = 'both', target = 'all'): void {

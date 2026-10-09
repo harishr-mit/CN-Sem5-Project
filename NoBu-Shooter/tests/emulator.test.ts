@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Pipeline, LinkState, DEFAULT_LINK_CONFIG, type Clock, type Packet } from '../emulator/src/pipeline.js';
+import { completeConfig } from '../emulator/src/control.js';
 
 class VirtualClock implements Clock {
   currentTime = 1000;
@@ -149,5 +150,13 @@ describe('Network Emulator Pipeline (SPEC.md §11, §14.3)', () => {
     }
 
     expect(queueDrops).toBeGreaterThan(0);
+  });
+});
+
+describe('Emulator control: ad-hoc presets (preset + config)', () => {
+  it('complete a partial config from the defaults and ignore bad keys', () => {
+    const cfg = completeConfig({ latencyMs: 50, jitterMs: 30, lossModel: 7, bogus: 1 });
+    expect(cfg).toEqual({ ...DEFAULT_LINK_CONFIG, latencyMs: 50, jitterMs: 30 });
+    expect(completeConfig(null)).toEqual(DEFAULT_LINK_CONFIG);
   });
 });

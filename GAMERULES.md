@@ -215,7 +215,7 @@ The server is the final authority over positions, collisions, projectiles, hits,
 | Room | Purpose | Bots | Firing | Timer / scoring |
 |---|---|---|---|---|
 | `main` | The game | per §12 | on | per §2 |
-| `lab` | Movement-only sandbox used by A/B compare mode (`docs/archive/SPEC-v1.md` §13.8) | off | rejected | state is always `RUNNING`; no timer, no deaths |
+| `lab` | Movement-only sandbox used by the Compare view (`PHASES.md` Phase 2). Also holds the **scripted movers** (circle, zigzag, reversal, stop–go; selected with the `lab` message, not players, no player cap) and accepts **spectators** (snapshots only, no player) | off | rejected | state is always `RUNNING`; no timer, no deaths |
 
 ---
 
