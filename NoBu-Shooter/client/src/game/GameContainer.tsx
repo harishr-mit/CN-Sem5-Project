@@ -1,23 +1,25 @@
 import React, { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
-import { ArenaScene } from './ArenaScene.js';
+import { ArenaScene, type ArenaSceneOptions } from './ArenaScene.js';
 import type { NetClient } from '../net/NetClient.js';
 import GAME from '@nobu/shared/config/game';
 
 interface GameContainerProps {
   netClient: NetClient;
+  /** Compare-view rendering options; read once at scene creation (its fields may be mutated later). */
+  options?: ArenaSceneOptions;
   className?: string;
   id?: string;
 }
 
-export const GameContainer: React.FC<GameContainerProps> = ({ netClient, className, id }) => {
+export const GameContainer: React.FC<GameContainerProps> = ({ netClient, options, className, id }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const scene = new ArenaScene({ netClient });
+    const scene = new ArenaScene({ netClient, options });
 
     const config: Phaser.Types.Core.GameConfig = {
       type: Phaser.AUTO,
@@ -46,6 +48,9 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, classNa
     if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
       resizeObserver = new ResizeObserver(() => {
         if (gameRef.current?.isBooted && gameRef.current?.scale) {
+          // refresh() reuses the cached parent size; re-measure first so the
+          // canvas also grows (not only shrinks) when its host gets bigger.
+          gameRef.current.scale.getParentBounds();
           gameRef.current.scale.refresh();
         }
       });

@@ -21,7 +21,7 @@ Shared context for every agent working in this directory. Read this file **befor
 
 ## Current Status
 
-* **Last updated:** 2026-10-09 (Claude Opus 5.5) — **Phase 1 of `PHASES.md` complete.** Next: Phase 2 (T31).
+* **Last updated:** 2026-10-09 (Claude Opus 5.5) — **Phase 1 of `PHASES.md` complete** (re-checked: 27/27 tests, typecheck clean). **Phase 2 plan written:** `docs/PHASE2_PLAN.md` — owner to approve decisions D1–D7 before T31 starts.
 * **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot-vs-state sync models, and a standalone network emulator (latency, jitter, loss, bandwidth, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (working branch `game`).
 * **Plan:** `PHASES.md` — six phases, each with a demo checkpoint and exit criteria. `GAMERULES.md` = gameplay rules. v1 spec archived at `docs/archive/SPEC-v1.md`.
 * **Architecture:** Browser (Phaser + React) ⇄ Emulator (:9000 data, :9001 control) ⇄ Authoritative server (:8080). Server core is transport-agnostic (`server/src/core.ts`); `NetClient` is headless (injectable transport/clock).
@@ -61,12 +61,21 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T28: NetClient headless refactor + real GameServer+NetClient+Pipeline harness (`tests/netcode.test.ts`) — R5, R6
 * [x] T29: Bots LOS/strafe/unstick, hybrid server loop (0.9 % CPU), demo.mjs process cleanup — R7–R9
 * [x] T30: Small fixes batch — R10 (presets, per-session stats, strip, slider merge, perturb, lab RUNNING, particles, typecheck)
-* [ ] T31: **Phase 2** — Compare view + reference pane + scripted movers + comparison presets (PHASES.md C1–C6)
+* [~] T31: **Phase 2** — Compare view + reference pane + scripted movers + comparison presets (PHASES.md C1–C6)
 * [ ] T32: **Phase 3** — Sync models: full / delta / state+extrapolation, bandwidth chart (PHASES.md S0–S5)
 * [ ] T33: **Phase 4** — Presenter mode, arena/lab/strip polish, texture manifest, `npm run shots` (PHASES.md P1–P7)
 * [ ] T34: **Phase 5** — UDP adapters, emulator UDP mode, network-player swarm, emulator dashboard + README (PHASES.md U1–U7)
 * [ ] T35: **Phase 6** — Lockstep (S4), final docs, rehearsal (PHASES.md L1–L5)
 * [x] T36: Docs: archive SPEC.md → `docs/archive/SPEC-v1.md`, ROADMAP.md → `PHASES.md`, remove duplicate `NoBu-Shooter/docs/` and stale root `tests/`, update README/PROTOCOL/DEMO_SCRIPT/ASSUMPTIONS
+
+* [x] T37: Quick Phase 1 verification + Phase 2 implementation plan (`docs/PHASE2_PLAN.md`)
+* [x] T38: Phase 2 docs — PHASES.md / PHASE2_PLAN.md reflect the approved decisions D1–D7
+* [x] T39: Phase 2 step 1 — shared movers, Room movers + spectators, `lab` message, protocol validators (plan tests 1–4)
+* [x] T40: Phase 2 step 2 — NetClient `spectate`, `serverNow()`, truth clock, RemoteErrorTracker metrics (plan tests 5–6)
+* [x] T41: Phase 2 step 3 — compare core (types, presets, layout, InputDriver) + emulator ad-hoc preset (plan tests 7–9)
+* [x] T42: Phase 2 step 4 — ArenaScene options: shared input, mover look, trails, truth markers, pane colours
+* [x] T43: Phase 2 step 5 — UI: EmulatorControls extraction, CompareView/ComparePane/PaneMetricsBar/CompareDock, App/Landing, delete ABCompare
+* [~] T44: Phase 2 step 6 — smoke extension, browser check (1280×720, 1920×1080), docs (PROTOCOL, DEMO_SCRIPT, ASSUMPTIONS, GAMERULES, README), exit
 
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
@@ -74,6 +83,28 @@ Shared context for every agent working in this directory. Read this file **befor
 ## Change Log
 
 <!-- Newest first. Copy the template below for each entry. -->
+
+### 2026-10-09 — Claude (Opus 5.5) — Phase 2 implementation (T31, T38–T44) — IN PROGRESS
+
+* **Task:** Implement Phase 2 per `docs/PHASE2_PLAN.md` (owner approved D1–D7)
+* **Status:** WORKING — steps are ticked in the Task List; this entry is extended as each step lands
+* **T38 (docs):** `PHASES.md` (status, Phase 2 C1–C6 rewritten to D1–D7, demo checkpoint, exit criteria + fps; S4 and P1 notes), `docs/PHASE2_PLAN.md` (status approved, §1 heading, new §10 Deviations)
+* **T39 (step 1, server/shared):** created `shared/src/sim/movers.ts` (`moverPath`, 4 patterns), `tests/movers.test.ts` (12 tests); edited `shared/src/sim/index.ts`, `shared/src/config/game.json` + `game.ts` (`rooms.*.movers`, `lab.moverSpeed`, `lab.stopGo`), `shared/src/protocol/messages.ts` (`hello.spectate`, `welcome.spectator`, `PlayerSnap.mover`, new `MsgLab` + validator), `server/src/game/room.ts` (movers map, `setMovers`, `stepMovers`, spectator count + snapshots, `buildSnapshot(null)`, clear movers when empty; 3rd ctor arg is now the spectator send fn — the old broadcast fn was unused), `server/src/core.ts` (spectator connections, `lab` message), `tests/protocol.test.ts` (+1 test). 40/40 tests, typecheck clean.
+* **T40 (step 2, NetClient):** created `client/src/net/remoteError.ts` (`RemoteErrorTracker`, `findDelay`); edited `client/src/net/NetClient.ts` (`spectate` option, `isSpectator`, `serverNow()`, `setTruthClock()`, `setMovers()`, render-state caching, mover metrics `moverLagMs/moverWobbleMs/moverErrorPx/moverFrozenPct/moverSamples`), `tests/netcode.test.ts` (harness `spectator` option, +3 tests). 43/43, typecheck clean.
+  - **Deviation (plan §10):** lag/wobble are the drawn mover's *effective delay* in ms (τ where path(t−τ) = drawn position, same heading), median and IQR/1.35 — raw px distance mixed in path shape (stops, reversals). First attempt locked onto the wrong pass of the back-and-forth paths (τ drifted to 7 s); fixed by matching heading + clamping the search.
+  - Measured in the harness at 50 ± 30 ms: interp ON lag 158 ms, wobble 5.9 ms, 30.2 px, frozen 2 %; OFF lag 67 ms, wobble 36.4 ms, 14.5 px, frozen 67 %.
+* **T41 (step 3, compare core):** created `client/src/compare/{types,presets,layout,InputDriver}.ts`, `tests/compare.test.ts` (13 tests); edited `emulator/src/control.ts` (`completeConfig`, `preset` accepts `config` = ad-hoc named preset), `client/src/net/EmulatorClient.ts` (`applyPreset(name, target, config?)`), `tests/emulator.test.ts` (+1). 57/57, typecheck clean.
+
+### 2026-10-09 — Claude (Opus 5.5) — T37: Phase 1 check + Phase 2 implementation plan
+
+* **Task:** Quick check that Phase 1 is implemented; plan Phase 2 (C1–C6)
+* **Status:** DONE (plan only — no source files changed)
+* **Files:** `docs/PHASE2_PLAN.md` (created), `PHASES.md` (status line + link under Phase 2), `log.md`
+* **Details:**
+  - Phase 1 check (branch `game-phase2plus`, clean tree): `npm test` 27/27, `npm run typecheck` clean, Phase 1 files present. Smoke not re-run.
+  - Plan decisions D1–D7: movers as `PlayerSnap` with `mover` field (outside `state.players`); mover paths pure functions of server time (`shared/src/sim/movers.ts`); remote error = lag / wobble / frozen % against the exact true position (a single mean error would rate interpolation worse: ≈ 30 px vs ≈ 13 px at 50 ± 30 ms); reference pane = spectator (`hello.spectate`), always connected as the server clock; one shared `InputDriver` for all panes; one-setting comparison presets (Prediction preset now ≈ 340 ms vs 17 ms, not 236 ms); 16:9-exact pane layout + dock.
+  - Mover paths and pane layouts checked with a scratchpad script against `game.json` (clearance ≥ 20 px; layouts at 1280×720 / 1920×1080).
+* **Notes / Errors:** none. The startup git snapshot listed untracked `client/src/game/input.ts` / `tests/input.test.ts`; they do not exist on this branch (snapshot was stale).
 
 ### 2026-10-09 — Claude (Opus 5.5) — Phase 1 complete (T27–T30, T36) + PHASES.md
 

@@ -11,6 +11,7 @@ import { GameServer } from '../server/src/core.js';
 import { NetClient, type TransportFactory } from '../client/src/net/NetClient.js';
 import { Pipeline, LinkState, DEFAULT_LINK_CONFIG, type LinkConfig, type Clock } from '../emulator/src/pipeline.js';
 import { KEY } from '../shared/src/sim/movement.js';
+import { MOVER_PATTERNS } from '../shared/src/sim/movers.js';
 import NET from '../shared/src/config/net.js';
 
 const fakeClock: Clock = {
@@ -21,6 +22,8 @@ const fakeClock: Clock = {
 interface Harness {
   server: GameServer;
   clients: NetClient[];
+  /** Direct (unimpaired) spectator connection, when requested. */
+  spectator: NetClient | null;
   corrections: number[];
   /** Advance one 60 Hz frame: clients step/send/render, server ticks, timers run. */
   frame(): void;
@@ -29,10 +32,22 @@ interface Harness {
 
 let frameNo = 0;
 
-function makeHarness(link: Partial<LinkConfig>, clientCount = 1, seed = 7): Harness {
+function makeHarness(link: Partial<LinkConfig>, clientCount = 1, seed = 7, opts: { spectator?: boolean } = {}): Harness {
   const server = new GameServer(() => Date.now());
   const clients: NetClient[] = [];
   const corrections: number[] = [];
+
+  let spectator: NetClient | null = null;
+  if (opts.spectator) {
+    // Direct to the server, like the Compare reference pane (no emulator)
+    const direct: TransportFactory = (_url, h) => {
+      const conn = server.addConnection((text) => h.onMessage(text), () => h.onClose());
+      setTimeout(() => h.onOpen(), 0);
+      return { send: (text) => server.handleMessage(conn, text), close: () => server.removeConnection(conn) };
+    };
+    spectator = new NetClient({ url: 'ws://direct', name: 'REF', room: 'lab', transport: direct, now: () => Date.now(), spectate: true });
+    spectator.connect();
+  }
 
   for (let i = 0; i < clientCount; i++) {
     const pipeline = new Pipeline(seed + i, fakeClock);
@@ -63,12 +78,12 @@ function makeHarness(link: Partial<LinkConfig>, clientCount = 1, seed = 7): Harn
   }
 
   const h: Harness = {
-    server, clients, corrections,
+    server, clients, corrections, spectator,
     frame() {
       for (const c of clients) c.simStep();
       if (frameNo % 2 === 0) for (const c of clients) c.sendInputs(); // 30 Hz
       server.tick();
-      for (const c of clients) {
+      for (const c of spectator ? [...clients, spectator] : clients) {
         c.getInterpolatedState();
         c.framePresented(1000 / 60);
       }
@@ -87,6 +102,7 @@ function makeHarness(link: Partial<LinkConfig>, clientCount = 1, seed = 7): Harn
   // Connect and let the welcome + first snapshots arrive (keys idle)
   h.run(90);
   for (const c of clients) expect(c.isConnected).toBe(true);
+  if (spectator) expect(spectator.isConnected).toBe(true);
   return h;
 }
 
@@ -226,5 +242,82 @@ describe('Netcode harness: interpolation and latency metrics (SPEC.md §10.5, §
     // ack delay ≥ RTT (100 ms); + 100 ms interpolation + a frame
     expect(serverOnly.metrics.ackDelayMs).toBeGreaterThanOrEqual(100);
     expect(serverOnly.metrics.inputToScreenMs).toBeGreaterThan(200);
+  });
+});
+
+describe('Netcode harness: spectator reference and mover metrics (PHASES.md C2, C4)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    frameNo = 0;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** Harness with movers on and every client measuring against the spectator's clock. */
+  function moverHarness(link: Partial<LinkConfig>, clientCount: number): Harness {
+    const h = makeHarness(link, clientCount, 7, { spectator: true });
+    const ref = h.spectator!;
+    for (const c of h.clients) c.setTruthClock(() => ref.serverNow());
+    ref.setMovers([...MOVER_PATTERNS]);
+    h.run(30);
+    return h;
+  }
+
+  it('the spectator adds no player and draws exactly the server positions', () => {
+    const h = makeHarness({ latencyMs: 30 }, 1, 7, { spectator: true });
+    const ref = h.spectator!;
+    ref.toggles.interpolation = false;
+    ref.setMovers([...MOVER_PATTERNS]);
+    const lab = h.server.rooms.get('lab')!;
+    expect(lab.playerCount).toBe(1);
+    expect(ref.myPlayerId).toBeNull();
+
+    h.run(60, () => KEY.RIGHT);
+    // Stop on a frame whose server tick sent a snapshot
+    while (ref.latestSnapshot!.tick !== lab.buildSnapshot(null).tick) h.frame();
+    const truth = lab.buildSnapshot(null).players.map(({ id, x, y }) => ({ id, x, y }));
+    const drawn = ref.getInterpolatedState().players.map(({ id, x, y }) => ({ id, x, y }));
+    expect(truth).toHaveLength(5); // 1 player + 4 movers
+    expect(drawn).toEqual(truth);
+    expect(ref.pendingCount).toBe(0); // never sends input
+  });
+
+  it('clean link: interpolation draws movers ~interpDelay behind, smoothly; without it they freeze every other frame', () => {
+    const h = moverHarness({}, 2);
+    const [on, off] = h.clients;
+    off.toggles.interpolation = false;
+    h.run(300);
+    const a = on.metrics;
+    const b = off.metrics;
+    expect(a.moverSamples).toBeGreaterThan(100);
+    expect(b.moverSamples).toBeGreaterThan(100);
+
+    expect(a.moverLagMs).toBeGreaterThan(NET.interpDelayMs - 15);
+    expect(a.moverLagMs).toBeLessThan(NET.interpDelayMs + 15);
+    expect(a.moverFrozenPct).toBeLessThan(5);
+    expect(a.moverErrorPx).toBeGreaterThan(10); // ≈ 100 ms × 200 px/s, a little less around stops
+    expect(a.moverErrorPx).toBeLessThan(26);
+
+    expect(b.moverLagMs).toBeLessThan(30); // newest snapshot: 0–33 ms old
+    expect(b.moverFrozenPct).toBeGreaterThanOrEqual(40); // 30 Hz snapshots, 60 Hz frames
+    expect(b.moverFrozenPct).toBeLessThanOrEqual(60);
+  });
+
+  it('50 ms ± 30 ms jitter: interpolation trades a larger, steady lag for no freezing (demo checkpoint)', () => {
+    const h = moverHarness({ latencyMs: 50, jitterMs: 30 }, 2);
+    const [on, off] = h.clients;
+    off.toggles.interpolation = false;
+    h.run(300);
+    const a = on.metrics;
+    const b = off.metrics;
+    expect(a.moverSamples).toBeGreaterThan(100);
+    expect(b.moverSamples).toBeGreaterThan(50);
+
+    expect(a.moverLagMs).toBeGreaterThan(b.moverLagMs); // the price of smoothness
+    expect(b.moverWobbleMs).toBeGreaterThan(2 * a.moverWobbleMs);
+    expect(b.moverFrozenPct).toBeGreaterThanOrEqual(a.moverFrozenPct + 30);
   });
 });

@@ -12,9 +12,33 @@
 
 import Phaser from 'phaser';
 import type { NetClient, CorrectionEvent } from '../net/NetClient.js';
+import type { InputDriver } from '../compare/InputDriver.js';
 import type { PlayerSnap, ProjectileSnap, GameEvent } from '@nobu/shared/protocol';
+import { moverPath, type MoverCfg } from '@nobu/shared/sim';
 import GAME from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
+
+/**
+ * Compare-view rendering options (PHASES.md C1-C4). Without them the scene
+ * behaves exactly as in Quick Match. `view` is read every frame, so the
+ * owner can flip its flags without recreating the scene.
+ */
+export interface ArenaSceneOptions {
+  /** Shared input: the scene stops polling keys and stepping the client. */
+  input?: InputDriver;
+  /** Colour per player id (Compare: each pane's player in its pane colour). */
+  playerColors?: () => ReadonlyMap<number, number>;
+  /** True server time in ms, for truth markers. */
+  truthClock?: () => number | null;
+  view?: {
+    /** Draw other panes' players at 30 % alpha. */
+    dimOthers: boolean;
+    /** Dots at the last drawn mover positions: bunched = stutter. */
+    moverTrails: boolean;
+    /** Dashed ring at each mover's exact true position. */
+    truthMarkers: boolean;
+  };
+}
 
 // ─── Palette (SPEC.md §13.1) ──────────────────────────────────
 const C_LOCAL_PLAYER   = 0x00e5ff; // cyan
@@ -26,6 +50,11 @@ const C_ARENA_BG       = 0x07070f;
 const C_GRID           = 0x0d1a3a;
 const C_SPAWN_PROTECT  = 0x00e5ff; // cyan shield ring
 const C_RESPAWN_RING   = 0x7c4dff; // violet pulse
+const C_MOVER          = 0xc6b5ff; // pale violet drone
+const C_TRUTH          = 0xffffff;
+
+const MOVER_CFG: MoverCfg = { speed: GAME.lab.moverSpeed, stopGo: GAME.lab.stopGo };
+const TRAIL_LEN = 24;
 
 /** Eight distinct hues for remote players (indexed by player.id % 8). */
 const PLAYER_COLORS = [
@@ -103,9 +132,14 @@ export class ArenaScene extends Phaser.Scene {
   private localY = 0;
   private unsubscribers: (() => void)[] = [];
 
-  constructor(config: Phaser.Types.Scenes.SettingsConfig & { netClient: NetClient }) {
+  private options: ArenaSceneOptions;
+  /** Last drawn positions per mover id (newest last). */
+  private moverTrails = new Map<number, { x: number; y: number }[]>();
+
+  constructor(config: Phaser.Types.Scenes.SettingsConfig & { netClient: NetClient; options?: ArenaSceneOptions }) {
     super({ key: 'ArenaScene', ...config });
     this.netClient = (config as unknown as { netClient: NetClient }).netClient;
+    this.options = (config as { options?: ArenaSceneOptions }).options ?? {};
   }
 
   init(data: { netClient: NetClient }): void {
@@ -123,25 +157,32 @@ export class ArenaScene extends Phaser.Scene {
     this.fxGraphics    = this.add.graphics();
 
     // Input — pointer worldX/Y is already in arena space at any scale
+    const driver = this.options.input;
     this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => {
       this.pointerX = ptr.worldX;
       this.pointerY = ptr.worldY;
+      driver?.setPointer(ptr.worldX, ptr.worldY);
     });
-    this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
-      if (ptr.leftButtonDown()) this.netClient.fireDown = true;
-    });
-    this.input.on('pointerup', () => { this.netClient.fireDown = false; });
+    if (!driver) {
+      this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
+        if (ptr.leftButtonDown()) this.netClient.fireDown = true;
+      });
+      this.input.on('pointerup', () => { this.netClient.fireDown = false; });
+    }
 
-    // Keyboard — store refs so we can poll them inside update() (Bug 2A fix)
+    // Keyboard — store refs so we can poll them inside update() (Bug 2A fix).
+    // With a shared InputDriver the driver owns the keyboard instead.
     const kb = this.input.keyboard!;
-    this.keyW     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-    this.keyA     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-    this.keyS     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-    this.keyD     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
-    this.keyUp    = kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
-    this.keyDown  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
-    this.keyLeft  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
-    this.keyRight = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
+    if (!driver) {
+      this.keyW     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+      this.keyA     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+      this.keyS     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+      this.keyD     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+      this.keyUp    = kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
+      this.keyDown  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
+      this.keyLeft  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
+      this.keyRight = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
+    }
 
     // Clean up keys and NetClient subscriptions when the scene stops or the
     // whole game is destroyed (React StrictMode mounts the container twice).
@@ -180,34 +221,37 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private colorFor(id: number): number {
-    return PLAYER_COLORS[id % PLAYER_COLORS.length];
+    return this.options.playerColors?.().get(id) ?? PLAYER_COLORS[id % PLAYER_COLORS.length];
   }
 
   update(_time: number, delta: number): void {
     const dt = delta;
 
-    // ── Poll keyboard (Bug 2A fix: moved here from events.on('update')) ────
-    let keys = 0;
-    if (this.keyW?.isDown  || this.keyUp?.isDown)    keys |= 1; // UP
-    if (this.keyS?.isDown  || this.keyDown?.isDown)  keys |= 2; // DOWN
-    if (this.keyA?.isDown  || this.keyLeft?.isDown)  keys |= 4; // LEFT
-    if (this.keyD?.isDown  || this.keyRight?.isDown) keys |= 8; // RIGHT
-    this.netClient.keys = keys;
+    // With a shared InputDriver, it samples keys and steps the client.
+    if (!this.options.input) {
+      // ── Poll keyboard (Bug 2A fix: moved here from events.on('update')) ────
+      let keys = 0;
+      if (this.keyW?.isDown  || this.keyUp?.isDown)    keys |= 1; // UP
+      if (this.keyS?.isDown  || this.keyDown?.isDown)  keys |= 2; // DOWN
+      if (this.keyA?.isDown  || this.keyLeft?.isDown)  keys |= 4; // LEFT
+      if (this.keyD?.isDown  || this.keyRight?.isDown) keys |= 8; // RIGHT
+      this.netClient.keys = keys;
 
-    // ── Fixed sim accumulator (60 Hz) ────────────────────────
-    const stepMs = 1000 / GAME.sim.hz;
-    this.accumMs += dt;
-    while (this.accumMs >= stepMs) {
-      this.netClient.simStep();
-      this.accumMs -= stepMs;
-    }
+      // ── Fixed sim accumulator (60 Hz) ────────────────────────
+      const stepMs = 1000 / GAME.sim.hz;
+      this.accumMs += dt;
+      while (this.accumMs >= stepMs) {
+        this.netClient.simStep();
+        this.accumMs -= stepMs;
+      }
 
-    // ── Input send (inputSendHz) ─────────────────────────────
-    const sendMs = 1000 / NET.inputSendHz;
-    this.inputSendAccum += dt;
-    if (this.inputSendAccum >= sendMs) {
-      this.netClient.sendInputs();
-      this.inputSendAccum %= sendMs;
+      // ── Input send (inputSendHz) ─────────────────────────────
+      const sendMs = 1000 / NET.inputSendHz;
+      this.inputSendAccum += dt;
+      if (this.inputSendAccum >= sendMs) {
+        this.netClient.sendInputs();
+        this.inputSendAccum %= sendMs;
+      }
     }
 
     // ── FPS auto-degrade ─────────────────────────────────────
@@ -259,14 +303,20 @@ export class ArenaScene extends Phaser.Scene {
     const local = this.netClient.getLocalRenderPos(state);
     this.localX = local.x;
     this.localY = local.y;
-    if (this.pointerX !== null && this.pointerY !== null) {
-      this.netClient.aimAngle = Math.atan2(this.pointerY - local.y, this.pointerX - local.x);
+    const pointerX = this.options.input?.pointerX ?? this.pointerX;
+    const pointerY = this.options.input?.pointerY ?? this.pointerY;
+    if (pointerX !== null && pointerY !== null) {
+      this.netClient.aimAngle = Math.atan2(pointerY - local.y, pointerX - local.x);
     }
 
-    // Draw remote players
+    // Movers: trails, truth markers, then the drones themselves
+    this.drawMovers(pg, fxG, players);
+
+    // Draw remote players (other panes' players are dimmed when asked)
+    const dim = (this.options.view?.dimOthers ?? false) && myId !== null;
     for (const p of players) {
-      if (p.id === myId) continue;
-      this.drawRemotePlayer(pg, p);
+      if (p.id === myId || p.mover) continue;
+      this.drawRemotePlayer(pg, p, dim ? 0.3 : 1);
     }
 
     // Draw local player
@@ -372,7 +422,7 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  private drawRemotePlayer(g: Phaser.GameObjects.Graphics, p: PlayerSnap): void {
+  private drawRemotePlayer(g: Phaser.GameObjects.Graphics, p: PlayerSnap, alpha = 1): void {
     if (!p.alive) return;
 
     const color = this.colorFor(p.id);
@@ -385,23 +435,68 @@ export class ArenaScene extends Phaser.Scene {
      * Replace with a sprite sheet for remote players.
      * Current: glowing circle with chevron aim indicator. */
     // Glow halo
-    g.fillStyle(color, 0.15);
+    g.fillStyle(color, 0.15 * alpha);
     g.fillCircle(p.x, p.y, P_RADIUS + 8);
-    g.fillStyle(color, 0.3);
+    g.fillStyle(color, 0.3 * alpha);
     g.fillCircle(p.x, p.y, P_RADIUS + 4);
 
     // Body
-    g.fillStyle(color, 1);
+    g.fillStyle(color, alpha);
     g.fillCircle(p.x, p.y, P_RADIUS);
 
     // Inner ring
-    g.lineStyle(2, 0xffffff, 0.5);
+    g.lineStyle(2, 0xffffff, 0.5 * alpha);
     g.strokeCircle(p.x, p.y, P_RADIUS - 4);
 
     // Name tag
     // (Text would be a Phaser Text object; for this procedural version we skip dynamic text in Graphics)
 
     // Score badge
+  }
+
+  /**
+   * Scripted lab movers (PHASES.md C3): a hollow drone ring. Optional trail
+   * of recent drawn positions (evenly spaced = smooth, bunched = stutter)
+   * and a dashed marker at the exact true position.
+   */
+  private drawMovers(g: Phaser.GameObjects.Graphics, fx: Phaser.GameObjects.Graphics, players: PlayerSnap[]): void {
+    const view = this.options.view;
+    const seen = new Set<number>();
+    for (const p of players) {
+      if (!p.mover) continue;
+      seen.add(p.id);
+      let trail = this.moverTrails.get(p.id);
+      if (!trail) { trail = []; this.moverTrails.set(p.id, trail); }
+      trail.push({ x: p.x, y: p.y });
+      if (trail.length > TRAIL_LEN) trail.shift();
+
+      if (view?.moverTrails) {
+        const n = trail.length;
+        trail.forEach((pt, i) => {
+          fx.fillStyle(C_MOVER, 0.15 + 0.6 * (i / n));
+          fx.fillCircle(pt.x, pt.y, 2.5);
+        });
+      }
+
+      /* TEXTURE: mover_drone
+       * Replace with a drone sprite. Current: hollow glowing ring. */
+      g.fillStyle(C_MOVER, 0.12);
+      g.fillCircle(p.x, p.y, P_RADIUS + 6);
+      g.lineStyle(3, C_MOVER, 0.95);
+      g.strokeCircle(p.x, p.y, P_RADIUS - 2);
+      g.fillStyle(C_MOVER, 1);
+      g.fillCircle(p.x, p.y, 4);
+    }
+    for (const id of [...this.moverTrails.keys()]) if (!seen.has(id)) this.moverTrails.delete(id);
+
+    const truth = view?.truthMarkers ? (this.options.truthClock?.() ?? null) : null;
+    if (truth !== null) {
+      for (const p of players) {
+        if (!p.mover) continue;
+        const t = moverPath(p.mover, truth / 1000, MOVER_CFG);
+        this.drawDashedCircle(fx, t.x, t.y, P_RADIUS + 2, C_TRUTH, 0.8);
+      }
+    }
   }
 
   private drawLocalPlayer(g: Phaser.GameObjects.Graphics, me: PlayerSnap): void {
@@ -490,10 +585,11 @@ export class ArenaScene extends Phaser.Scene {
     g: Phaser.GameObjects.Graphics,
     x: number, y: number,
     r: number,
-    color: number
+    color: number,
+    alpha = 0.5
   ): void {
     const segments = 16;
-    g.lineStyle(1, color, 0.5);
+    g.lineStyle(alpha >= 0.8 ? 2 : 1, color, alpha);
     for (let i = 0; i < segments; i += 2) {
       const a0 = (i / segments) * Math.PI * 2;
       const a1 = ((i + 1) / segments) * Math.PI * 2;

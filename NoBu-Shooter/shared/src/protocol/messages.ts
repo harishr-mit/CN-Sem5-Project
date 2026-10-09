@@ -4,6 +4,10 @@
  * Both client and server import from here.
  */
 
+import { isMoverPattern, type MoverPattern } from '../sim/movers.js';
+
+export type { MoverPattern };
+
 // ───────────────────────────────────────────────────────────────
 // Client → Server
 // ───────────────────────────────────────────────────────────────
@@ -25,6 +29,8 @@ export interface MsgHello {
   name: string;
   room: 'main' | 'lab';
   nonce: string;
+  /** Join as a spectator: receive snapshots, no player (Compare reference pane). */
+  spectate?: boolean;
 }
 
 export interface MsgInput {
@@ -49,7 +55,13 @@ export interface MsgBye {
   t: 'bye';
 }
 
-export type ClientMsg = MsgHello | MsgInput | MsgPing | MsgPerturb | MsgBye;
+/** Select the active scripted movers (rooms with movers enabled only). */
+export interface MsgLab {
+  t: 'lab';
+  movers: MoverPattern[];
+}
+
+export type ClientMsg = MsgHello | MsgInput | MsgPing | MsgPerturb | MsgBye | MsgLab;
 
 // ───────────────────────────────────────────────────────────────
 // Server → Client
@@ -64,6 +76,8 @@ export interface MsgWelcome {
   snapshotHz: number;
   serverTime: number;
   nonce: string;
+  /** Present for spectators, whose playerId is 0. */
+  spectator?: boolean;
 }
 
 export interface PlayerSnap {
@@ -79,6 +93,8 @@ export interface PlayerSnap {
   /** Respawn remaining in ms. */
   respawnMs: number;
   score: number;
+  /** Set only on scripted lab movers (PHASES.md C3). */
+  mover?: MoverPattern;
 }
 
 export interface ProjectileSnap {
@@ -182,6 +198,7 @@ export function validateClientMsg(raw: unknown): ClientMsg | null {
       if (typeof raw['name'] !== 'string') return null;
       if (raw['room'] !== 'main' && raw['room'] !== 'lab') return null;
       if (typeof raw['nonce'] !== 'string') return null;
+      if (raw['spectate'] !== undefined && typeof raw['spectate'] !== 'boolean') return null;
       return raw as unknown as MsgHello;
 
     case 'input': {
@@ -208,6 +225,13 @@ export function validateClientMsg(raw: unknown): ClientMsg | null {
 
     case 'bye':
       return { t: 'bye' };
+
+    case 'lab': {
+      const movers = raw['movers'];
+      if (!Array.isArray(movers) || movers.length > 8) return null;
+      if (!movers.every(isMoverPattern)) return null;
+      return { t: 'lab', movers: [...new Set(movers)] };
+    }
 
     default:
       return null;

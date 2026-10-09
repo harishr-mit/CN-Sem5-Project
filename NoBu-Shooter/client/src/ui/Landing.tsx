@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 
 interface LandingProps {
   onStartQuickMatch: (name: string) => void;
-  onStartABCompare: (name: string) => void;
+  onStartCompare: (name: string) => void;
 }
 
-export const Landing: React.FC<LandingProps> = ({ onStartQuickMatch, onStartABCompare }) => {
+export const Landing: React.FC<LandingProps> = ({ onStartQuickMatch, onStartCompare }) => {
   const [name, setName] = useState(() => {
     return 'PILOT_' + Math.floor(100 + Math.random() * 900);
   });
@@ -53,12 +53,12 @@ export const Landing: React.FC<LandingProps> = ({ onStartQuickMatch, onStartABCo
           </button>
 
           <button
-            id="ab-compare-btn"
+            id="compare-btn"
             className="btn-ghost"
             style={{ width: '100%', borderColor: 'var(--c-violet)', color: 'var(--c-violet)' }}
-            onClick={() => onStartABCompare(name.trim() || 'PILOT_01')}
+            onClick={() => onStartCompare(name.trim() || 'PILOT_01')}
           >
-            NETWORK LAB — A/B COMPARE
+            NETWORK LAB — COMPARE
           </button>
 
           <p className="landing-controls-hint">

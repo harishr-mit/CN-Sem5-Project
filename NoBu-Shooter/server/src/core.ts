@@ -16,6 +16,8 @@ export interface Connection {
   send: (text: string) => void;
   close: () => void;
   playerId: number | null;
+  /** Spectators receive snapshots but have no player. */
+  spectator: boolean;
   room: Room | null;
   nonce: string | null;
   lastMsg: number;
@@ -47,7 +49,7 @@ export class GameServer {
           }
         },
         (msg) => {
-          for (const conn of this.connections) if (conn.room === room) conn.send(msg);
+          for (const conn of this.connections) if (conn.room === room && conn.spectator) conn.send(msg);
         }
       );
       this.rooms.set(name, room);
@@ -59,7 +61,7 @@ export class GameServer {
     const t = this.now();
     const conn: Connection = {
       id: nextConnId++, send, close,
-      playerId: null, room: null, nonce: null,
+      playerId: null, spectator: false, room: null, nonce: null,
       lastMsg: t, msgCount: 0, msgCountWindow: t,
     };
     this.connections.add(conn);
@@ -73,7 +75,9 @@ export class GameServer {
       conn.room.removePlayer(conn.playerId);
       console.log(`[server] Player ${conn.playerId} left ${conn.room.name}`);
     }
+    if (conn.spectator && conn.room) conn.room.removeSpectator();
     conn.playerId = null;
+    conn.spectator = false;
     conn.room = null;
   }
 
@@ -121,11 +125,20 @@ export class GameServer {
           return;
         }
         // Repeated hello (welcome was lost): answer with the same welcome
-        if (conn.playerId !== null && conn.room) {
+        if (conn.room) {
           if (conn.nonce === msg.nonce) this.sendWelcome(conn, msg.nonce);
           return;
         }
         const room = this.getRoom(msg.room === 'lab' ? 'lab' : 'main');
+        if (msg.spectate) {
+          conn.spectator = true;
+          conn.room = room;
+          conn.nonce = msg.nonce;
+          room.addSpectator();
+          this.sendWelcome(conn, msg.nonce);
+          console.log(`[server] Spectator joined ${room.name}`);
+          return;
+        }
         if (room.isFull()) {
           reply({ t: 'error', code: 'ROOM_FULL', msg: 'Room is full' });
           return;
@@ -160,6 +173,10 @@ export class GameServer {
         }
         break;
 
+      case 'lab':
+        if (conn.room) conn.room.setMovers(msg.movers);
+        break;
+
       case 'bye':
         this.removeConnection(conn);
         conn.close();
@@ -170,12 +187,13 @@ export class GameServer {
   private sendWelcome(conn: Connection, nonce: string): void {
     conn.send(encodeServer({
       t: 'welcome', v: 1,
-      playerId: conn.playerId!,
+      playerId: conn.playerId ?? 0,
       room: conn.room!.name,
       simHz: GAME.sim.hz,
       snapshotHz: NET.snapshotHz,
       serverTime: this.now(),
       nonce,
+      ...(conn.spectator ? { spectator: true } : {}),
     }));
   }
 }

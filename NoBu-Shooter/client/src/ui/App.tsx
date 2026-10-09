@@ -8,7 +8,7 @@ import { Hud } from './Hud.js';
 import { NetworkLab } from './NetworkLab.js';
 import { PacketFlowStrip } from './PacketFlowStrip.js';
 import { PacketInspector } from './PacketInspector.js';
-import { ABCompare } from './ABCompare.js';
+import { CompareView } from './compare/CompareView.js';
 import { SettingsPanel } from './SettingsPanel.js';
 import { ControlsOverlay } from './ControlsOverlay.js';
 import { loadSettings, type UserSettings } from './settings.js';
@@ -16,7 +16,7 @@ import { loadSettings, type UserSettings } from './settings.js';
 const EMULATOR_DATA_URL = 'ws://127.0.0.1:9000';
 
 export const App: React.FC = () => {
-  const [view, setView] = useState<'landing' | 'game' | 'ab-compare'>('landing');
+  const [view, setView] = useState<'landing' | 'game' | 'compare'>('landing');
   const [playerName, setPlayerName] = useState('PILOT_01');
   const [isLabOpen, setIsLabOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 900 : true));
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
@@ -45,9 +45,9 @@ export const App: React.FC = () => {
     setView('game');
   };
 
-  const handleStartABCompare = (name: string) => {
+  const handleStartCompare = (name: string) => {
     setPlayerName(name);
-    setView('ab-compare');
+    setView('compare');
   };
 
   // Keyboard shortcut listener for Escape and F1 / ?
@@ -94,14 +94,14 @@ export const App: React.FC = () => {
     return (
       <Landing
         onStartQuickMatch={handleStartQuickMatch}
-        onStartABCompare={handleStartABCompare}
+        onStartCompare={handleStartCompare}
       />
     );
   }
 
-  if (view === 'ab-compare') {
+  if (view === 'compare') {
     return (
-      <ABCompare
+      <CompareView
         playerName={playerName}
         onExit={() => {
           setView('landing');

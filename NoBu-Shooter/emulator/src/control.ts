@@ -26,6 +26,24 @@ export const PRESETS: Record<string, LinkConfig> = {
   }),
 };
 
+/**
+ * Complete a partial config from the defaults, ignoring unknown keys and
+ * values of the wrong type. Used for ad-hoc presets (`preset` + `config`),
+ * so a one-off preset never inherits settings from the previous one.
+ */
+export function completeConfig(partial: unknown): LinkConfig {
+  const out: LinkConfig = { ...DEFAULT_LINK_CONFIG };
+  if (typeof partial !== 'object' || partial === null) return out;
+  const src = partial as Record<string, unknown>;
+  for (const key of Object.keys(DEFAULT_LINK_CONFIG) as (keyof LinkConfig)[]) {
+    const v = src[key];
+    if (v !== undefined && typeof v === typeof DEFAULT_LINK_CONFIG[key]) {
+      (out as unknown as Record<string, unknown>)[key] = v;
+    }
+  }
+  return out;
+}
+
 // ─── Control server ───────────────────────────────────────────
 export class ControlServer {
   private wss: WebSocketServer;
@@ -119,8 +137,10 @@ export class ControlServer {
       }
 
       case 'preset': {
-        const name = cmd['name'] as string;
-        const preset = PRESETS[name];
+        // A named preset, or an ad-hoc one when `config` is given
+        const name = cmd['name'];
+        if (typeof name !== 'string') return;
+        const preset = cmd['config'] !== undefined ? completeConfig(cmd['config']) : PRESETS[name];
         if (!preset) return;
         const target = cmd['target'] as string ?? 'all';
 
