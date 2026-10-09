@@ -12,9 +12,23 @@
 
 import Phaser from 'phaser';
 import type { NetClient, CorrectionEvent } from '../net/NetClient.js';
-import type { PlayerSnap, ProjectileSnap, GameEvent } from '@nobu/shared/protocol';
+import type { PlayerSnap, GameEvent } from '@nobu/shared/protocol';
 import GAME from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
+import { acquireKeyboard, movementKeys, createPointerState, type PointerState } from './input.js';
+
+export interface ArenaSceneOptions {
+  netClient: NetClient;
+  /** Shared aim/fire state (A/B panes pass one instance to both scenes). */
+  pointer?: PointerState;
+  /** Clients whose players are not drawn here (the twin in the other A/B pane). */
+  hidePlayersOf?: NetClient[];
+}
+
+const SIM_STEP_MS = 1000 / GAME.sim.hz;
+const INPUT_SEND_MS = 1000 / NET.inputSendHz;
+/** After a stall (hidden tab, debugger) drop ticks beyond this instead of fast-forwarding. */
+const MAX_CATCHUP_TICKS = 6;
 
 // ─── Palette (SPEC.md §13.1) ──────────────────────────────────
 const C_LOCAL_PLAYER   = 0x00e5ff; // cyan
@@ -68,16 +82,6 @@ export class ArenaScene extends Phaser.Scene {
   private fxGraphics!: Phaser.GameObjects.Graphics;
   private ghostGraphics!: Phaser.GameObjects.Graphics;
 
-  // Keyboard keys (Bug 2A fix — stored as class fields, polled in update())
-  private keyW!: Phaser.Input.Keyboard.Key;
-  private keyA!: Phaser.Input.Keyboard.Key;
-  private keyS!: Phaser.Input.Keyboard.Key;
-  private keyD!: Phaser.Input.Keyboard.Key;
-  private keyUp!: Phaser.Input.Keyboard.Key;
-  private keyDown!: Phaser.Input.Keyboard.Key;
-  private keyLeft!: Phaser.Input.Keyboard.Key;
-  private keyRight!: Phaser.Input.Keyboard.Key;
-
   // Particle system
   private particles: ParticleEffect[] = [];
   private correctionLines: CorrectionLine[] = [];
@@ -91,25 +95,25 @@ export class ArenaScene extends Phaser.Scene {
   private fpsSamples: number[] = [];
   private bloomEnabled = true;
 
-  // Fixed sim accumulator
-  private accumMs = 0;
-  private inputSendAccum = 0;
+  // Fixed 60 Hz sim and 30 Hz input send, aligned to absolute frame time so
+  // every pane on the page steps and sends in the same frames (A/B twins
+  // sample identical inputs). -1 = not started.
+  private lastSimTick = -1;
+  private lastSendSlot = -1;
 
-  // Last pointer position in arena space; aim is recomputed every frame from
-  // the *rendered* local position so it stays correct while moving.
-  private pointerX: number | null = null;
-  private pointerY: number | null = null;
+  // Pointer position in arena space (shared between A/B panes); aim is
+  // recomputed every frame from the *rendered* local position.
+  private pointer: PointerState;
+  private hidePlayersOf: NetClient[];
   private localX = 0;
   private localY = 0;
   private unsubscribers: (() => void)[] = [];
 
-  constructor(config: Phaser.Types.Scenes.SettingsConfig & { netClient: NetClient }) {
-    super({ key: 'ArenaScene', ...config });
-    this.netClient = (config as unknown as { netClient: NetClient }).netClient;
-  }
-
-  init(data: { netClient: NetClient }): void {
-    if (data.netClient) this.netClient = data.netClient;
+  constructor(opts: ArenaSceneOptions) {
+    super({ key: 'ArenaScene' });
+    this.netClient = opts.netClient;
+    this.pointer = opts.pointer ?? createPointerState();
+    this.hidePlayersOf = opts.hidePlayersOf ?? [];
   }
 
   create(): void {
@@ -122,31 +126,26 @@ export class ArenaScene extends Phaser.Scene {
     this.playerGraphics = this.add.graphics();
     this.fxGraphics    = this.add.graphics();
 
-    // Input — pointer worldX/Y is already in arena space at any scale
+    // Pointer — worldX/Y is already in arena space at any scale
     this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => {
-      this.pointerX = ptr.worldX;
-      this.pointerY = ptr.worldY;
+      this.pointer.x = ptr.worldX;
+      this.pointer.y = ptr.worldY;
     });
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
-      if (ptr.leftButtonDown()) this.netClient.fireDown = true;
+      if (ptr.leftButtonDown()) this.pointer.fireDown = true;
     });
-    this.input.on('pointerup', () => { this.netClient.fireDown = false; });
+    const release = () => { this.pointer.fireDown = false; };
+    this.input.on('pointerup', release);
+    this.input.on('pointerupoutside', release);
 
-    // Keyboard — store refs so we can poll them inside update() (Bug 2A fix)
-    const kb = this.input.keyboard!;
-    this.keyW     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-    this.keyA     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-    this.keyS     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-    this.keyD     = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
-    this.keyUp    = kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
-    this.keyDown  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
-    this.keyLeft  = kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
-    this.keyRight = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
+    // Keyboard — one page-level tracker shared by every pane (see input.ts).
+    // Phaser's per-game keyboard is not used for movement.
+    const releaseKeyboard = acquireKeyboard();
 
-    // Clean up keys and NetClient subscriptions when the scene stops or the
-    // whole game is destroyed (React StrictMode mounts the container twice).
+    // Clean up the keyboard and NetClient subscriptions when the scene stops or
+    // the whole game is destroyed (React StrictMode mounts the container twice).
     const cleanup = () => {
-      kb.removeAllKeys(true);
+      releaseKeyboard();
       this.unsubscribers.forEach((off) => off());
       this.unsubscribers = [];
     };
@@ -183,31 +182,28 @@ export class ArenaScene extends Phaser.Scene {
     return PLAYER_COLORS[id % PLAYER_COLORS.length];
   }
 
-  update(_time: number, delta: number): void {
+  update(time: number, delta: number): void {
     const dt = delta;
 
-    // ── Poll keyboard (Bug 2A fix: moved here from events.on('update')) ────
-    let keys = 0;
-    if (this.keyW?.isDown  || this.keyUp?.isDown)    keys |= 1; // UP
-    if (this.keyS?.isDown  || this.keyDown?.isDown)  keys |= 2; // DOWN
-    if (this.keyA?.isDown  || this.keyLeft?.isDown)  keys |= 4; // LEFT
-    if (this.keyD?.isDown  || this.keyRight?.isDown) keys |= 8; // RIGHT
-    this.netClient.keys = keys;
+    // ── Input state (keyboard is page-level, pointer may be shared) ────
+    this.netClient.keys = movementKeys();
+    this.netClient.fireDown = this.pointer.fireDown;
 
-    // ── Fixed sim accumulator (60 Hz) ────────────────────────
-    const stepMs = 1000 / GAME.sim.hz;
-    this.accumMs += dt;
-    while (this.accumMs >= stepMs) {
+    // ── Fixed 60 Hz sim on absolute tick boundaries ──────────
+    // `time` is the requestAnimationFrame timestamp, identical for every
+    // Phaser game in the same frame, so A/B panes run the same ticks.
+    const simTick = Math.floor(time / SIM_STEP_MS);
+    if (this.lastSimTick < 0 || simTick - this.lastSimTick > MAX_CATCHUP_TICKS) this.lastSimTick = simTick - 1;
+    while (this.lastSimTick < simTick) {
       this.netClient.simStep();
-      this.accumMs -= stepMs;
+      this.lastSimTick++;
     }
 
-    // ── Input send (inputSendHz) ─────────────────────────────
-    const sendMs = 1000 / NET.inputSendHz;
-    this.inputSendAccum += dt;
-    if (this.inputSendAccum >= sendMs) {
+    // ── Input send (inputSendHz), same alignment ─────────────
+    const sendSlot = Math.floor(time / INPUT_SEND_MS);
+    if (sendSlot !== this.lastSendSlot) {
+      this.lastSendSlot = sendSlot;
       this.netClient.sendInputs();
-      this.inputSendAccum %= sendMs;
     }
 
     // ── FPS auto-degrade ─────────────────────────────────────
@@ -259,13 +255,13 @@ export class ArenaScene extends Phaser.Scene {
     const local = this.netClient.getLocalRenderPos(state);
     this.localX = local.x;
     this.localY = local.y;
-    if (this.pointerX !== null && this.pointerY !== null) {
-      this.netClient.aimAngle = Math.atan2(this.pointerY - local.y, this.pointerX - local.x);
+    if (this.pointer.x !== null && this.pointer.y !== null) {
+      this.netClient.aimAngle = Math.atan2(this.pointer.y - local.y, this.pointer.x - local.x);
     }
 
-    // Draw remote players
+    // Draw remote players (except twins shown in another pane)
     for (const p of players) {
-      if (p.id === myId) continue;
+      if (p.id === myId || this.hidePlayersOf.some(c => c.myPlayerId === p.id)) continue;
       this.drawRemotePlayer(pg, p);
     }
 

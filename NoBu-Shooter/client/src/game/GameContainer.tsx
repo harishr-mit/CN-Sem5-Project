@@ -2,22 +2,27 @@ import React, { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
 import { ArenaScene } from './ArenaScene.js';
 import type { NetClient } from '../net/NetClient.js';
+import type { PointerState } from './input.js';
 import GAME from '@nobu/shared/config/game';
 
 interface GameContainerProps {
   netClient: NetClient;
+  /** Shared aim/fire state (A/B panes pass the same object). */
+  pointer?: PointerState;
+  /** Clients whose players this pane does not draw (A/B twins). */
+  hidePlayersOf?: NetClient[];
   className?: string;
   id?: string;
 }
 
-export const GameContainer: React.FC<GameContainerProps> = ({ netClient, className, id }) => {
+export const GameContainer: React.FC<GameContainerProps> = ({ netClient, pointer, hidePlayersOf, className, id }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const scene = new ArenaScene({ netClient });
+    const scene = new ArenaScene({ netClient, pointer, hidePlayersOf });
 
     const config: Phaser.Types.Core.GameConfig = {
       type: Phaser.AUTO,
@@ -31,6 +36,9 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, classNa
         width: GAME.arena.width,
         height: GAME.arena.height,
       },
+      // Movement keys come from the page-level tracker in input.ts. Phaser's
+      // keyboard manager would preventDefault them, hiding them from a second pane.
+      input: { keyboard: false },
       render: {
         pixelArt: false,
         antialias: true,
@@ -57,7 +65,7 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, classNa
       game.destroy(true);
       gameRef.current = null;
     };
-  }, [netClient]);
+  }, [netClient, pointer, hidePlayersOf]);
 
   return (
     <div

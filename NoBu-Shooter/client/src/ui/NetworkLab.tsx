@@ -3,12 +3,21 @@ import type { NetClient } from '../net/NetClient.js';
 import type { EmulatorClient } from '../net/EmulatorClient.js';
 import { useGameStore } from './store.js';
 import { Sparkline } from './Sparkline.js';
+import { isTypingTarget } from '../game/input.js';
 
 interface NetworkLabProps {
+  /** Client whose metrics the tiles show (pane B in A/B compare). */
   netClient: NetClient;
   emulatorClient: EmulatorClient;
   isOpen: boolean;
   onToggleOpen: () => void;
+  /**
+   * A/B compare: every pane's client. Prediction / reconciliation /
+   * interpolation are fixed per pane (that is the comparison), so those
+   * toggles and their hotkeys are hidden; redundancy and the nudge apply to
+   * every pane so the twins stay mirrored.
+   */
+  compareClients?: NetClient[];
 }
 
 const PRESETS = [
@@ -24,7 +33,9 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
   emulatorClient,
   isOpen,
   onToggleOpen,
+  compareClients,
 }) => {
+  const isCompare = !!compareClients;
   const emulatorStatus = useGameStore((s) => s.emulatorStatus);
   const emulatorStats = useGameStore((s) => s.emulatorStats);
 
@@ -105,8 +116,8 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
   // Keyboard hotkeys for presets and toggles per SPEC.md §13.2
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger when typing in inputs
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Don't trigger when typing in a text field (sliders/checkboxes are fine)
+      if (isTypingTarget(e.target)) return;
 
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -121,6 +132,8 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
         handleApplyPreset('Transatlantic');
       } else if (e.key === '5') {
         handleApplyPreset('Nightmare');
+      } else if (isCompare) {
+        // Per-pane netcode is fixed in A/B compare
       } else if (e.key === 'p' || e.key === 'P') {
         toggleNetcode('prediction');
       } else if (e.key === 'r' || e.key === 'R') {
@@ -134,16 +147,21 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onToggleOpen, toggles]);
+  }, [onToggleOpen, toggles, isCompare]);
 
   const toggleNetcode = (key: keyof typeof toggles) => {
     setToggles((prev) => {
-      const updated = { ...prev, [key]: !prev[key] };
-      netClient.toggles = updated;
-      return updated;
+      const value = !prev[key];
+      // Each client keeps its own other toggles (A/B panes differ on purpose)
+      for (const c of compareClients ?? [netClient]) c.toggles = { ...c.toggles, [key]: value };
+      return { ...prev, [key]: value };
     });
     // Latency averages from the previous mode would be misleading
     if (key === 'prediction' || key === 'interpolation') netClient.resetLatencySamples();
+  };
+
+  const handleNudge = () => {
+    for (const c of compareClients ?? [netClient]) c.perturb(40, 0);
   };
 
   // This client's own emulator session (ground-truth loss, SPEC.md §12)
@@ -413,49 +431,59 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
 
         {/* Section 4: Netcode Toggles */}
         <div className="lab-section">
-          <div className="lab-section-title">NETCODE TOGGLES</div>
+          <div className="lab-section-title">{isCompare ? 'A/B NETCODE (FIXED PER PANE)' : 'NETCODE TOGGLES'}</div>
+
+          {isCompare ? (
+            <div style={{ fontSize: '0.72rem', lineHeight: 1.5, color: 'var(--c-text-muted)', marginBottom: '6px' }}>
+              <div><span style={{ color: 'var(--c-red)' }}>Pane A</span> — prediction, reconciliation, interpolation <strong>OFF</strong></div>
+              <div><span style={{ color: 'var(--c-cyan)' }}>Pane B</span> — all <strong>ON</strong> (+ amber ghost)</div>
+              <div style={{ marginTop: '4px' }}>Presets and sliders impair both panes' links identically.</div>
+            </div>
+          ) : (
+            <>
+              <div className="toggle-row">
+                <label htmlFor="toggle-pred">Prediction [P]</label>
+                <label className="toggle">
+                  <input
+                    id="toggle-pred"
+                    type="checkbox"
+                    checked={toggles.prediction}
+                    onChange={() => toggleNetcode('prediction')}
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+
+              <div className="toggle-row">
+                <label htmlFor="toggle-recon">Reconciliation [R]</label>
+                <label className="toggle">
+                  <input
+                    id="toggle-recon"
+                    type="checkbox"
+                    checked={toggles.reconciliation}
+                    onChange={() => toggleNetcode('reconciliation')}
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+
+              <div className="toggle-row">
+                <label htmlFor="toggle-interp">Snapshot Interpolation [I]</label>
+                <label className="toggle">
+                  <input
+                    id="toggle-interp"
+                    type="checkbox"
+                    checked={toggles.interpolation}
+                    onChange={() => toggleNetcode('interpolation')}
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+            </>
+          )}
 
           <div className="toggle-row">
-            <label htmlFor="toggle-pred">Prediction [P]</label>
-            <label className="toggle">
-              <input
-                id="toggle-pred"
-                type="checkbox"
-                checked={toggles.prediction}
-                onChange={() => toggleNetcode('prediction')}
-              />
-              <span className="toggle-slider" />
-            </label>
-          </div>
-
-          <div className="toggle-row">
-            <label htmlFor="toggle-recon">Reconciliation [R]</label>
-            <label className="toggle">
-              <input
-                id="toggle-recon"
-                type="checkbox"
-                checked={toggles.reconciliation}
-                onChange={() => toggleNetcode('reconciliation')}
-              />
-              <span className="toggle-slider" />
-            </label>
-          </div>
-
-          <div className="toggle-row">
-            <label htmlFor="toggle-interp">Snapshot Interpolation [I]</label>
-            <label className="toggle">
-              <input
-                id="toggle-interp"
-                type="checkbox"
-                checked={toggles.interpolation}
-                onChange={() => toggleNetcode('interpolation')}
-              />
-              <span className="toggle-slider" />
-            </label>
-          </div>
-
-          <div className="toggle-row">
-            <label htmlFor="toggle-redundancy">Input Redundancy</label>
+            <label htmlFor="toggle-redundancy">Input Redundancy{isCompare ? ' (both panes)' : ''}</label>
             <label className="toggle">
               <input
                 id="toggle-redundancy"
@@ -467,23 +495,25 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
             </label>
           </div>
 
-          <div className="toggle-row">
-            <label htmlFor="toggle-ghost">Ghost Overlay (Authoritative) [G]</label>
-            <label className="toggle">
-              <input
-                id="toggle-ghost"
-                type="checkbox"
-                checked={toggles.ghost}
-                onChange={() => toggleNetcode('ghost')}
-              />
-              <span className="toggle-slider" />
-            </label>
-          </div>
+          {!isCompare && (
+            <div className="toggle-row">
+              <label htmlFor="toggle-ghost">Ghost Overlay (Authoritative) [G]</label>
+              <label className="toggle">
+                <input
+                  id="toggle-ghost"
+                  type="checkbox"
+                  checked={toggles.ghost}
+                  onChange={() => toggleNetcode('ghost')}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+          )}
         </div>
 
         {/* Section 5: Metric Tiles */}
         <div className="lab-section">
-          <div className="lab-section-title">LIVE METRICS (5 HZ)</div>
+          <div className="lab-section-title">LIVE METRICS (5 HZ){isCompare ? ' — PANE B' : ''}</div>
           <div className="metrics-grid">
             {/* RTT */}
             <div className={`metric-tile ${metrics.rttMs > 150 ? 'alert' : metrics.rttMs > 60 ? 'warn' : ''}`}>
@@ -614,9 +644,9 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
               fontFamily: 'var(--font-mono)',
               fontSize: '0.8rem',
             }}
-            onClick={() => netClient.perturb(40, 0)}
+            onClick={handleNudge}
           >
-            ⚡ NUDGE ME (SERVER MISPREDICT +40PX)
+            ⚡ {isCompare ? 'NUDGE BOTH PANES' : 'NUDGE ME'} (SERVER MISPREDICT +40PX)
           </button>
 
           <p style={{ marginBottom: '6px' }}>

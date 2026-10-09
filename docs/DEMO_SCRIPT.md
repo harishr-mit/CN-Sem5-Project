@@ -79,12 +79,13 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
 4. Switch **Input Redundancy ON**: corrections from upstream loss mostly disappear, although the queueing delay remains.
 
 ### 8. A/B Compare Mode
-1. Click the home button or reload to return to the landing page.
+1. Click **◄ LEAVE MATCH** (bottom-left of the arena, or `Esc` → **Leave match**) to return to the landing page.
 2. Click **NETWORK LAB — A/B COMPARE**.
-3. **Observation**: Two identical game viewports render side-by-side receiving synchronized keyboard inputs:
+3. **Observation**: Two mirrored viewports: one twin player per pane, both at the same spawn point, both driven by the same keys and mouse:
    - **Pane A (Server-Only)**: Delayed, sluggish, showing true lag.
-   - **Pane B (Predict + Reconcile)**: Crisp, instant, silky smooth.
-   - Under each pane, live readouts contrast *Input → Screen* latency. Press `4` (Transatlantic, 90 ms one-way): expect ≈ 236 ms (A) vs ≈ 17 ms (B).
+   - **Pane B (Predict + Reconcile + Interpolate)**: Crisp, instant, silky smooth, with the amber ghost trailing.
+   - Under each pane, live readouts contrast *Input → Screen*, ack delay, RTT, corrections, emulator loss ↑/↓ and bandwidth. Press `4` (Transatlantic, 90 ms one-way): both panes show RTT ≈ 196 ms; Input → Screen ≈ 237 ms (A) vs ≈ 17 ms (B). Both twins stop at exactly the same place.
+   - The Lab's netcode section is fixed per pane in this view (`P`/`R`/`I`/`G` do nothing); Input Redundancy and **Nudge** apply to both panes. If heavy burst loss ever pulls the twins apart, click **⟲ RE-SYNC TWINS**.
 
 ### 9. Real-Time Metrics & Inspector
 1. Click **▼ INSPECT PACKETS** on the packet strip to open the packet drawer.

@@ -41,6 +41,8 @@ interface GameState {
   setEmulatorState: (state: unknown) => void;
   addPacketEvents: (evs: PacketEvent[]) => void;
   addEvent: (ev: GameEvent) => void;
+  /** Forget everything about the current match (leaving to the landing page). */
+  resetSession: () => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -89,4 +91,15 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
     set(s => ({ events: [...s.events.slice(-100), ev] }));
   },
+
+  // emulatorState (the emulator's global config) is kept: it is still true.
+  resetSession: () => set({
+    connectionStatus: 'connecting',
+    playerId: null,
+    snap: null,
+    emulatorStats: [],
+    packetEvents: [],
+    killFeed: [],
+    events: [],
+  }),
 }));

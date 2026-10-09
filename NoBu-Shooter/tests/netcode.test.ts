@@ -181,6 +181,47 @@ describe('Netcode harness: prediction + reconciliation through the emulator (SPE
   });
 });
 
+describe('Netcode harness: A/B compare twins', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    frameNo = 0;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** Pane A = all netcode off, pane B = all on; both get the same keys every frame. */
+  function twinsEndTogether(link: Partial<LinkConfig>): { a: { x: number; y: number }; b: { x: number; y: number } } {
+    const h = makeHarness(link, 2);
+    const [a, b] = h.clients;
+    a.toggles = { ...a.toggles, prediction: false, reconciliation: false, interpolation: false, ghost: false };
+    for (const c of h.clients) c.toggles.redundancy = true;
+    const room = h.server.rooms.get('lab') as unknown as {
+      state: { players: Map<number, { x: number; y: number }> };
+    };
+    const pos = (c: NetClient) => {
+      const p = room.state.players.get(c.myPlayerId!)!;
+      return { x: p.x, y: p.y };
+    };
+    expect(pos(a)).toEqual(pos(b)); // same lab spawn
+    h.run(360, (f) => scriptedKeys(f));
+    h.run(120);
+    return { a: pos(a), b: pos(b) };
+  }
+
+  it('same keys from the same spawn give identical server paths (60 ms ± 20 ms)', () => {
+    const { a, b } = twinsEndTogether({ latencyMs: 60, jitterMs: 20 });
+    expect(a).toEqual(b);
+  });
+
+  it('stay identical under 10 % loss with input redundancy on (the A/B default)', () => {
+    const { a, b } = twinsEndTogether({ lossPct: 10 });
+    expect(a).toEqual(b);
+  });
+});
+
 describe('Netcode harness: interpolation and latency metrics (SPEC.md §10.5, §12)', () => {
   beforeEach(() => {
     vi.useFakeTimers();

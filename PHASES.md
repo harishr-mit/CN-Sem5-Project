@@ -1,4 +1,4 @@
-# NoBu Shooter — Project Phases
+@@# NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
 **Status:** Phase 1 done (2026-10-09). Next: Phase 2.
@@ -130,6 +130,8 @@ R10 covered:
 | C4 | **Per-pane metrics bar**: Input → Screen, ack delay, RTT, corrections/s, bandwidth ↓, and **remote error in px** (rendered mover position vs the reference pane's position at the same moment). |
 | C5 | **Comparison presets** (one click): "Prediction off vs on", "Interpolation off vs on", "Redundancy off vs on", each with the right emulator preset. The old A/B view becomes the first of these. |
 | C6 | Tests: the movers are deterministic; the reference pane matches server positions exactly. |
+
+**Already in place** (bug-fix run of 2026-10-09, outside the phase plan): lab players share one spawn point; the page-level keyboard (`client/src/game/input.ts`) and a shared `PointerState` drive every pane; scenes step on absolute rAF tick boundaries so panes produce identical inputs; a pane can hide other panes' twins (`hidePlayersOf`); `NetworkLab` has a compare mode (`compareClients`); the harness has a twin-mirror test. C1 builds on these instead of re-creating them.
 
 **Demo checkpoint:** open Compare and choose "Interpolation off vs on" at 50 ms ± 30 ms jitter. The movers stutter in the left pane and glide in the right one, and the remote-error number tells the same story.
 

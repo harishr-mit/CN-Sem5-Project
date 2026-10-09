@@ -50,6 +50,6 @@
   },
   "rooms": {
     "main": { "bots": true,  "firing": true,  "timed": true  },
-    "lab":  { "bots": false, "firing": false, "timed": false }
+    "lab":  { "bots": false, "firing": false, "timed": false, "spawn": { "x": 640, "y": 520 } }
   }
 }

@@ -59,9 +59,17 @@ type BroadcastFn = (msg: string) => void;
 
 let nextPlayerId = 1;
 
+interface RoomCfg {
+  bots: boolean;
+  firing: boolean;
+  timed: boolean;
+  /** Fixed spawn for every player (lab); otherwise GAMERULES.md §9 selection. */
+  spawn?: { x: number; y: number };
+}
+
 export class Room {
   readonly name: string;
-  readonly roomCfg: { bots: boolean; firing: boolean; timed: boolean };
+  readonly roomCfg: RoomCfg;
 
   private state: RoomState;
   private botCtrl: BotController;
@@ -79,7 +87,7 @@ export class Room {
     broadcastFn: BroadcastFn
   ) {
     this.name = name;
-    this.roomCfg = (GAME.rooms as Record<string, typeof this.roomCfg>)[name] ?? {
+    this.roomCfg = (GAME.rooms as Record<string, RoomCfg>)[name] ?? {
       bots: false, firing: false, timed: false,
     };
     this.sendFn = sendFn;
@@ -113,7 +121,7 @@ export class Room {
 
   addPlayer(name: string, isBot = false): number {
     const id = nextPlayerId++;
-    const spawnPos = pickSpawnPoint(this.state.players, this.rng);
+    const spawnPos = this.spawnFor();
     const p: PlayerState = {
       id, name: name.slice(0, GAME.player.maxNameLength), bot: isBot,
       x: spawnPos.x, y: spawnPos.y,
@@ -446,8 +454,14 @@ export class Room {
     this.metrics.counters.hits++;
   }
 
+  /** Lab: the fixed twin spawn. Otherwise GAMERULES.md §9. */
+  private spawnFor(excludeId?: number): { x: number; y: number } {
+    const fixed = this.roomCfg.spawn;
+    return fixed ? { x: fixed.x, y: fixed.y } : pickSpawnPoint(this.state.players, this.rng, excludeId);
+  }
+
   private respawnPlayer(p: PlayerState): void {
-    const pos = pickSpawnPoint(this.state.players, this.rng, p.id);
+    const pos = this.spawnFor(p.id);
     p.x = pos.x;
     p.y = pos.y;
     p.alive = true;
@@ -472,7 +486,7 @@ export class Room {
 
     // Place all players at spawn points
     for (const p of this.state.players.values()) {
-      const pos = pickSpawnPoint(this.state.players, this.rng, p.id);
+      const pos = this.spawnFor(p.id);
       p.x = pos.x; p.y = pos.y;
       p.alive = false; // can't move during countdown
       p.score = 0;
@@ -500,7 +514,7 @@ export class Room {
     this.state.matchState = 'RUNNING';
     this.state.runningTicksLeft = RUNNING_TICKS;
     for (const p of this.state.players.values()) {
-      const pos = pickSpawnPoint(this.state.players, this.rng, p.id);
+      const pos = this.spawnFor(p.id);
       p.x = pos.x; p.y = pos.y;
       p.alive = true;
       p.life = 1;

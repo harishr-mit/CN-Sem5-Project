@@ -4,9 +4,26 @@ import { useGameStore } from './store.js';
 interface HudProps {
   onOpenSettings?: () => void;
   onOpenControls?: () => void;
+  /** Leave the match and return to the landing page. */
+  onLeave?: () => void;
 }
 
-export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls }) => {
+const quickButtonStyle: React.CSSProperties = {
+  background: 'rgba(10, 8, 26, 0.75)',
+  border: '1px solid var(--c-border)',
+  borderRadius: '4px',
+  padding: '4px 10px',
+  fontFamily: 'var(--font-mono)',
+  fontSize: '0.72rem',
+  letterSpacing: '0.08em',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '4px',
+  backdropFilter: 'blur(4px)',
+};
+
+export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls, onLeave }) => {
   const snap = useGameStore((s) => s.snap);
   const myPlayerId = useGameStore((s) => s.playerId);
   const killFeed = useGameStore((s) => s.killFeed);
@@ -196,11 +213,16 @@ export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls }) => {
                 </div>
               </div>
             )}
+            {onLeave && (
+              <button id="hud-overlay-leave-btn" className="btn-ghost" onClick={onLeave} style={{ fontSize: '0.8rem' }}>
+                ◄ BACK TO MENU
+              </button>
+            )}
           </div>
         </div>
       )}
 
-      {/* Quick Action Floating Bar */}
+      {/* Quick Action Floating Bar (.hud has pointer-events: none, so opt back in) */}
       <div
         style={{
           position: 'absolute',
@@ -209,26 +231,23 @@ export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls }) => {
           display: 'flex',
           gap: '8px',
           zIndex: 40,
+          pointerEvents: 'auto',
         }}
       >
+        {onLeave && (
+          <button
+            id="hud-leave-btn"
+            onClick={onLeave}
+            style={{ ...quickButtonStyle, color: 'var(--c-red)' }}
+            title="Leave the match and return to the main menu"
+          >
+            <span>◄</span> LEAVE MATCH
+          </button>
+        )}
         {onOpenControls && (
           <button
             onClick={onOpenControls}
-            style={{
-              background: 'rgba(10, 8, 26, 0.75)',
-              border: '1px solid var(--c-border)',
-              borderRadius: '4px',
-              padding: '4px 10px',
-              color: 'var(--c-cyan)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.72rem',
-              letterSpacing: '0.08em',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              backdropFilter: 'blur(4px)',
-            }}
+            style={{ ...quickButtonStyle, color: 'var(--c-cyan)' }}
             title="Controls Guide [F1]"
           >
             <span>?</span> CONTROLS [F1]
@@ -237,21 +256,7 @@ export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls }) => {
         {onOpenSettings && (
           <button
             onClick={onOpenSettings}
-            style={{
-              background: 'rgba(10, 8, 26, 0.75)',
-              border: '1px solid var(--c-border)',
-              borderRadius: '4px',
-              padding: '4px 10px',
-              color: 'var(--c-text-muted)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.72rem',
-              letterSpacing: '0.08em',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              backdropFilter: 'blur(4px)',
-            }}
+            style={{ ...quickButtonStyle, color: 'var(--c-text-muted)' }}
             title="Settings [Esc]"
           >
             <span>⚙</span> SETTINGS [ESC]

@@ -40,7 +40,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
     {
       category: 'SYSTEM SHORTCUTS',
       items: [
-        { keys: ['ESC'], desc: 'Open System Settings' },
+        { keys: ['ESC'], desc: 'Open System Settings (includes Leave Match)' },
         { keys: ['F1', '?'], desc: 'Toggle this Controls Guide' },
       ],
     },
@@ -51,6 +51,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
       className="overlay"
       style={{
         zIndex: 1000,
+        // .overlay is click-through (pointer-events: none); a modal must take clicks
+        pointerEvents: 'auto',
         backgroundColor: 'rgba(5, 5, 15, 0.82)',
         backdropFilter: 'blur(8px)',
         WebkitBackdropFilter: 'blur(8px)',

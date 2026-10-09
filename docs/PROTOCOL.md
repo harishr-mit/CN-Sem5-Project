@@ -28,7 +28,7 @@ Resent every 250 ms until an authoritative `welcome` message is received.
 ```
 - `v`: Protocol version (`number`, must be 1).
 - `name`: Callsign string (truncated to 12 chars by the server, GAMERULES.md §4).
-- `room`: `"main"` (full match with bots) or `"lab"` (sandbox for A/B testing).
+- `room`: `"main"` (full match with bots) or `"lab"` (sandbox for A/B testing; every lab player spawns at the same point, `rooms.lab.spawn`, so A/B twins start together).
 - `nonce`: Unique client-generated session identifier for idempotent handshake retry.
 
 ### 2.2 `input` (Player Movement & Fire)

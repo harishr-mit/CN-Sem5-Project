@@ -50,7 +50,9 @@ export const GAME = {
   },
   rooms: {
     main: { bots: true,  firing: true,  timed: true  },
-    lab:  { bots: false, firing: false, timed: false },
+    // Every lab player spawns at `spawn`: A/B (Compare) panes are twins driven
+    // by the same input, so they must start from the same place (GAMERULES.md §14).
+    lab:  { bots: false, firing: false, timed: false, spawn: { x: 640, y: 520 } },
   },
 } as const;
 

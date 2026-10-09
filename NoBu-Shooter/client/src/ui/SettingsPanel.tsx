@@ -5,12 +5,15 @@ interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onSettingsChange?: (settings: UserSettings) => void;
+  /** Leave the match and return to the landing page. */
+  onLeave?: () => void;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   isOpen,
   onClose,
   onSettingsChange,
+  onLeave,
 }) => {
   const [settings, setSettings] = useState<UserSettings>(() => loadSettings());
 
@@ -40,6 +43,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       className="overlay"
       style={{
         zIndex: 1000,
+        // .overlay is click-through (pointer-events: none); a modal must take clicks
+        pointerEvents: 'auto',
         backgroundColor: 'rgba(5, 5, 15, 0.82)',
         backdropFilter: 'blur(8px)',
         WebkitBackdropFilter: 'blur(8px)',
@@ -169,6 +174,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             style={{ accentColor: 'var(--c-lime)', cursor: 'pointer' }}
           />
         </div>
+
+        {onLeave && (
+          <button
+            id="settings-leave-btn"
+            onClick={onLeave}
+            style={{
+              background: 'rgba(255, 59, 92, 0.08)',
+              border: '1px solid var(--c-red)',
+              color: 'var(--c-red)',
+              borderRadius: '4px',
+              padding: '8px 12px',
+              fontSize: '0.85rem',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              cursor: 'pointer',
+            }}
+          >
+            ◄ LEAVE MATCH — BACK TO MAIN MENU
+          </button>
+        )}
 
         {/* Actions */}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'var(--sp-s)', borderTop: '1px solid var(--c-border)', paddingTop: 'var(--sp-m)' }}>

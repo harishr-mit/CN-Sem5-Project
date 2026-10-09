@@ -111,6 +111,18 @@ describe('Gameplay Rules & Authority (SPEC.md §14.4, GAMERULES.md)', () => {
     expect(insideX && insideY).toBe(false);
   });
 
+  it('lab room spawns every player at the fixed lab spawn, so A/B twins start together (GAMERULES.md §14)', () => {
+    const room = new Room('lab', () => {}, () => {});
+    const a = room.addPlayer('Twin_A', false);
+    const b = room.addPlayer('Twin_B', false);
+    const players = (room as unknown as Internals).state.players;
+    const spawn = GAME.rooms.lab.spawn;
+    for (const id of [a, b]) {
+      expect(players.get(id)!.x).toBe(spawn.x);
+      expect(players.get(id)!.y).toBe(spawn.y);
+    }
+  });
+
   it('bots keep moving (no lock-on through walls, no getting stuck)', () => {
     const room = new Room('main', () => {}, () => {});
     room.addPlayer('Human', false);
