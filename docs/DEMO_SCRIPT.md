@@ -12,17 +12,20 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
 |---|---|
 | Movement | `W`, `A`, `S`, `D` or Arrow Keys |
 | Aim | Mouse cursor |
-| Fire | Left Mouse Button |
+| Fire | Left Mouse Button (hold) |
+| Reload | `R` (automatic when the magazine is empty; the pistol reloads forever) |
+| Dash | `Space` (with the Dash power-up) |
+| Mute sound | `M` |
 | Toggle Network Lab | `Tab` |
 | Presets | Keys `1`, `2`, `3`, `4`, `5` |
 | Prediction Toggle | `P` |
-| Reconciliation Toggle | `R` |
+| Reconciliation Toggle | `C` |
 | Interpolation Toggle | `I` |
 | Ghost Overlay Toggle | `G` |
 
 ---
 
-## 9-Step Walkthrough
+## 10-Step Walkthrough
 
 ### 1. Baseline Conditions
 1. Start the project: `npm run demo`
@@ -57,10 +60,10 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
    - **Observation**: Bot movement becomes smooth: remote entities are drawn ~100 ms in the past, linearly interpolated between the two surrounding snapshots.
 
 ### 5. Server Reconciliation Drift
-1. With 10% packet loss and Input Redundancy OFF, toggle **Reconciliation OFF** (press `R`).
+1. With 10% packet loss and Input Redundancy OFF, toggle **Reconciliation OFF** (press `C`).
 2. Move across the arena.
    - **Observation**: The client predicts movement locally but never corrects to the server. The amber dashed ghost permanently drifts away from your avatar.
-3. Turn **Reconciliation ON** (press `R`).
+3. Turn **Reconciliation ON** (press `C`).
    - **Observation**: The avatar smoothly snaps back to align with the authoritative server state.
 
 ### 6. Perturbation ("Nudge Me")
@@ -90,9 +93,19 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
    - **Expect** in the dock: mover lag ≈ 75 ± 26 ms, frozen frames ≈ 60–70 % (A) vs ≈ 160 ± 3 ms, ≈ 2 % (B). Talking point: 160 ms ≈ 50 ms network + 100 ms interpolation delay — interpolation buys smoothness with a fixed, predictable lag. (Distance alone would mislead: ≈ 15 px vs ≈ 30 px.)
    - The **REF** pane is a spectator connected straight to the server: it shows where every pane's player and every drone really is. The panes' players sit on top of each other there: the server received the same inputs from every pane, so prediction, reconciliation and interpolation change only what each pane *draws*. (Under loss without redundancy they can drift apart: that is the Redundancy preset.)
 5. **Redundancy** (50 ms, 10 % loss). **Expect** ≈ 2–4 corrections/s (A, redundancy off) vs 0 (B).
-6. **Custom**: choose 2–4 panes, click a pane to select it and toggle `P` / `R` / `I` / `G` (or the chips in its header). `Tab` opens the network drawer; `1`–`5` still apply the emulator presets to every emulated pane.
+6. **Custom**: choose 2–4 panes, click a pane to select it and toggle `P` / `C` / `I` / `G` (or the chips in its header). `Tab` opens the network drawer; `1`–`5` still apply the emulator presets to every emulated pane.
 
 ### 9. Real-Time Metrics & Inspector
 1. Click **▼ INSPECT PACKETS** on the packet strip to open the packet drawer.
 2. Observe real-time JSON frames, sizes, and fate codes (delivered, loss drop, queue drop).
 3. Review the live 12-second Sparkline graphs in the Lab for RTT, Loss %, Pending Inputs, and Correction Error.
+
+### 10. Weapons, Power-ups and Maps (Phase 2.5)
+Rehearsal tip: `NOBU_MAPS=warehouse npm run demo` starts on a chosen map (the rotation is `neon → warehouse → plaza → overgrown`, one map per match).
+1. In Quick Match, hold fire: the HUD (bottom-right) counts the handgun down from 8/8 (`∞` spare), the magazine reloads itself at 0, and `R` reloads early (amber bar, reload sound).
+2. Power-ups appear at random spots, at most one per two players (2 in a 4-player match), a new one 10 s after each pickup. Walk over one: **Rapid Fire** (rifle, rare) or **Spread Shot** (shotgun, 3 pellets) — 10 s or two magazines, then back to the pistol; **Shield** (green bubble absorbs one hit); **Speed** (×1.5, pulsing ring); **Piercing** (violet bullets through walls); **Dash** (`Space`). A chip shows what is active.
+   - Rehearsal: under `npm run demo` the Network Lab has a **Developer → Invincible** switch, so you can talk without being shot (your tag reads `[DEV]`).
+3. Press `4` (Transatlantic) and pick up **Speed**: the first moves after the pickup are predicted at normal speed, so a small correction line appears — pickups are decided by the server and are never predicted.
+4. Press `5` (Nightmare), turn **Input Redundancy OFF** and hold fire: some shots are lost on the way up; the server never fired them, so the ammo counter **flashes amber** as the prediction is corrected (occasional flashes; at 20 % loss the netcode harness sees several per 10 s of firing). Turn redundancy ON: the flashes stop.
+5. Note the bandwidth under Nightmare: full snapshots of a 4-player match are ≈ 510 kbps, above the 400 kbps cap, so the ack delay grows — the motivation for Phase 3's delta snapshots.
+

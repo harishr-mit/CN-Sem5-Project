@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { Room } from '../server/src/game/room.js';
 import GAME from '../shared/src/config/game.json';
+import { mapDef } from '../shared/src/config/game.js';
+import { isValidPowerupSpot } from '../shared/src/sim/powerups.js';
 
 type Internals = {
   state: {
@@ -101,7 +103,7 @@ describe('Gameplay Rules & Authority (SPEC.md §14.4, GAMERULES.md)', () => {
     const room = new Room('lab', () => {}, () => {});
     const id = room.addPlayer('Nudge', false);
     const p = (room as unknown as Internals).state.players.get(id)!;
-    const center = GAME.obstacles[0]; // { x: 600, y: 310, w: 80, h: 100 }
+    const center = GAME.maps.neon.obstacles[0]; // { x: 600, y: 310, w: 80, h: 100 }
     p.x = center.x - 40;
     p.y = center.y + center.h / 2;
     room.receivePerturb(id, 60, 0); // would land inside the block
@@ -135,10 +137,163 @@ describe('Gameplay Rules & Authority (SPEC.md §14.4, GAMERULES.md)', () => {
     expect(bots.length).toBe(3);
     for (let window = 0; window < 4; window++) {
       const start = bots.map(b => ({ x: b.x, y: b.y, alive: b.alive }));
-      for (let i = 0; i < 300; i++) room.tick(); // 5 s
-      const moved = bots.filter((b, i) =>
-        !start[i].alive || !b.alive || Math.hypot(b.x - start[i].x, b.y - start[i].y) > 40);
+      // Furthest distance from the window's start (a bot may circle back)
+      const far = bots.map(() => 0);
+      for (let i = 0; i < 300; i++) { // 5 s
+        room.tick();
+        bots.forEach((b, k) => { far[k] = Math.max(far[k], Math.hypot(b.x - start[k].x, b.y - start[k].y)); });
+      }
+      const moved = bots.filter((b, i) => !start[i].alive || !b.alive || far[i] > 40);
       expect(moved.length).toBe(bots.length);
     }
+  });
+});
+
+// ── Phase 2.5: maps, weapons, reload, power-ups (GAMERULES.md §3, §6–§6b) ──
+
+type Combat = { weapon: string; ammo: number; reloadTicks: number; speedTicks: number };
+type FullInternals = {
+  roomCfg: { bots: boolean };
+  state: {
+    matchState: string;
+    map: string;
+    endedTicksLeft: number;
+    pickups: { id: number; x: number; y: number; kind: string }[];
+    events: { type: string; playerId?: number; victim?: number; kind?: string }[];
+    projectiles: Map<number, { ownerId: number; x: number; y: number; dx: number; dy: number }>;
+    players: Map<number, { id: number; x: number; y: number; alive: boolean; protectionTicksLeft: number; shield: boolean; invincible: boolean; combat: Combat }>;
+  };
+};
+
+/** A main room without bots, two humans, ticked into RUNNING. */
+function runningMain() {
+  const room = new Room('main', () => {}, () => {});
+  const it = room as unknown as FullInternals;
+  it.roomCfg.bots = false;
+  const a = room.addPlayer('A', false);
+  const b = room.addPlayer('B', false);
+  for (let i = 0; i < 200 && it.state.matchState !== 'RUNNING'; i++) room.tick();
+  expect(it.state.matchState).toBe('RUNNING');
+  for (const p of it.state.players.values()) p.protectionTicksLeft = 0;
+  return { room, it, a, b };
+}
+
+let seqs = new Map<number, number>();
+function input(room: Room, id: number, f: 0 | 1, r?: 1, a = 0): void {
+  const s = (seqs.get(id) ?? 0) + 1;
+  seqs.set(id, s);
+  room.receiveInput(id, [{ s, k: 0, a, f, ...(r ? { r } : {}) }]);
+  room.tick();
+}
+
+describe('Phase 2.5 rules: maps, weapons, reload, power-ups', () => {
+  it('main rotates maps at every COUNTDOWN; lab is always neon with no power-ups', () => {
+    const { room, it } = runningMain();
+    expect(it.state.map).toBe(GAME.maps.rotation[0]);
+    expect(room.buildSnapshot(null).match.map).toBe(GAME.maps.rotation[0]);
+    it.state.matchState = 'ENDED';
+    it.state.endedTicksLeft = 1;
+    room.tick();
+    expect(it.state.matchState).toBe('COUNTDOWN');
+    expect(it.state.map).toBe(GAME.maps.rotation[1]);
+
+    const lab = new Room('lab', () => {}, () => {});
+    const id = lab.addPlayer('L', false);
+    lab.tick();
+    const snap = lab.buildSnapshot(id);
+    expect(snap.match.map).toBe('neon');
+    expect(snap.pickups).toEqual([]);
+    expect(snap.me?.weapon).toBe('handgun');
+  });
+
+  it('a shot uses a round; R reloads (RELOAD_START) and refills after reloadMs', () => {
+    seqs = new Map();
+    const { room, it, a } = runningMain();
+    const me = it.state.players.get(a)!;
+    input(room, a, 1);
+    expect(me.combat.ammo).toBe(GAME.weapons.handgun.magazine - 1);
+    input(room, a, 0, 1);
+    expect(it.state.events.some((e) => e.type === 'RELOAD_START' && e.playerId === a)).toBe(true);
+    const reloadTicks = Math.round(GAME.weapons.handgun.reloadMs * GAME.sim.hz / 1000);
+    for (let i = 0; i < reloadTicks; i++) input(room, a, 0);
+    expect(me.combat.ammo).toBe(GAME.weapons.handgun.magazine);
+  });
+
+  it('the shotgun fires 3 projectiles per shot', () => {
+    seqs = new Map();
+    const { room, it, a } = runningMain();
+    it.state.players.get(a)!.combat.weapon = 'shotgun';
+    it.state.players.get(a)!.combat.ammo = GAME.weapons.shotgun.magazine;
+    it.state.projectiles.clear();
+    input(room, a, 1, undefined, Math.PI / 2);
+    const mine = [...it.state.projectiles.values()].filter((p) => p.ownerId === a);
+    expect(mine).toHaveLength(3);
+  });
+
+  it('power-ups: ⌊players / 2⌋ at random valid spots; lowest id wins a tie; a new one 10 s after a pickup', () => {
+    seqs = new Map();
+    const { room, it, a, b } = runningMain();
+    const map = mapDef(it.state.map);
+    expect(it.state.pickups).toHaveLength(1); // 2 players → 1
+    for (const pk of it.state.pickups) expect(isValidPowerupSpot(map, pk)).toBe(true);
+    const pk = it.state.pickups[0];
+    pk.kind = 'speed';
+    for (const id of [a, b]) { const p = it.state.players.get(id)!; p.x = pk.x; p.y = pk.y; }
+    room.tick();
+    expect(it.state.pickups).toHaveLength(0);
+    expect(it.state.players.get(Math.min(a, b))!.combat.speedTicks).toBeGreaterThan(0);
+    expect(it.state.players.get(Math.max(a, b))!.combat.speedTicks).toBe(0);
+    expect(it.state.events.some((e) => e.type === 'PICKUP' && e.kind === 'speed')).toBe(true);
+    for (const id of [a, b]) it.state.players.get(id)!.x = 30;
+    const respawn = Math.round(GAME.powerups.respawnMs * GAME.sim.hz / 1000);
+    for (let i = 0; i < respawn - 1; i++) room.tick();
+    expect(it.state.pickups).toHaveLength(0);
+    room.tick();
+    expect(it.state.pickups).toHaveLength(1);
+    expect(it.state.pickups[0].id).not.toBe(pk.id);
+    expect(isValidPowerupSpot(map, it.state.pickups[0])).toBe(true);
+
+    // Two more players: the cap rises to 2, the second one arrives 10 s later
+    room.addPlayer('C', false);
+    room.addPlayer('D', false);
+    for (const p of it.state.players.values()) p.x = 30;
+    for (let i = 0; i < respawn + 1; i++) room.tick();
+    expect(it.state.pickups).toHaveLength(2);
+  });
+
+  it('developer invincibility: refused without npm run demo; when on, hits never kill', () => {
+    seqs = new Map();
+    const { room, it, a, b } = runningMain();
+    expect(room.setDev(b, true)).toBe(false); // NOBU_DEV is not set in tests
+    const shooter = it.state.players.get(a)!;
+    const target = it.state.players.get(b)!;
+    it.state.pickups = [];
+    shooter.x = 200; shooter.y = 40;
+    target.x = 320; target.y = 40;
+    target.invincible = true;
+    input(room, a, 1);
+    for (let i = 0; i < 20; i++) room.tick();
+    expect(target.alive).toBe(true);
+    expect(room.buildSnapshot(a).players.find((p) => p.id === b)?.invincible).toBe(true);
+  });
+
+  it('a shield absorbs one hit (SHIELD_HIT), the next one kills', () => {
+    seqs = new Map();
+    const { room, it, a, b } = runningMain();
+    const shooter = it.state.players.get(a)!;
+    const target = it.state.players.get(b)!;
+    it.state.pickups = [];
+    shooter.x = 200; shooter.y = 40;
+    target.x = 320; target.y = 40;
+    target.shield = true;
+    input(room, a, 1);
+    for (let i = 0; i < 20; i++) room.tick();
+    expect(target.alive).toBe(true);
+    expect(target.shield).toBe(false);
+    expect(it.state.events.some((e) => e.type === 'SHIELD_HIT' && e.victim === b)).toBe(true);
+    for (let i = 0; i < 18; i++) input(room, a, 1);
+    for (let i = 0; i < 20; i++) room.tick();
+    expect(target.alive).toBe(false);
+    expect(target.combat.weapon).toBe('handgun');
   });
 });

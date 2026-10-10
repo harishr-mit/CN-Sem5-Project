@@ -71,7 +71,7 @@ export function customPreset(count: number, from?: ComparePreset): ComparePreset
   return {
     id: 'custom',
     title: 'Custom',
-    caption: 'Click a pane to select it, then toggle P / R / I / G (or the chips in its header).',
+    caption: 'Click a pane to select it, then toggle P / C / I / G (or the chips in its header).',
     panes,
     reference: from?.reference ?? false,
     network: null,

@@ -12,9 +12,23 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
     {
       category: 'PILOT & COMBAT',
       items: [
-        { keys: ['W', 'A', 'S', 'D'], desc: 'Move pilot / Thrusters (or Arrow Keys)' },
-        { keys: ['MOUSE'], desc: 'Aim weapon turret' },
-        { keys: ['LMB'], desc: 'Fire laser cannon' },
+        { keys: ['W', 'A', 'S', 'D'], desc: 'Move (or Arrow Keys)' },
+        { keys: ['MOUSE'], desc: 'Aim' },
+        { keys: ['LMB'], desc: 'Fire (hold) — magazine reloads itself when empty' },
+        { keys: ['R'], desc: 'Reload (the pistol has unlimited reloads)' },
+        { keys: ['SPACE'], desc: 'Dash (with the Dash power-up)' },
+        { keys: ['M'], desc: 'Mute / unmute sound effects' },
+      ],
+    },
+    {
+      category: 'POWER-UPS (walk over one; up to 1 per 2 players)',
+      items: [
+        { keys: ['RAPID'], desc: 'Rifle for 10 s or 2 magazines (rarest)' },
+        { keys: ['SPREAD'], desc: 'Shotgun for 10 s or 2 magazines — 3 pellets per shot' },
+        { keys: ['SHIELD'], desc: 'Absorbs the next hit' },
+        { keys: ['SPEED'], desc: '1.5× speed for 6 s (most common)' },
+        { keys: ['PIERCE'], desc: 'Bullets pass through obstacles for 8 s' },
+        { keys: ['DASH'], desc: 'For 10 s: SPACE = short burst (2 s cooldown)' },
       ],
     },
     {
@@ -32,7 +46,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
       category: 'NETCODE ENGINE TOGGLES',
       items: [
         { keys: ['P'], desc: 'Toggle Client-Side Prediction' },
-        { keys: ['R'], desc: 'Toggle Server Reconciliation' },
+        { keys: ['C'], desc: 'Toggle Server Reconciliation' },
         { keys: ['I'], desc: 'Toggle Snapshot Interpolation' },
         { keys: ['G'], desc: 'Toggle Ghost Player (Server True Position)' },
       ],

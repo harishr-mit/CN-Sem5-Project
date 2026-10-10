@@ -1,7 +1,71 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useGameStore } from './store.js';
+import { mapDef } from '@nobu/shared/config/game';
+import type { NetClient, CombatView } from '../net/NetClient.js';
+import { soundPrefs } from '../game/audio.js';
+import { playerColor, cssColor } from '../game/playerColors.js';
+
+const WEAPON_LABEL: Record<string, string> = { handgun: 'HANDGUN', rifle: 'RIFLE', shotgun: 'SHOTGUN' };
+
+/**
+ * Weapon panel (GAMERULES.md §6–§6b): predicted ammo, reload bar, power-up
+ * timers. Polls the NetClient at 10 Hz; flashes amber when the server
+ * corrects the predicted ammo (a lost shot or reload).
+ */
+const WeaponPanel: React.FC<{ net: NetClient }> = ({ net }) => {
+  const [cv, setCv] = useState<CombatView>(() => net.combatView);
+  const [muted, setMuted] = useState(soundPrefs.muted);
+  const [flash, setFlash] = useState(false);
+  const lastCorrections = useRef(cv.corrections);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const next = net.combatView;
+      if (next.corrections !== lastCorrections.current) {
+        lastCorrections.current = next.corrections;
+        setFlash(true);
+        setTimeout(() => setFlash(false), 600);
+      }
+      setCv(next);
+      setMuted(soundPrefs.muted);
+    }, 100);
+    return () => clearInterval(id);
+  }, [net]);
+
+  const chips: { label: string; color: string }[] = [];
+  if (cv.weaponMsLeft > 0) chips.push({ label: `${WEAPON_LABEL[cv.weapon]} ${(cv.weaponMsLeft / 1000).toFixed(1)}s`, color: 'var(--c-amber)' });
+  if (cv.speedMsLeft > 0) chips.push({ label: `SPEED ${(cv.speedMsLeft / 1000).toFixed(1)}s`, color: '#ffd400' });
+  if (cv.pierceMsLeft > 0) chips.push({ label: `PIERCING ${(cv.pierceMsLeft / 1000).toFixed(1)}s`, color: '#b388ff' });
+  if (cv.dashMsLeft > 0) chips.push({ label: `DASH ${cv.dashReady ? '[SPACE]' : '…'} ${(cv.dashMsLeft / 1000).toFixed(1)}s`, color: '#2fd6ff' });
+  if (cv.shield) chips.push({ label: 'SHIELD', color: 'var(--c-green)' });
+  if (cv.invincible) chips.push({ label: 'DEV: INVINCIBLE', color: 'var(--c-red)' });
+
+  return (
+    <div className="hud-weapon" id="hud-weapon">
+      {chips.length > 0 && (
+        <div className="hud-weapon-chips">
+          {chips.map((c) => (
+            <span key={c.label} className="hud-chip" style={{ color: c.color, borderColor: c.color }}>{c.label}</span>
+          ))}
+        </div>
+      )}
+      <div className="hud-weapon-name">{WEAPON_LABEL[cv.weapon] ?? cv.weapon}{muted ? '  ·  MUTED [M]' : ''}</div>
+      <div className={`hud-ammo ${flash ? 'hud-ammo-corrected' : ''} ${cv.ammo === 0 ? 'hud-ammo-empty' : ''}`} id="hud-ammo"
+        title="Predicted ammo; flashes amber when the server corrects it">
+        {cv.ammo}<span className="hud-ammo-mag">/{cv.magazine}</span>
+        <span className="hud-ammo-reserve" title="Spare rounds (the pistol reloads forever)">{cv.reserve === null ? '∞' : `+${cv.reserve}`}</span>
+      </div>
+      <div className="hud-reload">
+        {cv.reload !== null
+          ? <><div className="hud-reload-bar" style={{ width: `${Math.round(cv.reload * 100)}%` }} /><span>RELOADING</span></>
+          : <span className="hud-reload-hint">{cv.ammo < cv.magazine && cv.reserve !== 0 ? '[R] RELOAD' : cv.reserve === 0 ? 'LAST MAGAZINE' : ''}</span>}
+      </div>
+    </div>
+  );
+};
 
 interface HudProps {
+  /** The match client, for the predicted weapon state. */
+  netClient?: NetClient;
   onOpenSettings?: () => void;
   onOpenControls?: () => void;
   /** Leave the match and return to the landing page. */
@@ -23,7 +87,7 @@ const quickButtonStyle: React.CSSProperties = {
   backdropFilter: 'blur(4px)',
 };
 
-export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls, onLeave }) => {
+export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenControls, onLeave }) => {
   const snap = useGameStore((s) => s.snap);
   const myPlayerId = useGameStore((s) => s.playerId);
   const killFeed = useGameStore((s) => s.killFeed);
@@ -32,6 +96,7 @@ export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls, onLeav
   const myPlayer = snap?.players.find((p) => p.id === myPlayerId);
   const matchState = snap?.match.state ?? 'WAITING';
   const timeLeftMs = snap?.match.timeLeftMs ?? 0;
+  const mapName = snap ? mapDef(snap.match.map).name : '';
 
   // Format time MM:SS
   const totalSeconds = Math.max(0, Math.ceil(timeLeftMs / 1000));
@@ -51,8 +116,11 @@ export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls, onLeav
       {matchState !== 'WAITING' && (
         <div className={`hud-timer ${isTimeCritical ? 'timer-danger' : ''}`} id="hud-timer">
           {timeStr}
+          {mapName && <div className="hud-map" id="hud-map">{mapName.toUpperCase()}</div>}
         </div>
       )}
+
+      {netClient && myPlayer?.alive && matchState === 'RUNNING' && <WeaponPanel net={netClient} />}
 
       {/* Local Score */}
       <div className="hud-score" id="hud-score">
@@ -82,7 +150,7 @@ export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls, onLeav
               className={`scoreboard-row ${p.id === myPlayerId ? 'self' : ''}`}
             >
               <span className="rank">{idx + 1}</span>
-              <span className="name">{p.name}</span>
+              <span className="name" style={{ color: cssColor(playerColor(p.id, myPlayerId)) }}>{p.name}</span>
               <span className="score">{p.score}</span>
             </div>
           ))}
@@ -113,6 +181,7 @@ export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls, onLeav
           <div className="countdown-num">
             {totalSeconds > 0 ? totalSeconds : 'GO!'}
           </div>
+          {mapName && <div className="overlay-sub">MAP: {mapName.toUpperCase()}</div>}
         </div>
       )}
 
@@ -147,7 +216,7 @@ export const Hud: React.FC<HudProps> = ({ onOpenSettings, onOpenControls, onLeav
             letterSpacing: '0.1em',
           }}
         >
-          SHIELD ACTIVE: {(myPlayer.protectMs / 1000).toFixed(1)}s
+          SPAWN PROTECTED {(myPlayer.protectMs / 1000).toFixed(1)} s
         </div>
       )}
 

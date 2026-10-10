@@ -8,6 +8,7 @@
     "test": "npm --prefix NoBu-Shooter test",
     "smoke": "npm --prefix NoBu-Shooter run smoke",
     "typecheck": "npm --prefix NoBu-Shooter run typecheck",
-    "install:all": "npm --prefix NoBu-Shooter install"
+    "install:all": "npm --prefix NoBu-Shooter install",
+    "pack-assets": "npm --prefix NoBu-Shooter run pack-assets"
   }
 }

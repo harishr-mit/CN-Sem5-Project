@@ -10,7 +10,7 @@ import { KEY } from '@nobu/shared/sim';
 import type { Rect } from '@nobu/shared/sim';
 import type { InputEntry } from '@nobu/shared/protocol';
 import type { PlayerState } from './game/state.js';
-import GAME from '@nobu/shared/config/game.js';
+import GAME, { type MapDef } from '@nobu/shared/config/game.js';
 
 type Rng = () => number;
 
@@ -44,18 +44,26 @@ const ENGAGE_MAX = 380;
 const STRAFE_FLIP_TICKS = Math.round(1.2 * BOT_HZ);
 
 /** Obstacles expanded by the projectile radius: a shot along a segment that
- *  misses these also misses the real obstacle (GAMERULES.md §7). */
-const SHOT_BLOCKERS: Rect[] = (GAME.obstacles as readonly Rect[]).map((o) => ({
-  x: o.x - GAME.projectile.radius,
-  y: o.y - GAME.projectile.radius,
-  w: o.w + 2 * GAME.projectile.radius,
-  h: o.h + 2 * GAME.projectile.radius,
-}));
+ *  misses these also misses the real obstacle (GAMERULES.md §7). Per map. */
+const blockerCache = new Map<string, Rect[]>();
+function shotBlockers(map: MapDef): Rect[] {
+  let rects = blockerCache.get(map.id);
+  if (!rects) {
+    rects = map.obstacles.map((o) => ({
+      x: o.x - GAME.projectile.radius,
+      y: o.y - GAME.projectile.radius,
+      w: o.w + 2 * GAME.projectile.radius,
+      h: o.h + 2 * GAME.projectile.radius,
+    }));
+    blockerCache.set(map.id, rects);
+  }
+  return rects;
+}
 
-function hasLineOfSight(ax: number, ay: number, bx: number, by: number): boolean {
+function hasLineOfSight(blockers: Rect[], ax: number, ay: number, bx: number, by: number): boolean {
   const a = { x: ax, y: ay };
   const b = { x: bx, y: by };
-  for (const r of SHOT_BLOCKERS) if (segmentIntersectsRect(a, b, r)) return false;
+  for (const r of blockers) if (segmentIntersectsRect(a, b, r)) return false;
   return true;
 }
 
@@ -73,9 +81,7 @@ function keysToward(dx: number, dy: number): number {
   return keys;
 }
 
-const spawnPoints: readonly { x: number; y: number }[] = GAME.spawnPoints;
-
-function randomArenaPoint(rng: Rng): { x: number; y: number } {
+function randomArenaPoint(rng: Rng, spawnPoints: readonly { x: number; y: number }[]): { x: number; y: number } {
   // Prefer spawn points for wander targets (gives natural movement)
   if (rng() < 0.6) {
     return spawnPoints[Math.floor(rng() * spawnPoints.length)];
@@ -90,12 +96,20 @@ export class BotController {
   private rng: Rng;
   private bots = new Map<number, BotInternal>();
 
-  constructor() {
+  /** The current map: line of sight and wander targets (Room sets it on map change). */
+  private map: MapDef;
+
+  constructor(map: MapDef) {
     this.rng = mulberry32(GAME.bots.seed);
+    this.map = map;
+  }
+
+  setMap(map: MapDef): void {
+    this.map = map;
   }
 
   addBot(playerId: number): void {
-    const target = randomArenaPoint(this.rng);
+    const target = randomArenaPoint(this.rng, this.map.spawnPoints);
     this.bots.set(playerId, {
       playerId,
       targetX: target.x,
@@ -125,6 +139,8 @@ export class BotController {
     seqMap: Map<number, number>
   ): Map<number, InputEntry> {
     const result = new Map<number, InputEntry>();
+    const blockers = shotBlockers(this.map);
+    const spawns = this.map.spawnPoints;
 
     for (const [id, bot] of this.bots) {
       const self = players.get(id);
@@ -147,7 +163,7 @@ export class BotController {
         const dx = p.x - self.x;
         const dy = p.y - self.y;
         const d = Math.sqrt(dx * dx + dy * dy);
-        if (d < SIGHT_RANGE && d < nearestDist && hasLineOfSight(self.x, self.y, p.x, p.y)) {
+        if (d < SIGHT_RANGE && d < nearestDist && hasLineOfSight(blockers, self.x, self.y, p.x, p.y)) {
           nearestDist = d;
           nearestId = pid;
         }
@@ -182,7 +198,7 @@ export class BotController {
         const movedY = Math.abs(self.y - bot.stuckY);
         if (movedX + movedY < STUCK_THRESHOLD) {
           // Pick a new wander target and circle the other way
-          const t = randomArenaPoint(this.rng);
+          const t = randomArenaPoint(this.rng, spawns);
           bot.targetX = t.x;
           bot.targetY = t.y;
           bot.strafeSign = -bot.strafeSign;
@@ -195,7 +211,7 @@ export class BotController {
       bot.wanderTicksLeft--;
       if (bot.wanderTicksLeft <= 0) {
         if (bot.trackingId === null) {
-          const t = randomArenaPoint(this.rng);
+          const t = randomArenaPoint(this.rng, spawns);
           bot.targetX = t.x;
           bot.targetY = t.y;
         }

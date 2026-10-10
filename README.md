@@ -69,6 +69,8 @@ Once started, open your browser to:
 
 Click **Quick Match (vs bots)** to play, or **Network Lab — Compare** to compare netcode settings side by side: 2–4 panes driven by one keyboard, an optional reference pane connected straight to the server, scripted moving targets, and one-click comparisons (prediction, interpolation, redundancy).
 
+Quick Match rotates through four maps (`neon → warehouse → plaza → overgrown`, one per match), with ammo and reloads, six power-ups at random spots, survivor avatars and sound (`GAMERULES.md`). `npm run demo` also enables a developer **Invincible** switch in the Network Lab (not available any other way). To start on a particular map: `NOBU_MAPS=plaza npm run demo` (PowerShell: `$env:NOBU_MAPS='plaza'; npm run demo`).
+
 Stop everything with `Ctrl+C` — all four ports are released. (If the launcher is killed some other way, its child processes notice within ~1 s and exit by themselves.)
 
 ---
@@ -78,7 +80,8 @@ Stop everything with `Ctrl+C` — all four ports are released. (If the launcher 
 Ensure your environment passes all test suites and the headless end-to-end simulation:
 
 ```bash
-# Run unit and integration tests (64 tests: sim, protocol, emulator pipeline, game rules,
+# Run unit and integration tests (105 tests: sim, protocol, emulator pipeline, game rules,
+# weapons/ammo/reload, power-ups, map layouts,
 # movement keys, movers/spectators, Compare layout/input/presets, and an end-to-end netcode
 # harness: real server + client + emulator pipeline on fake timers, incl. the twin-pane check)
 npm test
@@ -87,7 +90,11 @@ npm test
 npm run typecheck
 
 # Run the automated headless bot smoke test through the emulator under Nightmare preset
+# (also checks ammo, reload, bot shots, power-up pads and the map id)
 npm run smoke
+
+# Re-pack the player animation atlas after changing frames in assets/sprites/player
+npm run pack-assets
 ```
 
 ---
@@ -99,8 +106,12 @@ npm run smoke
 | **Movement** | `W`, `A`, `S`, `D` (by physical key position, any layout) or Arrow Keys |
 | **Aim** | Mouse cursor |
 | **Shoot** | Hold Left Click |
+| **Reload** | `R` (also automatic when the magazine is empty) |
+| **Power-ups** | Walk over one (random spots, ≤ 1 per 2 players): Rapid Fire (rifle), Spread Shot (shotgun), Shield, Speed, Piercing, Dash (`Space`) |
+| **Developer toggle** | `npm run demo` only: Network Lab → **Developer → Invincible** |
+| **Mute sounds** | `M` (volume in Settings, `Esc`) |
 | **Toggle Network Lab** | `Tab` |
-| **Netcode toggles** | `P` prediction, `R` reconciliation, `I` interpolation, `G` ghost |
+| **Netcode toggles** | `P` prediction, `C` reconciliation (was `R` until 2026-10-10; `R` is now reload), `I` interpolation, `G` ghost (while shown it replaces your cyan ring) |
 | **Controls / Settings** | `F1` / `Esc` |
 | **Leave match** | **◄ LEAVE MATCH** (bottom-left of the arena), or `Esc` → **◄ LEAVE MATCH — BACK TO MAIN MENU** (end of the settings menu). Compare: **◄ EXIT** (top bar) |
 | **Network Presets** | Keys `1` through `5` |
@@ -109,7 +120,7 @@ npm run smoke
 | **Preset 3** | Mobile 4G (45 ms ± 25 ms jitter, 2% loss, 5 Mbps) |
 | **Preset 4** | Transatlantic (90 ms ± 8 ms jitter, 0.5% loss) |
 | **Preset 5** | Nightmare (120 ms ± 50 ms jitter, 12% burst loss, 3% dup, 5% reorder, 400 kbps) |
-| **Compare view** | **Network Lab — Compare** on the landing page. Inside: `Tab` network drawer, `1`–`5` presets, click a pane then `P` / `R` / `I` / `G` to toggle its settings, `T` truth rings |
+| **Compare view** | **Network Lab — Compare** on the landing page. Inside: `Tab` network drawer, `1`–`5` presets, click a pane then `P` / `C` / `I` / `G` to toggle its settings, `T` truth rings |
 
 Latencies are one-way, applied in each direction (RTT ≈ 2 × latency).
 
@@ -122,7 +133,7 @@ CN-Sem5-Project/
 ├── .gitignore              # Ignores all node_modules, build artifacts, envs, caches
 ├── README.md               # Quickstart guide & documentation overview
 ├── PHASES.md               # Project goals and phased plan (current status)
-├── GAMERULES.md            # Gameplay rules and game constants
+├── GAMERULES.md            # Gameplay rules and game constants (revised 2026-10-10: weapons, reload, power-ups, maps, look, sound)
 ├── package.json            # Root workspace scripts & postinstall hook
 ├── log.md                  # Development & task tracking log (agents)
 ├── docs/
@@ -131,6 +142,7 @@ CN-Sem5-Project/
 │   ├── ASSUMPTIONS.md      # Design decisions and their reasons
 │   └── archive/SPEC-v1.md  # Original v1 build spec (archived)
 └── NoBu-Shooter/           # Primary application workspace
+    ├── assets/             # Textures, sprites, FX and sound effects (inventory: assets/README.md, licences: assets/CREDITS.md)
     ├── client/             # Phaser 3 + React HUD & Network Lab UI (Vite)
     ├── emulator/           # Standalone bidirectional network impairment proxy
     ├── server/             # Authoritative 60 Hz headless WebSocket game server
@@ -167,7 +179,18 @@ CN-Sem5-Project/
   `npm run demo` checks ports 5173/8080/9000/9001 first and prints the command to free them. Usually a previous demo is still running. You can find and terminate processes holding these ports (e.g., in Windows PowerShell: `Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Stop-Process -Force`).
 - **Dependencies not found after pulling**:
   Run `npm install` at root, or run `cd NoBu-Shooter && npm install`.
-- **`D` (or `P`, `R`, `1`–`5`) does nothing, while the arrow keys work**:
+- **`D` (or `P`, `R`, `C`, `1`–`5`) does nothing, while the arrow keys work**:
   A browser extension is consuming the key before the page sees it. **Vimium** does exactly this: it maps `d` (scroll half page down), `r` (reload!), `p` (open clipboard URL) and digits (count prefix). Exclude the demo in Vimium: click the Vimium toolbar icon on the demo tab and choose *Exclude*, or add `http://localhost:5173/*` with an empty key list under Vimium Options → *Excluded URLs and keys*. A browser profile without such extensions works too.
 - **Canvas render error or blank page**:
   Hard refresh the browser (`Ctrl + F5`) to clear Vite cache. Ensure your browser supports WebGL / HTML5 Canvas.
+
+---
+
+## 🎨 Credits
+
+Art and sound in `NoBu-Shooter/assets/` (full list and licences: [`assets/CREDITS.md`](NoBu-Shooter/assets/CREDITS.md)):
+
+- Player avatar: **"Animated Top Down Survivor Player"** by Riley Gombart — [OpenGameArt](https://opengameart.org/node/38111), CC-BY 3.0.
+- Props and drone target: **"RC Art – Rough Props"** by Reactorcore — [OpenGameArt](https://opengameart.org/content/rough-industrial-combat-props), credited (CC0 / CC-BY 4.0).
+- Pickup icons: **ring icons** by qubodup (CC0); Spread Shot and Speed badges made for this project from CC0 art.
+- All other textures, effects and sounds: CC0.

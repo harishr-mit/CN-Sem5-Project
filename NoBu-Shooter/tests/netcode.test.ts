@@ -32,8 +32,13 @@ interface Harness {
 
 let frameNo = 0;
 
-function makeHarness(link: Partial<LinkConfig>, clientCount = 1, seed = 7, opts: { spectator?: boolean } = {}): Harness {
+function makeHarness(
+  link: Partial<LinkConfig>, clientCount = 1, seed = 7,
+  opts: { spectator?: boolean; room?: 'main' | 'lab'; noBots?: boolean } = {},
+): Harness {
   const server = new GameServer(() => Date.now());
+  // Main room without bots: two harness clients start a match on their own
+  if (opts.noBots) (server.getRoom('main') as unknown as { roomCfg: { bots: boolean } }).roomCfg.bots = false;
   const clients: NetClient[] = [];
   const corrections: number[] = [];
 
@@ -70,7 +75,7 @@ function makeHarness(link: Partial<LinkConfig>, clientCount = 1, seed = 7, opts:
     };
 
     const client = new NetClient({
-      url: 'ws://harness', name: `T${i}`, room: 'lab', transport, now: () => Date.now(),
+      url: 'ws://harness', name: `T${i}`, room: opts.room ?? 'lab', transport, now: () => Date.now(),
     });
     client.on('correction', (ev) => corrections.push(ev.errorPx));
     client.connect();
@@ -362,5 +367,80 @@ describe('Netcode harness: spectator reference and mover metrics (PHASES.md C2, 
     expect(a.moverLagMs).toBeGreaterThan(b.moverLagMs); // the price of smoothness
     expect(b.moverWobbleMs).toBeGreaterThan(2 * a.moverWobbleMs);
     expect(b.moverFrozenPct).toBeGreaterThanOrEqual(a.moverFrozenPct + 30);
+  });
+});
+
+describe('Netcode harness: weapon prediction (GAMERULES.md §6a)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    frameNo = 0;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** Fire for 10 s (with a manual reload half way), idle 2 s; client 0 only. */
+  function shootThenSettle(h: Harness) {
+    for (let f = 0; f < 300 && h.clients[0].latestSnapshot?.match.state !== 'RUNNING'; f++) h.frame();
+    expect(h.clients[0].latestSnapshot?.match.state).toBe('RUNNING');
+    h.run(90); // spawn protection, first snapshots of the match
+    const c = h.clients[0];
+    c.aimAngle = Math.PI / 2;
+    let shots = 0;
+    const off = c.on('fire', () => { shots++; });
+    for (let f = 0; f < 600; f++) {
+      c.fireDown = f < 560;
+      if (f === 280) c.requestReload();
+      h.frame();
+    }
+    c.fireDown = false;
+    h.run(150);
+    off();
+    return { c, shots };
+  }
+
+  it('clean link: predicted ammo and reload match the server exactly (0 corrections)', () => {
+    const h = makeHarness({ latencyMs: 40 }, 2, 7, { room: 'main', noBots: true });
+    const { c, shots } = shootThenSettle(h);
+    expect(shots).toBeGreaterThan(20);
+    expect(c.combatView.corrections).toBe(0);
+    expect(c.predictedCombat).toEqual(c.latestSnapshot?.me);
+  });
+
+  it('clean link: dashing is predicted exactly (no position corrections)', () => {
+    const h = makeHarness({ latencyMs: 40 }, 2, 7, { room: 'main', noBots: true });
+    for (let f = 0; f < 300 && h.clients[0].latestSnapshot?.match.state !== 'RUNNING'; f++) h.frame();
+    h.run(60);
+    const c = h.clients[0];
+    // Grant Dash on the server (as a pickup would) and let the client learn it
+    const room = h.server.getRoom('main') as unknown as { state: { players: Map<number, { combat: { dashTicks: number } }> } };
+    room.state.players.get(c.myPlayerId!)!.combat.dashTicks = 590;
+    h.run(30);
+    expect(c.predictedCombat.dashTicks).toBeGreaterThan(0);
+    const before = h.corrections.length;
+    const start = { ...c.predicted };
+    let dashes = 0;
+    let bursts = 0;
+    for (let f = 0; f < 300; f++) {
+      c.keys = Math.floor(f / 75) % 2 === 0 ? KEY.RIGHT : KEY.LEFT;
+      if (f % 40 === 0) { c.requestDash(); dashes++; }
+      h.frame();
+      if (c.predictedCombat.dashBurstTicks === 8) bursts++; // first input after a dash started
+    }
+    h.run(120);
+    expect(dashes).toBeGreaterThan(5);
+    expect(bursts).toBe(3); // 5 s with a 2 s cooldown: dashes at 0, ~2 and ~4 s
+    expect(Math.hypot(c.predicted.x - start.x, c.predicted.y - start.y)).toBeGreaterThan(0);
+    expect(h.corrections.length - before).toBe(0);
+    expect(c.predicted).toEqual({ x: c.authX, y: c.authY });
+  });
+
+  it('20 % loss, redundancy off: lost shots are corrected, and the state converges', () => {
+    const h = makeHarness({ latencyMs: 40, lossPct: 20 }, 2, 7, { room: 'main', noBots: true });
+    const { c } = shootThenSettle(h);
+    expect(c.combatView.corrections).toBeGreaterThan(0);
+    expect(c.predictedCombat).toEqual(c.latestSnapshot?.me);
   });
 });

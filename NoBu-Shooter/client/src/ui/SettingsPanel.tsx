@@ -179,6 +179,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             onChange={(e) => updateSetting('soundVolume', parseInt(e.target.value, 10))}
             style={{ accentColor: 'var(--c-lime)', cursor: 'pointer' }}
           />
+          <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.9rem', color: 'var(--c-text)', cursor: 'pointer' }}>
+            <span>Mute Sound Effects <span className="font-mono" style={{ color: 'var(--c-text-muted)', fontSize: '0.75rem' }}>[M]</span></span>
+            <input
+              id="settings-mute"
+              type="checkbox"
+              checked={settings.muted}
+              onChange={(e) => updateSetting('muted', e.target.checked)}
+              style={{ accentColor: 'var(--c-lime)', width: '16px', height: '16px', cursor: 'pointer' }}
+            />
+          </label>
         </div>
 
         {/* Actions */}

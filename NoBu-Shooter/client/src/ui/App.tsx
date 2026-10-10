@@ -11,7 +11,8 @@ import { PacketInspector } from './PacketInspector.js';
 import { CompareView } from './compare/CompareView.js';
 import { SettingsPanel } from './SettingsPanel.js';
 import { ControlsOverlay } from './ControlsOverlay.js';
-import { loadSettings, type UserSettings } from './settings.js';
+import { loadSettings, saveSettings, type UserSettings } from './settings.js';
+import { setSoundPrefs } from '../game/audio.js';
 import { useGameStore } from './store.js';
 import { isTypingTarget } from '../game/input.js';
 
@@ -79,6 +80,12 @@ export const App: React.FC = () => {
       } else if (e.key === 'F1' || e.key === '?') {
         e.preventDefault();
         setIsControlsOpen((prev) => !prev);
+      } else if (e.code === 'KeyM' && !e.repeat) {
+        // Mute / unmute sound effects (GAMERULES.md §18), remembered
+        const s = loadSettings();
+        const next = { ...s, muted: !s.muted };
+        saveSettings(next);
+        setSoundPrefs(next.soundVolume / 100, next.muted);
       }
     };
 
@@ -105,6 +112,7 @@ export const App: React.FC = () => {
     if (netClient) {
       netClient.toggles.ghost = newSettings.showGhost;
     }
+    setSoundPrefs(newSettings.soundVolume / 100, newSettings.muted);
   };
 
   if (view === 'landing') {
@@ -137,6 +145,7 @@ export const App: React.FC = () => {
           <div className="arena-canvas-container">
             <GameContainer netClient={netClient} id="game-canvas" />
             <Hud
+              netClient={netClient}
               onOpenSettings={() => setIsSettingsOpen(true)}
               onOpenControls={() => setIsControlsOpen(true)}
               onLeave={handleLeaveMatch}

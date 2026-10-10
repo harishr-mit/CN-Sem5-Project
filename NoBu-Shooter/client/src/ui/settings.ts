@@ -4,6 +4,8 @@ export interface UserSettings {
   showGhost: boolean;
   showParticleTrails: boolean;
   soundVolume: number;
+  /** Sound effects muted (`M`, GAMERULES.md §18). */
+  muted: boolean;
 }
 
 const SETTINGS_KEY = 'nobu_shooter_settings';
@@ -14,6 +16,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   showGhost: true,
   showParticleTrails: true,
   soundVolume: 80,
+  muted: false,
 };
 
 export function loadSettings(): UserSettings {

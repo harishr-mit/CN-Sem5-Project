@@ -67,7 +67,7 @@ describe('Mover paths (shared/src/sim/movers.ts)', () => {
         expect(pt.y).toBeGreaterThanOrEqual(R + 4);
         expect(pt.x).toBeLessThanOrEqual(GAME.arena.width - R - 4);
         expect(pt.y).toBeLessThanOrEqual(GAME.arena.height - R - 4);
-        for (const o of GAME.obstacles) {
+        for (const o of GAME.maps.neon.obstacles) {
           const c = closestPointOnRect(pt, o);
           expect(Math.hypot(pt.x - c.x, pt.y - c.y)).toBeGreaterThanOrEqual(R + 4);
         }
@@ -82,7 +82,7 @@ describe('Mover paths (shared/src/sim/movers.ts)', () => {
     for (const p of MOVER_PATTERNS) {
       for (const pt of samples(p, 30)) expect(Math.hypot(pt.x - spawn.x, pt.y - spawn.y)).toBeGreaterThanOrEqual(108);
     }
-    for (const o of GAME.obstacles) {
+    for (const o of GAME.maps.neon.obstacles) {
       const c = closestPointOnRect(spawn, o);
       expect(Math.hypot(spawn.x - c.x, spawn.y - c.y)).toBeGreaterThanOrEqual(R + 4);
     }
