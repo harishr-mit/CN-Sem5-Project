@@ -13,7 +13,9 @@
     "./sim": "./src/sim/index.ts",
     "./sim/*": "./src/sim/*",
     "./protocol": "./src/protocol/index.ts",
-    "./protocol/*": "./src/protocol/*"
+    "./protocol/*": "./src/protocol/*",
+    "./sync": "./src/sync/index.ts",
+    "./sync/*": "./src/sync/*"
   },
   "scripts": {
     "build": "tsc",

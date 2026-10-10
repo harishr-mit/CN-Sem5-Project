@@ -14,6 +14,9 @@
  *    deviation for normal noise), so a rare glitch doesn't swamp them.
  *  - error: the plain distance to the true position, in px.
  *  - frozen: frames where the entity really moved but was drawn in place.
+ *  - off path: frames where it was drawn more than 3 px from every point of
+ *    its path — overshoot and rubber-banding of extrapolation (Phase 3), which
+ *    a delay can't describe.
  * Headless and pure (no DOM), so the netcode harness can test it.
  */
 
@@ -35,6 +38,8 @@ export interface RemoteErrorStats {
   errorPx: number;
   /** Frames drawn in place while the entity really moved (%). */
   frozenPct: number;
+  /** Frames drawn off the path while the entity really moved (%). */
+  offPathPct: number;
   /** Delay samples in the window (0 = no data). */
   samples: number;
 }
@@ -70,7 +75,7 @@ interface Match { tau: number; cost: number }
 export class RemoteErrorTracker {
   private delays: { t: number; v: number }[] = [];
   private errors: { t: number; v: number }[] = [];
-  private frames: { t: number; frozen: boolean }[] = [];
+  private frames: { t: number; frozen: boolean; offPath: boolean }[] = [];
   private entities = new Map<number, EntityState>();
 
   /** Record one presented frame: `serverMs` is the true server time it shows. */
@@ -81,18 +86,22 @@ export class RemoteErrorTracker {
       if (st && now - st.seenAt > STALE_MS) st = undefined;
 
       let dir = st?.dir ?? null;
+      let drawnStep = 0;
+      let trueStep = 0;
       if (st) {
-        const drawnStep = Math.hypot(e.x - st.drawnX, e.y - st.drawnY);
-        const trueStep = Math.hypot(truth.x - st.trueX, truth.y - st.trueY);
-        if (trueStep > MOVING_PX) {
-          this.frames.push({ t: now, frozen: drawnStep < FROZEN_PX });
-          this.errors.push({ t: now, v: Math.hypot(e.x - truth.x, e.y - truth.y) });
-        }
+        drawnStep = Math.hypot(e.x - st.drawnX, e.y - st.drawnY);
+        trueStep = Math.hypot(truth.x - st.trueX, truth.y - st.trueY);
         if (drawnStep > MOVING_PX) dir = { x: (e.x - st.drawnX) / drawnStep, y: (e.y - st.drawnY) / drawnStep };
       }
 
       const tau = dir ? findDelay(e.path, serverMs, e.x, e.y, dir, st?.tau ?? null) : null;
       if (tau !== null) this.delays.push({ t: now, v: tau });
+      if (st && trueStep > MOVING_PX) {
+        // Only searched when no delay matched (on-path frames almost always match)
+        const offPath = tau === null && distanceToPath(e.path, serverMs, e.x, e.y) >= MATCH_TOL_PX;
+        this.frames.push({ t: now, frozen: drawnStep < FROZEN_PX, offPath });
+        this.errors.push({ t: now, v: Math.hypot(e.x - truth.x, e.y - truth.y) });
+      }
       this.entities.set(e.id, {
         seenAt: now, drawnX: e.x, drawnY: e.y, trueX: truth.x, trueY: truth.y,
         tau: tau ?? st?.tau ?? null, dir,
@@ -106,11 +115,13 @@ export class RemoteErrorTracker {
     const d = this.delays.map((s) => s.v).sort((a, b) => a - b);
     const err = this.errors.map((s) => s.v);
     const frozen = this.frames.filter((f) => f.frozen).length;
+    const offPath = this.frames.filter((f) => f.offPath).length;
     return {
       lagMs: Math.round(quantile(d, 0.5)),
       wobbleMs: Math.round(((quantile(d, 0.75) - quantile(d, 0.25)) / 1.35) * 10) / 10,
       errorPx: err.length ? Math.round((err.reduce((a, b) => a + b, 0) / err.length) * 10) / 10 : 0,
       frozenPct: this.frames.length ? Math.round((frozen / this.frames.length) * 100) : 0,
+      offPathPct: this.frames.length ? Math.round((offPath / this.frames.length) * 100) : 0,
       samples: d.length,
     };
   }
@@ -155,6 +166,11 @@ function searchDelay(path: PathFn, serverMs: number, x: number, y: number, lo: n
     if (c < best.cost) best = { tau, cost: c };
   }
   return best;
+}
+
+/** Distance (px) from a drawn position to the nearest point of the path within the searched delays. */
+export function distanceToPath(path: PathFn, serverMs: number, x: number, y: number): number {
+  return searchDelay(path, serverMs, x, y, TAU_MIN_MS, TAU_MAX_MS, 5).cost;
 }
 
 /** All separate places in [TAU_MIN_MS, TAU_MAX_MS] where the drawn position lies on the path. */

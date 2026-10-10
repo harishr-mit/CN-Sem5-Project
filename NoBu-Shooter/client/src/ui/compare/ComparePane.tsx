@@ -4,6 +4,7 @@ import type { ArenaSceneOptions } from '../../game/ArenaScene.js';
 import type { NetClient, LocalMetrics, PredictionToggle } from '../../net/NetClient.js';
 import { PaneMetricsBar } from './PaneMetricsBar.js';
 import { PANE_CHROME_PX } from '../../compare/layout.js';
+import { syncLabel, type SyncSpec } from '@nobu/shared/sync';
 
 const CHIPS: { key: keyof PredictionToggle; label: string; hint: string }[] = [
   { key: 'prediction', label: 'P', hint: 'Prediction [P]' },
@@ -26,14 +27,18 @@ interface ComparePaneProps {
   /** Reference pane: direct to the server, no toggles. */
   reference?: boolean;
   toggles?: PredictionToggle;
+  /** Sync model of this pane (PHASES.md Phase 3). */
+  sync?: SyncSpec;
   selected?: boolean;
   onSelect?: () => void;
   onToggle?: (key: keyof PredictionToggle) => void;
+  /** Cycle the sync model (Full → Delta → State 10 → State 30). */
+  onCycleSync?: () => void;
 }
 
 export const ComparePane: React.FC<ComparePaneProps> = ({
   id, title, color, netClient, options, canvasW, canvasH, metrics,
-  showMovers, reference, toggles, selected, onSelect, onToggle,
+  showMovers, reference, toggles, sync, selected, onSelect, onToggle, onCycleSync,
 }) => (
   <div
     onMouseDown={onSelect}
@@ -72,20 +77,46 @@ export const ComparePane: React.FC<ComparePaneProps> = ({
         </span>
       ) : (
         <span style={{ display: 'flex', gap: 3 }}>
+          {sync && (
+            <button
+              title="Sync model [Y]: Full → Delta → State 10 Hz → State 30 Hz"
+              className="cmp-sync-chip"
+              onClick={(e) => { e.stopPropagation(); onCycleSync?.(); }}
+              style={{
+                height: 18,
+                padding: '0 6px',
+                marginRight: 4,
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.62rem',
+                cursor: 'pointer',
+                borderRadius: 3,
+                whiteSpace: 'nowrap',
+                color: color,
+                background: 'transparent',
+                border: `1px solid ${color}`,
+              }}
+            >
+              {syncLabel(sync)}
+            </button>
+          )}
           {CHIPS.map((c) => {
             const on = toggles?.[c.key] ?? false;
+            // State sync extrapolates; interpolation doesn't apply (docs/PHASE3_PLAN.md D6)
+            const inert = c.key === 'interpolation' && sync?.model === 'state';
             return (
               <button
                 key={c.key}
-                title={c.hint}
+                title={inert ? 'Interpolation: not used with State sync (it extrapolates)' : c.hint}
+                disabled={inert}
                 onClick={(e) => { e.stopPropagation(); onToggle?.(c.key); }}
                 style={{
+                  opacity: inert ? 0.3 : 1,
                   minWidth: 22,
                   height: 18,
                   padding: '0 4px',
                   fontFamily: 'var(--font-mono)',
                   fontSize: '0.62rem',
-                  cursor: 'pointer',
+                  cursor: inert ? 'default' : 'pointer',
                   borderRadius: 3,
                   color: on ? '#07070f' : 'var(--c-text-muted)',
                   background: on ? color : 'transparent',

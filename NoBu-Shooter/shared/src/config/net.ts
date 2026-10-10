@@ -11,6 +11,10 @@ export const NET = {
   extrapolateMaxMs: 100,
   snapshotBufferSize: 32,
   eventRedundancyMs: 500,
+  /** Delta snapshots (docs/PHASE3_PLAN.md D3). */
+  delta: { ringSize: 32, maxBaseAgeMs: 1000, clientRingSize: 64 },
+  /** State sync + extrapolation (docs/PHASE3_PLAN.md D5, D6). */
+  state: { defaultHz: 10, rates: [10, 30], extrapolateMaxMs: 250, extrapolateBackMs: 100, blendHalfLifeMs: 100 },
   clockSmoothing: 0.05,
   reconcile: { epsilonPx: 0.01, smoothHalfLifeMs: 80, snapThresholdPx: 64 },
   pingIntervalMs: 500,

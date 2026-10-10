@@ -49,6 +49,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
         { keys: ['C'], desc: 'Toggle Server Reconciliation' },
         { keys: ['I'], desc: 'Toggle Snapshot Interpolation' },
         { keys: ['G'], desc: 'Toggle Ghost Player (Server True Position)' },
+        { keys: ['Y'], desc: 'Cycle sync model: Full → Delta → State 10 Hz → State 30 Hz (live)' },
       ],
     },
     {

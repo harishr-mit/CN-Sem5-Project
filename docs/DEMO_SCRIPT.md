@@ -2,7 +2,7 @@
 
 Follow these steps for a complete, 60-second end-to-end demonstration of the netcode and network impairment simulator.
 
-Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into Presenter mode). Expected numbers below were measured on 2026-10-09 (Windows laptop, local Chrome).
+Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into Presenter mode). Expected numbers below were measured on 2026-10-09 (Windows laptop, local Chrome); §7 and §11 on 2026-10-10 (Phase 3). Bandwidth figures count wire bytes (payload + 28 B per message, like the emulator).
 
 ---
 
@@ -22,10 +22,11 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
 | Reconciliation Toggle | `C` |
 | Interpolation Toggle | `I` |
 | Ghost Overlay Toggle | `G` |
+| Sync model (Full → Delta → State 10 → State 30) | `Y` (Quick Match: Network Lab; Compare: the selected pane) |
 
 ---
 
-## 10-Step Walkthrough
+## Walkthrough
 
 ### 1. Baseline Conditions
 1. Start the project: `npm run demo`
@@ -78,8 +79,9 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
    - Lost packets burst and drop in red.
    - Bandwidth queue limit causes orange queue drops.
    - Duplications split dots into twins.
-3. Note the **bufferbloat**: the 400 kbps cap is below what full snapshots need (~380–450 kbps), so the emulator queue fills, ack delay climbs to ~700 ms and the orange queue-drop count rises. (Phase 3's delta snapshots fix exactly this.)
-4. Switch **Input Redundancy ON**: corrections from upstream loss mostly disappear, although the queueing delay remains.
+3. Note the **bufferbloat**: full snapshots of a 4-player match need ≈ 500–600 kbps, above the 400 kbps cap, so the emulator queue fills, ack delay climbs to ≈ 650–700 ms and the orange queue-drop count rises.
+4. Press `Y` (Network Lab → **SYNC MODEL** → DELTA). You stay in the match; the server now sends only what changed since the last snapshot you acknowledged. **Expect** after ≈ 15 s: ↓ ≈ 130 kbps instead of ≈ 400, ≈ 500 B per message instead of ≈ 1.9 kB, ack delay ≈ 325 ms instead of ≈ 660 ms (measured 2026-10-10). Press `Y` again for **STATE 10** (≈ 190 kbps, remote players extrapolated) and twice more to get back to FULL.
+5. Switch **Input Redundancy ON**: corrections from upstream loss mostly disappear, although the queueing delay remains (with Full).
 
 ### 8. Compare View
 1. Click **◄ LEAVE MATCH** (bottom-left of the arena), or press `Esc` and click **◄ LEAVE MATCH — BACK TO MAIN MENU** (end of the settings menu), to return to the landing page.
@@ -93,7 +95,7 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
    - **Expect** in the dock: mover lag ≈ 75 ± 26 ms, frozen frames ≈ 60–70 % (A) vs ≈ 160 ± 3 ms, ≈ 2 % (B). Talking point: 160 ms ≈ 50 ms network + 100 ms interpolation delay — interpolation buys smoothness with a fixed, predictable lag. (Distance alone would mislead: ≈ 15 px vs ≈ 30 px.)
    - The **REF** pane is a spectator connected straight to the server: it shows where every pane's player and every drone really is. The panes' players sit on top of each other there: the server received the same inputs from every pane, so prediction, reconciliation and interpolation change only what each pane *draws*. (Under loss without redundancy they can drift apart: that is the Redundancy preset.)
 5. **Redundancy** (50 ms, 10 % loss). **Expect** ≈ 2–4 corrections/s (A, redundancy off) vs 0 (B).
-6. **Custom**: choose 2–4 panes, click a pane to select it and toggle `P` / `C` / `I` / `G` (or the chips in its header). `Tab` opens the network drawer; `1`–`5` still apply the emulator presets to every emulated pane.
+6. **Custom**: choose 2–4 panes, click a pane to select it and toggle `P` / `C` / `I` / `G`, or cycle its sync model with `Y` (or the chips in its header). `Tab` opens the network drawer; `1`–`5` still apply the emulator presets to every emulated pane. The Phase 3 presets are in §11.
 
 ### 9. Real-Time Metrics & Inspector
 1. Click **▼ INSPECT PACKETS** on the packet strip to open the packet drawer.
@@ -107,5 +109,16 @@ Rehearsal tip: `NOBU_MAPS=warehouse npm run demo` starts on a chosen map (the ro
    - Rehearsal: under `npm run demo` the Network Lab has a **Developer → Invincible** switch, so you can talk without being shot (your tag reads `[DEV]`).
 3. Press `4` (Transatlantic) and pick up **Speed**: the first moves after the pickup are predicted at normal speed, so a small correction line appears — pickups are decided by the server and are never predicted.
 4. Press `5` (Nightmare), turn **Input Redundancy OFF** and hold fire: some shots are lost on the way up; the server never fired them, so the ammo counter **flashes amber** as the prediction is corrected (occasional flashes; at 20 % loss the netcode harness sees several per 10 s of firing). Turn redundancy ON: the flashes stop.
-5. Note the bandwidth under Nightmare: full snapshots of a 4-player match are ≈ 510 kbps, above the 400 kbps cap, so the ack delay grows — the motivation for Phase 3's delta snapshots.
+5. Note the bandwidth under Nightmare: full snapshots of a 4-player match are ≈ 510 kbps, above the 400 kbps cap, so the ack delay grows — press `Y` for delta snapshots (§7 step 4).
+
+### 11. Sync Models: Snapshot vs State (Phase 3)
+Open **NETWORK LAB — COMPARE**. Each pane's header shows its sync model (click it, or select the pane and press `Y`, to cycle). The dock shows a live **bandwidth chart** (↓ kbps per pane, last 30 s) with a dashed line at the emulator's cap. Give each preset ≈ 15 s.
+1. **Sync** (Nightmare: 400 kbps, 12 % burst loss; all four drones). This is the Phase 3 demo checkpoint.
+   - **Pane A (Full)** needs ≈ 450 kbps here: its line rides the cap, the queue fills, and its drones fall far behind their truth rings.
+   - **Pane B (Delta)** sends only what changed: ≈ 250 B per message instead of ≈ 1.8 kB, far below the cap, and stays responsive.
+   - **Pane C (State 10 Hz)** draws drones with no interpolation delay, so they are the most current — but they overshoot every turn and get pulled back (OFF-PATH %).
+   - **Expect** (browser, 2026-10-10): ack delay ≈ 740 / 310 / 360 ms, mover lag ≈ 640 / 250 / 170 ms, ↓ ≈ 400 / 60 / 160 kbps, off-path ≈ 0 / 0 / 33 %. Talking point: the same picture for ≈ 1/6 of the bytes; under a bandwidth cap, bytes become latency.
+2. **Bandwidth** (a clean 300 kbps link, no loss): Full vs Delta isolates queueing from loss. **Expect** ack delay ≈ 560 ms vs ≈ 140 ms, mover lag ≈ 570 ms vs ≈ 150 ms, ↓ ≈ 300 vs ≈ 65 kbps; Full also loses ≈ 7 snapshots/s to the full queue (LOST/s).
+3. **State Hz** (Transatlantic; zigzag + reversal drones; REF on): State 10 Hz vs 30 Hz. Both extrapolate, so mover lag ≈ the one-way latency (≈ 100 ms vs ≈ 190 ms with interpolation). **Expect** off-path ≈ 30 % vs ≈ 10 % and ↓ ≈ 105 vs ≈ 320 kbps: more updates mean less rubber-banding but 3× the bytes.
+4. Under heavy burst loss State 10 Hz can freeze briefly: it extrapolates at most 250 ms past the last state, then holds until the next one arrives.
 

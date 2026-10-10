@@ -1,7 +1,7 @@
 # NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
-**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. **Next: Phase 3.**
+**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). **Next: Phase 4.**
 **Replaces:** `ROADMAP.md` (draft of 2026-10-09). The v1 build spec is archived at `docs/archive/SPEC-v1.md`. `GAMERULES.md` remains the source of truth for gameplay.
 
 The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10-10. Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
@@ -25,8 +25,8 @@ The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10
 | 1 | **Correct core netcode** | Prediction/reconciliation demo with honest numbers: 0 corrections on a clean network, corrections under loss, A/B shows 17 ms vs 236 ms | G2 | **done 2026-10-09** |
 | 2 | **Compare view + scripted movers** | 2–4 synchronised panes plus a ground-truth reference pane, with moving targets that make interpolation visible | G1 foundation, G2 | **done 2026-10-09** |
 | 2.5 | **Gameplay + textures** | Textured survivor avatars with colour rings and a local-player marker, four rotating maps, ammo + reload, five power-ups, sound effects | G4 (and netcode material for G1/G2) | **done 2026-10-10** |
-| 3 | **Sync models: snapshot vs state** | Full snapshots vs delta snapshots vs state sync with extrapolation, side by side, with a live bandwidth chart | G1 | **next** |
-| 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena and UI | G4 | planned |
+| 3 | **Sync models: snapshot vs state** | Full snapshots vs delta snapshots vs state sync with extrapolation, side by side, with a live bandwidth chart | G1 | **done 2026-10-10** |
+| 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena and UI | G4 | **next** |
 | 5 | **Realistic transport + standalone emulator** | Real UDP between Node "network players", emulator and server. The emulator dashboard works with no game running | G3 | planned |
 | 6 | **Lockstep + final verification** | Deterministic lockstep freezing under 2–5 % loss beside snapshot sync. Full rehearsal and docs | G1, all | planned |
 
@@ -172,28 +172,32 @@ Suggested order: A0 + A1 → A2 → A3 → A4 → A5 (A6 alongside each).
 
 **Goal:** show the trade-offs between synchronisation strategies with measurements.
 
+**Implementation plan:** `docs/PHASE3_PLAN.md` (decisions D1–D10; owner answers of 2026-10-10 included: Quick Match sync switch with default Full, three comparison presets, State at 10 Hz switchable to 30 Hz). Deviations Y1–Y7 in its §10.
+
 ### Models
 
 | Model | Server sends | Client does | What it demonstrates |
 |---|---|---|---|
 | **S1 Full snapshot + interpolation** (current) | The whole world, 30 Hz | Renders 100 ms in the past | Smooth and self-healing, but always behind and bandwidth-heavy |
 | **S2 Delta snapshot** | Only what changed since the last snapshot the client *acked* (the client sends `snapAck`). Falls back to full when the base is too old | Rebuilds full state from its base | ~70–90 % less bandwidth. Under loss the base goes stale and costs rise. **Fits under Nightmare's 400 kbps cap where S1 doesn't** |
-| **S3 State sync + extrapolation** (dead reckoning) | Position and velocity at a lower rate (e.g. 10 Hz) | Simulates remote entities forward from the last state, no interpolation delay; blends on update | Lowest latency for remote entities, but overshoot and rubber-banding on direction changes |
+| **S3 State sync + extrapolation** (dead reckoning) | Complete entity records plus velocity at 10 Hz (default) or 30 Hz, switchable per connection | Simulates remote entities forward from the last state, no interpolation delay; blends on update | Lowest latency for remote entities, but overshoot and rubber-banding on direction changes |
 
 ### Scope
 
 | ID | Task |
 |---|---|
-| S0 | Sync-model interface (`shared/src/sync/`): a server encoder and client decoder pair, selected per connection in `hello` (`sync: "full" \| "delta" \| "state"`). Encoders cover the Phase 2.5 state too (`players[].aim/weapon/reloading/shield/fast`, `me`, `pickups`, `match.map`). Baseline: full snapshots ≈ 2.1 kB / ≈ 510 kbps in a 4-player match. |
-| S1 | Protocol messages `snapDelta`, `state` and client `snapAck`, with validators. Documented in `docs/PROTOCOL.md`. |
+| S0 | Sync-model interface (`shared/src/sync/`): a server encoder and client decoder pair, selected per connection in `hello` (`sync: "full" \| "delta" \| "state"`, State with `hz` 10 or 30) and switchable live with a `sync` message (spectators always get Full). Encoders cover the Phase 2.5 state too (`players[].aim/weapon/reloading/shield/fast`, `me`, `pickups`, `match.map`). Baseline: full snapshots ≈ 2.1 kB / ≈ 510 kbps in a 4-player match. |
+| S1 | Protocol messages `snapDelta`, `state`, client `sync` and `snapAck` (acks also ride on `input.sa`), with validators. Documented in `docs/PROTOCOL.md`. |
 | S2 | Delta encoder/decoder with baseline tracking and a full-snapshot fallback. |
 | S3 | State encoder (position + velocity, configurable rate) and an extrapolating client renderer with error blending. |
-| S4 | Compare view: a sync model per pane (`PaneSpec.sync`, reserved in Phase 2), plus a **live bandwidth chart** comparing panes (↓ kbps over time) in the compare dock. |
+| S4 | Compare view: a sync model per pane (`PaneSpec.sync`, reserved in Phase 2; SYNC chip / `Y` cycles Full → Delta → State 10 → State 30), plus a **live bandwidth chart** comparing panes (↓ wire kbps over time, with the emulator's cap line) in the compare dock. Three comparison presets: **Sync models** (Full / Delta / State 10 at Nightmare), **Bandwidth** (Full vs Delta on a clean 300 kbps link), **State rate** (State 10 vs 30 Hz at Transatlantic). Quick Match: a SYNC MODEL row in the Network Lab (`Y`), default Full (owner, 2026-10-10). |
 | S5 | Tests: a delta round-trip equals the full snapshot (including under loss with the fallback); extrapolation error is 0 on straight lines and bounded on reversals; per-model bandwidth falls within an expected range. |
 
-**Demo checkpoint:** three panes (Full / Delta / State) at the Nightmare preset. Delta stays responsive where Full builds a queue, and State reacts instantly but rubber-bands on the zigzag mover. The bandwidth chart shows the difference.
+**Demo checkpoint:** the "Sync" preset — three panes (Full / Delta / State 10) at the Nightmare preset with all four movers (no REF pane, so the dock with the bandwidth chart fits). Delta stays responsive where Full builds a queue, and State reacts instantly but rubber-bands on the zigzag mover. The bandwidth chart shows the difference.
 
 **Exit criteria:** the phase rules; measured delta bandwidth ≤ 40 % of full in the baseline lab scene (recorded in `docs/ASSUMPTIONS.md`).
+
+**Result (met, 2026-10-10):** 130 tests (new: `sync` 14 — diff/patch, delta streams at 30 % loss with reordering and duplication, fallbacks after a 2 s outage with no event lost, state encoder, GameServer per-connection encoders; `extrapolate` 6; netcode harness +4 — every model shows the server's world exactly with 0 corrections, live switch keeps the player, delta ≤ 40 % / state 10 Hz ≤ 45 % / state 30 Hz ≥ full bytes, state draws movers ≥ 60 ms more current, Nightmare full queues while delta stays exact), typecheck clean, smoke passes (new step: full + delta `NetClient`s under Nightmare, every decoded delta world equals the spectator's, 0 missing bases). Browser (local Chrome, 1920 × 1080 and 1280 × 720, 60 fps, 0 console errors): **Sync** at Nightmare — ack delay Full ≈ 740 ms / Delta ≈ 310 ms / State 10 ≈ 360 ms, mover lag ≈ 640 / 250 / 170 ms, ↓ ≈ 400 / 60 / 160 kbps, off-path 0 / 0 / 33 %; **Bandwidth** (300 kbps) — ack ≈ 560 vs 140 ms, lag ≈ 570 vs 150 ms; **State Hz** — off-path ≈ 35 % vs 8 %, ↓ ≈ 105 vs 320 kbps; Quick Match under Nightmare — `Y` to Delta lowers the ack delay ≈ 660 → 325 ms and ↓ ≈ 410 → 130 kbps without leaving the match. Phase 2 numbers unchanged (Interpolation preset: frozen 67 % vs 3 %).
 
 ---
 
@@ -261,7 +265,7 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 
 ### Definition of Done (all phases)
 
-- [ ] G1: four sync models are selectable and comparable side by side with measured bandwidth, latency and error.
+- [ ] G1: four sync models are selectable and comparable side by side with measured bandwidth, latency and error. *(Three done in Phase 3 — full, delta, state; lockstep is Phase 6.)*
 - [ ] G2: 0 corrections on a clean network; corrections under loss that converge; redundancy removes them (covered by tests and visible in the UI).
 - [ ] G3: the emulator runs standalone (WS + UDP) with its own dashboard and README, and the game is just one client of it.
 - [ ] G4: Presenter mode runs the whole talk; screenshots pass the visual checklist; textures and sounds drop in through the manifest (Phase 2.5).

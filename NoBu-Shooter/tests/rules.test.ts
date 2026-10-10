@@ -13,7 +13,7 @@ type Internals = {
 
 describe('Gameplay Rules & Authority (SPEC.md §14.4, GAMERULES.md)', () => {
   it('adds human player and auto-populates bots up to target count', () => {
-    const messages: string[] = [];
+    const messages: unknown[] = [];
     const room = new Room('main', (pid, msg) => messages.push(msg), (msg) => messages.push(msg));
 
     const p1 = room.addPlayer('Ace', false);

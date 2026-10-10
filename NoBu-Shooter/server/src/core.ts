@@ -6,7 +6,8 @@
  */
 
 import { decodeClient, encodeServer } from '@nobu/shared/protocol';
-import type { MsgInput, ServerMsg } from '@nobu/shared/protocol';
+import type { MsgInput, MsgSnap, ServerMsg } from '@nobu/shared/protocol';
+import { createEncoder, DEFAULT_SYNC, normalizeSync, sameSync, type SyncEncoder, type SyncSpec, type VelocityTable } from '@nobu/shared/sync';
 import NET from '@nobu/shared/config/net.js';
 import GAME from '@nobu/shared/config/game.js';
 import { Room } from './game/room.js';
@@ -18,6 +19,9 @@ export interface Connection {
   playerId: number | null;
   /** Spectators receive snapshots but have no player. */
   spectator: boolean;
+  /** Sync model of this connection and its encoder (spectators: always full). PHASES.md Phase 3. */
+  sync: SyncSpec;
+  encoder: SyncEncoder;
   room: Room | null;
   nonce: string | null;
   lastMsg: number;
@@ -43,13 +47,14 @@ export class GameServer {
     if (!room) {
       room = new Room(
         name,
-        (playerId, msg) => {
+        (playerId, snap, vel) => {
           for (const conn of this.connections) {
-            if (conn.room === room && conn.playerId === playerId) { conn.send(msg); break; }
+            if (conn.room === room && conn.playerId === playerId) { this.sendSnapshot(conn, snap, vel); break; }
           }
         },
-        (msg) => {
-          for (const conn of this.connections) if (conn.room === room && conn.spectator) conn.send(msg);
+        (snap) => {
+          const text = encodeServer(snap);
+          for (const conn of this.connections) if (conn.room === room && conn.spectator) conn.send(text);
         }
       );
       this.rooms.set(name, room);
@@ -62,6 +67,7 @@ export class GameServer {
     const conn: Connection = {
       id: nextConnId++, send, close,
       playerId: null, spectator: false, room: null, nonce: null,
+      sync: DEFAULT_SYNC, encoder: createEncoder(DEFAULT_SYNC),
       lastMsg: t, msgCount: 0, msgCountWindow: t,
     };
     this.connections.add(conn);
@@ -143,6 +149,7 @@ export class GameServer {
           reply({ t: 'error', code: 'ROOM_FULL', msg: 'Room is full' });
           return;
         }
+        if (msg.sync) this.setSync(conn, msg.sync);
         conn.playerId = room.addPlayer(msg.name);
         conn.room = room;
         conn.nonce = msg.nonce;
@@ -153,7 +160,16 @@ export class GameServer {
 
       case 'input':
         if (conn.playerId === null || !conn.room) return;
+        if (msg.sa !== undefined) conn.encoder.onAck(msg.sa);
         conn.room.receiveInput(conn.playerId, (msg as MsgInput).inputs);
+        break;
+
+      case 'snapAck':
+        conn.encoder.onAck(msg.tick);
+        break;
+
+      case 'sync':
+        if (!conn.spectator) this.setSync(conn, msg);
         break;
 
       case 'ping': {
@@ -186,6 +202,28 @@ export class GameServer {
         conn.close();
         break;
     }
+  }
+
+  /** Switch a connection's sync model; the same spec keeps the encoder (and its delta base). */
+  private setSync(conn: Connection, spec: SyncSpec): void {
+    const next = normalizeSync({ model: spec.model, ...(spec.hz ? { hz: spec.hz } : {}) });
+    if (sameSync(next, conn.sync)) return;
+    conn.sync = next;
+    conn.encoder = createEncoder(next);
+  }
+
+  /** One player's snapshot through its connection's sync encoder (docs/PHASE3_PLAN.md D2). */
+  private sendSnapshot(conn: Connection, snap: MsgSnap, vel: VelocityTable): void {
+    const fallbacksBefore = conn.encoder.fallbacks;
+    const out = conn.encoder.encode(snap, vel);
+    if (!out) return;
+    const text = encodeServer(out);
+    conn.send(text);
+    const metrics = conn.room?.metrics;
+    if (!metrics) return;
+    // Bytes count toward the connection's model (a delta fallback is delta traffic)
+    metrics.recordSync(conn.sync.model, text.length);
+    metrics.sync.deltaFallbacks += conn.encoder.fallbacks - fallbacksBefore;
   }
 
   private sendWelcome(conn: Connection, nonce: string): void {

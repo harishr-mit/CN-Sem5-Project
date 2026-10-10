@@ -34,11 +34,10 @@ export const App: React.FC = () => {
     setPlayerName(name);
 
     // Initialize network clients
-    const net = new NetClient({ url: EMULATOR_DATA_URL, name, room: 'main' });
-    const emu = new EmulatorClient('ws://127.0.0.1:9001');
-
-    // Apply saved ghost preference
+    // Saved ghost preference and sync model (Network Lab, `Y`)
     const initialSettings = loadSettings();
+    const net = new NetClient({ url: EMULATOR_DATA_URL, name, room: 'main', sync: initialSettings.syncModel });
+    const emu = new EmulatorClient('ws://127.0.0.1:9001');
     net.toggles.ghost = initialSettings.showGhost;
 
     setNetClient(net);

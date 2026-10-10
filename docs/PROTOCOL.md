@@ -31,6 +31,7 @@ Resent every 250 ms until an authoritative `welcome` message is received.
 - `room`: `"main"` (full match with bots) or `"lab"` (movement-only sandbox used by the Compare view; every lab player spawns at the same point, `rooms.lab.spawn`, so all panes' players start together).
 - `nonce`: Unique client-generated session identifier for idempotent handshake retry.
 - `spectate` (optional, boolean): join as a **spectator** — the connection receives snapshots but gets no player, doesn't count toward the room's player cap, and its `input`/`perturb` messages are ignored. The Compare view's reference pane uses this, connecting directly to the server (no emulator).
+- `sync` (optional, Phase 3): the connection's **sync model**, `{ "model": "full" | "delta" | "state", "hz"?: 10 | 30 }` (`hz` only for `state`, default 10). Omitted = `full`. Spectators always get full snapshots. It can be changed later with `sync` (§2.8). See §3.5 for what each model sends.
 
 ### 2.2 `input` (Player Movement & Fire)
 Flushed at 30 Hz. Contains one or more 60 Hz input samples.
@@ -53,6 +54,7 @@ Flushed at 30 Hz. Contains one or more 60 Hz input samples.
 - `f`: Fire flag (`1` = fire held, `0` = idle). Sent while the button is held; the server and the client's prediction both apply the weapon's cooldown and magazine (`shared/src/sim/combat.ts`).
 - `d` (optional, omitted when 0): dash request (Dash power-up). Sent on the input after `Space` and repeated during the predicted burst; the server ignores it without the power-up, without a movement key, during a burst or on cooldown.
 - `r` (optional, omitted when 0): reload request (`GAMERULES.md` §6a). The client sets it on the input after `R` and repeats it on every input of its predicted reload, so a lost input can't cancel the reload; the server ignores it while reloading or with a full magazine.
+- `sa` (optional, delta sync only): the newest snapshot tick the client has decoded — the **snapshot ack** the server's delta encoder uses as the next base (§3.5). When no input message goes out in a 30 Hz send step (dead, waiting, or idle), the client sends `snapAck` instead (§2.9).
 - *Redundancy off (default)*: every input is sent exactly once — the message carries all inputs created since the previous message (normally 2, since inputs are created at 60 Hz and sent at 30 Hz).
 - *Redundancy on*: the message carries all unacknowledged inputs, newest last, at most 10. Lost or late messages are then covered by the next one.
 - The server consumes one input per tick in sequence order, ignores `s <= lastConsumed` (duplicates/stale) and skips gaps; `ack` in the next snapshot is the last consumed `s`.
@@ -105,6 +107,18 @@ Selects the active scripted movers (PHASES.md C3). Accepted only in rooms with `
 - Movers are cleared when the room has no players and no spectators left.
 
 ---
+
+### 2.8 `sync` (Switch the Sync Model, Phase 3)
+```json
+{ "t": "sync", "model": "state", "hz": 30 }
+```
+- Switches this connection's sync model live: the player stays in the match (same id, no respawn). The server builds a new encoder, so the next message is self-contained (a full `snap`, or a `state`). The same model again is ignored (the delta base is kept). Ignored for spectators. `hz` is only valid for `state` (10 or 30).
+
+### 2.9 `snapAck` (Snapshot Ack, Delta Sync)
+```json
+{ "t": "snapAck", "tick": 4182 }
+```
+- Same meaning as `input.sa`, sent only when no input message carries it. Ticks are non-negative integers; older acks than the newest one are ignored.
 
 ## 3. Server → Client Messages
 
@@ -207,6 +221,31 @@ Broadcast at 30 Hz.
 - `me` (absent for spectators): the recipient's own weapon state (`CombatState`, `shared/src/sim/combat.ts`), exact to the acknowledged input (`*Ticks` count inputs, 60 per second; `reserve: -1` = unlimited). The client replays its unacknowledged inputs on top of it, like its position.
 - `events`: Array of redundant event entries covering the last 500 ms; deduplicated via `eid`.
 - Size: these Phase 2.5 fields make a 4-player main-room snapshot ≈ 2.1 kB (≈ 1.6 kB before), ≈ 510 kbps at 30 Hz — the full-snapshot baseline for Phase 3 (`docs/ASSUMPTIONS.md` #40).
+- Sent by the **full** sync model, to spectators, and by the delta model at start-up and as a fallback (§3.5). A delta fallback may carry, besides the last 500 ms of events, older events the client has not confirmed yet.
+
+### 3.2a `snapDelta` (Delta Snapshot, Phase 3)
+```json
+{
+  "t": "snapDelta", "tick": 4184, "base": 4180, "st": 69733.3, "ack": 4183,
+  "players": [ { "id": 3, "x": 512.25, "y": 300.5 }, { "id": 9, "aim": 1.2, "del": ["invincible"] } ],
+  "gone": [7],
+  "events": [ { "eid": 812, "type": "PICKUP", "tick": 4183, "playerId": 3, "kind": "speed" } ]
+}
+```
+- The changes from snapshot `base` (one the client acknowledged) to snapshot `tick`. Applying them to the base gives exactly the full snapshot of `tick` (`shared/src/sync/delta.ts`, `applyDelta`), except `events`.
+- `players` / `projectiles`: one entry per entity that changed, `{ id, …changed fields }`; `del` lists optional fields that disappeared (`invincible`, `mover`, `pierce`). An id the base doesn't have is a new entity and comes complete. `gone` / `projGone`: ids that disappeared. Values are exact (no rounding), so reconciliation stays bit-exact.
+- `match`, `me`: changed fields only (same `del` rule); `me: null` = no longer present. `pickups`: the whole list, only when it changed. Fields with no change are omitted.
+- `events`: every event the client has not confirmed (newer than the base), so an event repeats until an acknowledged snapshot contained it — even beyond the room's 500 ms window.
+- The client keeps the last 64 decoded snapshots; a delta whose base it doesn't have is dropped and counted (never half-applied). Loss, duplication and reordering are harmless because each delta names its base.
+
+### 3.2b `state` (State Sync, Phase 3)
+```json
+{ "t": "state", "hz": 10, "tick": 4182, "st": 69700.0, "ack": 4181,
+  "players": [ { "id": 3, "x": 510.2, "y": 300.5, "vx": 200, "vy": 0, "...": "every snap field" } ],
+  "...": "match, projectiles, pickups, me, events as in snap" }
+```
+- A complete `snap` body plus each player's (and mover's) velocity `vx`, `vy` in px/s, measured over the last server tick (a move > 30 px in one tick — respawn, perturb — counts as 0). Sent every 6th tick at 10 Hz or every snapshot tick at 30 Hz; `hz` says which.
+- The client extrapolates remote entities from it with no interpolation delay (`client/src/net/extrapolate.ts`); projectiles move along `dx`, `dy` at the projectile speed.
 
 ### 3.3 `pong` (RTT Echo & Server Health)
 ```json
@@ -229,6 +268,16 @@ Broadcast at 30 Hz.
   "msg": "Maximum room capacity reached"
 }
 ```
+
+### 3.5 Sync models (Phase 3)
+
+| Model | Messages | Lab, 3 panes + 4 movers (wire kbps) | Main room, 4 players firing |
+|---|---|---|---|
+| `full` | `snap` every 2 ticks (30 Hz) | ≈ 1.85 kB, ≈ 451 kbps | ≈ 2.5 kB, ≈ 600 kbps |
+| `delta` | `snapDelta` against the newest acknowledged snapshot (if ≤ 1 s old, from a 32-snapshot ring), else `snap` (fallback) | ≈ 0.25–0.35 kB, ≈ 60–92 kbps (15–19 %) | ≈ 0.6–0.8 kB, ≈ 140–190 kbps |
+| `state` 10 / 30 | `state` at 10 or 30 Hz | ≈ 2.0 kB: ≈ 160 / ≈ 480 kbps | — |
+
+Wire kbps include 28 bytes per message (the emulator's accounting). Measured in the harness and in the browser (`docs/ASSUMPTIONS.md` #49–#59).
 
 ---
 

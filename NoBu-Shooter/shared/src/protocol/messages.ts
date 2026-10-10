@@ -7,8 +7,9 @@
 import { isMoverPattern, type MoverPattern } from '../sim/movers.js';
 import type { WeaponId, PowerupKind, MapId } from '../config/game.js';
 import type { CombatState } from '../sim/combat.js';
+import { isSyncModel, isStateHz, isSyncSpec, type SyncSpec, type SyncModel, type StateHz } from '../sync/types.js';
 
-export type { MoverPattern, WeaponId, PowerupKind, MapId };
+export type { MoverPattern, WeaponId, PowerupKind, MapId, SyncSpec, SyncModel, StateHz };
 
 // ───────────────────────────────────────────────────────────────
 // Client → Server
@@ -37,11 +38,29 @@ export interface MsgHello {
   nonce: string;
   /** Join as a spectator: receive snapshots, no player (Compare reference pane). */
   spectate?: boolean;
+  /** Sync model for this connection (default full; spectators always get full). PHASES.md Phase 3. */
+  sync?: SyncSpec;
 }
 
 export interface MsgInput {
   t: 'input';
   inputs: InputEntry[];
+  /** Delta sync: newest snapshot tick the client has decoded (snapshot ack). */
+  sa?: number;
+}
+
+/** Switch this connection's sync model live (docs/PHASE3_PLAN.md D1). */
+export interface MsgSync {
+  t: 'sync';
+  model: SyncModel;
+  /** State only: send rate. */
+  hz?: StateHz;
+}
+
+/** Delta sync: snapshot ack, sent when no input message carries `sa`. */
+export interface MsgSnapAck {
+  t: 'snapAck';
+  tick: number;
 }
 
 export interface MsgPing {
@@ -73,7 +92,7 @@ export interface MsgLab {
   movers: MoverPattern[];
 }
 
-export type ClientMsg = MsgHello | MsgInput | MsgPing | MsgPerturb | MsgBye | MsgLab | MsgDev;
+export type ClientMsg = MsgHello | MsgInput | MsgPing | MsgPerturb | MsgBye | MsgLab | MsgDev | MsgSync | MsgSnapAck;
 
 // ───────────────────────────────────────────────────────────────
 // Server → Client
@@ -217,6 +236,52 @@ export interface MsgSnap {
   events: GameEvent[];
 }
 
+/**
+ * Changes of one record: changed or added fields, plus `del` = optional
+ * fields that were removed (e.g. `invincible`). Absent fields are unchanged.
+ */
+export type FieldPatch<T> = { [K in keyof T]?: T[K] } & { del?: string[] };
+/** An entity in a delta: a patch of the base's entity with this id, or a complete record if the base has none. */
+export type EntityPatch<T extends { id: number }> = { id: number } & FieldPatch<Omit<T, 'id'>>;
+
+/**
+ * Delta snapshot (docs/PHASE3_PLAN.md D3): the changes since snapshot `base`,
+ * which the client acknowledged. Applying it to that base gives the full
+ * snapshot of `tick`, except `events`, which holds only the events newer than
+ * the base (so an event repeats until a snapshot containing it is acknowledged).
+ */
+export interface MsgSnapDelta {
+  t: 'snapDelta';
+  tick: number;
+  base: number;
+  st: number;
+  ack: number;
+  match?: FieldPatch<MatchSnap>;
+  players?: EntityPatch<PlayerSnap>[];
+  /** Ids of players / movers no longer present. */
+  gone?: number[];
+  projectiles?: EntityPatch<ProjectileSnap>[];
+  projGone?: number[];
+  /** The whole list, only when it changed. */
+  pickups?: PickupSnap[];
+  /** Changed fields; null = no longer present. */
+  me?: FieldPatch<SelfCombatSnap> | null;
+  events?: GameEvent[];
+}
+
+/** A player in a state message: the full record plus its velocity (px/s) over the last tick. */
+export interface StatePlayerSnap extends PlayerSnap {
+  vx: number;
+  vy: number;
+}
+
+/** State sync (docs/PHASE3_PLAN.md D5): complete records plus velocity, at `hz`. */
+export interface MsgState extends Omit<MsgSnap, 't' | 'players'> {
+  t: 'state';
+  hz: StateHz;
+  players: StatePlayerSnap[];
+}
+
 export interface MsgPong {
   t: 'pong';
   id: number;
@@ -233,7 +298,7 @@ export interface MsgError {
   msg: string;
 }
 
-export type ServerMsg = MsgWelcome | MsgSnap | MsgPong | MsgError;
+export type ServerMsg = MsgWelcome | MsgSnap | MsgSnapDelta | MsgState | MsgPong | MsgError;
 
 // ───────────────────────────────────────────────────────────────
 // Validators (basic, non-crashing)
@@ -241,6 +306,10 @@ export type ServerMsg = MsgWelcome | MsgSnap | MsgPong | MsgError;
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
+}
+
+function isTick(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
 }
 
 export function validateClientMsg(raw: unknown): ClientMsg | null {
@@ -252,6 +321,7 @@ export function validateClientMsg(raw: unknown): ClientMsg | null {
       if (raw['room'] !== 'main' && raw['room'] !== 'lab') return null;
       if (typeof raw['nonce'] !== 'string') return null;
       if (raw['spectate'] !== undefined && typeof raw['spectate'] !== 'boolean') return null;
+      if (raw['sync'] !== undefined && !isSyncSpec(raw['sync'])) return null;
       return raw as unknown as MsgHello;
 
     case 'input': {
@@ -265,8 +335,18 @@ export function validateClientMsg(raw: unknown): ClientMsg | null {
         if (inp['r'] !== undefined && inp['r'] !== 0 && inp['r'] !== 1) return null;
         if (inp['d'] !== undefined && inp['d'] !== 0 && inp['d'] !== 1) return null;
       }
+      if (raw['sa'] !== undefined && !isTick(raw['sa'])) return null;
       return raw as unknown as MsgInput;
     }
+
+    case 'sync':
+      if (!isSyncModel(raw['model'])) return null;
+      if (raw['hz'] !== undefined && !isStateHz(raw['hz'])) return null;
+      return raw['hz'] === undefined ? { t: 'sync', model: raw['model'] } : { t: 'sync', model: raw['model'], hz: raw['hz'] };
+
+    case 'snapAck':
+      if (!isTick(raw['tick'])) return null;
+      return { t: 'snapAck', tick: raw['tick'] };
 
     case 'ping':
       if (typeof raw['id'] !== 'number') return null;
