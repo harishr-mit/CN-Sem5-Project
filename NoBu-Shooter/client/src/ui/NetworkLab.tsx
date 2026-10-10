@@ -6,6 +6,8 @@ import { Sparkline } from './Sparkline.js';
 import { EmulatorControls } from './EmulatorControls.js';
 import { isTypingTarget } from '../game/input.js';
 import { DEV_TOOLS } from '../dev.js';
+import { SYNC_CYCLE, nextSync, sameSync, syncLabel, type SyncSpec } from '@nobu/shared/sync';
+import { loadSettings, saveSettings } from './settings.js';
 
 interface NetworkLabProps {
   netClient: NetClient;
@@ -14,6 +16,12 @@ interface NetworkLabProps {
   onToggleOpen: () => void;
 }
 
+
+const SYNC_HINT: Record<SyncSpec['model'], string> = {
+  full: 'Whole world every snapshot, interpolated',
+  delta: 'Only changes since the last acknowledged snapshot',
+  state: 'Records + velocity, extrapolated (no delay)',
+};
 
 export const NetworkLab: React.FC<NetworkLabProps> = ({
   netClient,
@@ -27,6 +35,15 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
   // Netcode toggles
   const [toggles, setToggles] = useState({ ...netClient.toggles });
   const [devInvincible, setDevInvincible] = useState(false);
+  const [sync, setSyncState] = useState<SyncSpec>(() => netClient.sync);
+
+  /** Switch the sync model live (the player stays in the match) and remember it. */
+  const changeSync = (spec: SyncSpec) => {
+    netClient.setSync(spec);
+    netClient.resetLatencySamples();
+    setSyncState(netClient.sync);
+    saveSettings({ ...loadSettings(), syncModel: netClient.sync });
+  };
 
   // Sparkline history buffers (60 samples ~ 12s at 5 Hz)
   const [rttHistory, setRttHistory] = useState<number[]>(() => new Array(60).fill(0));
@@ -55,6 +72,8 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
         toggleNetcode('interpolation');
       } else if (e.key === 'g' || e.key === 'G') {
         toggleNetcode('ghost');
+      } else if (e.key === 'y' || e.key === 'Y') {
+        changeSync(nextSync(netClient.sync));
       }
     };
 
@@ -164,6 +183,26 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
         {/* Sections 2–3: presets + impairment sliders */}
         <EmulatorControls emulatorClient={emulatorClient} />
 
+        {/* Sync model (PHASES.md Phase 3): switched live, the player stays in the match */}
+        <div className="lab-section" id="lab-sync-section">
+          <div className="lab-section-title">SYNC MODEL [Y]</div>
+          <div className="presets-row">
+            {SYNC_CYCLE.map((spec) => (
+              <button
+                key={syncLabel(spec)}
+                className={`preset-chip ${sameSync(spec, sync) ? 'active' : ''}`}
+                title={SYNC_HINT[spec.model]}
+                onClick={() => changeSync(spec)}
+              >
+                {syncLabel(spec)}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: '0.66rem', color: 'var(--c-text-muted)', marginTop: 4 }}>
+            {SYNC_HINT[sync.model]} · {metrics.msgBytesDown} B/msg
+          </div>
+        </div>
+
         {/* Section 4: Netcode Toggles */}
         <div className="lab-section">
           <div className="lab-section-title">NETCODE TOGGLES</div>
@@ -195,7 +234,10 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
           </div>
 
           <div className="toggle-row">
-            <label htmlFor="toggle-interp">Snapshot Interpolation [I]</label>
+            <label htmlFor="toggle-interp" style={sync.model === 'state' ? { opacity: 0.45 } : undefined}
+              title={sync.model === 'state' ? 'Not used with State sync (it extrapolates)' : undefined}>
+              Snapshot Interpolation [I]{sync.model === 'state' ? ' — n/a in State' : ''}
+            </label>
             <label className="toggle">
               <input
                 id="toggle-interp"

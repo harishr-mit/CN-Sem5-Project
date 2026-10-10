@@ -33,6 +33,15 @@ export interface TickPerf {
   overruns: number;
 }
 
+/** Snapshot traffic per sync model (PHASES.md Phase 3); bytes = payload + 28 B per message. */
+export interface SyncTraffic {
+  msgs: number;
+  bytes: number;
+}
+
+/** Same per-message overhead the emulator adds (docs/ASSUMPTIONS.md #3). */
+export const WIRE_OVERHEAD_BYTES = 28;
+
 export class Metrics {
   readonly counters: MetricCounters = {
     shots: 0, hits: 0, deaths: 0, respawns: 0,
@@ -40,6 +49,19 @@ export class Metrics {
     playerMoves: 0, matchStarts: 0, matchEnds: 0, scoreUpdates: 0,
     reloads: 0, pickups: 0, shieldBlocks: 0,
   };
+
+  readonly sync: Record<'full' | 'delta' | 'state', SyncTraffic> & { deltaFallbacks: number } = {
+    full: { msgs: 0, bytes: 0 },
+    delta: { msgs: 0, bytes: 0 },
+    state: { msgs: 0, bytes: 0 },
+    deltaFallbacks: 0,
+  };
+
+  /** One snapshot-type message sent to a connection using `model`. */
+  recordSync(model: 'full' | 'delta' | 'state', payloadBytes: number): void {
+    this.sync[model].msgs++;
+    this.sync[model].bytes += payloadBytes + WIRE_OVERHEAD_BYTES;
+  }
 
   private tickTimes: number[] = [];
   private lastWindowStart = Date.now();

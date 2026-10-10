@@ -14,7 +14,7 @@ import type {
   InputEntry, MsgSnap, PlayerSnap, ProjectileSnap, PickupSnap,
   MatchState, GameEvent, MatchResults, ScoreEntry, WeaponId,
 } from '@nobu/shared/protocol';
-import { encodeServer } from '@nobu/shared/protocol';
+import type { Velocity, VelocityTable } from '@nobu/shared/sync';
 import GAME, { mapDef, isMapId, type MapDef, type MapId } from '@nobu/shared/config/game.js';
 import NET from '@nobu/shared/config/net.js';
 import { BotController } from '../bots.js';
@@ -47,6 +47,8 @@ const BACKLOG_THRESHOLD = NET.inputBacklogCatchup.threshold;
 const BACKLOG_MAX_PER_TICK = NET.inputBacklogCatchup.maxPerTick;
 const PICKUP_REACH = P_RADIUS + GAME.powerups.radius;
 const PICKUP_RESPAWN_TICKS = Math.round(GAME.powerups.respawnMs * SIM_HZ / 1000);
+/** A move longer than this in one tick is a teleport (respawn, perturb), not velocity. */
+const MAX_STEP_PX = 30;
 /** Developer switches (dev message) are honoured only under `npm run demo`. */
 const DEV_MODE = typeof process !== 'undefined' && process.env.NOBU_DEV === '1';
 
@@ -73,9 +75,14 @@ function mapRotation(): MapId[] {
 
 const MOVER_CFG: MoverCfg = { speed: GAME.lab.moverSpeed, stopGo: GAME.lab.stopGo };
 
-type SendFn = (playerId: number, msg: string) => void;
-/** Sends to every spectator connection in the room. */
-type SpectatorFn = (msg: string) => void;
+/**
+ * Hands one player's snapshot to the connection layer, whose sync encoder
+ * decides what goes on the wire (docs/PHASE3_PLAN.md D2). `vel` holds every
+ * entity's velocity over the last tick (used by state sync only).
+ */
+type SendFn = (playerId: number, snap: MsgSnap, vel: VelocityTable) => void;
+/** Sends to every spectator connection in the room (always full snapshots). */
+type SpectatorFn = (snap: MsgSnap) => void;
 
 /** A scripted lab mover (PHASES.md C3). Position = moverPath(pattern, tick / SIM_HZ). */
 interface MoverState {
@@ -120,6 +127,8 @@ export class Room {
   /** Scripted movers, keyed by pattern. Kept out of `players` (no player cap, no inputs). */
   private movers = new Map<MoverPattern, MoverState>();
   private spectators = 0;
+  /** Player and mover positions at the start of the current tick (velocities for state sync). */
+  private prevPos = new Map<number, Vec2>();
 
   // Send callbacks injected at construction
   private sendFn: SendFn;
@@ -364,6 +373,7 @@ export class Room {
     const t0 = performance.now();
     this.state.tick++;
     this.state.serverTime += 1000 / SIM_HZ;
+    this.recordPrevPositions();
 
     // 1. Bots generate inputs
     if (this.roomCfg.bots) {
@@ -813,11 +823,33 @@ export class Room {
     }
   }
 
+  private recordPrevPositions(): void {
+    this.prevPos.clear();
+    for (const p of this.state.players.values()) this.prevPos.set(p.id, { x: p.x, y: p.y });
+    for (const m of this.movers.values()) this.prevPos.set(m.id, { x: m.x, y: m.y });
+  }
+
+  /** Velocity (px/s) of every player and mover over the last tick; teleports count as 0. */
+  velocities(): Map<number, Velocity> {
+    const vel = new Map<number, Velocity>();
+    const add = (id: number, x: number, y: number) => {
+      const prev = this.prevPos.get(id);
+      const dx = prev ? x - prev.x : 0;
+      const dy = prev ? y - prev.y : 0;
+      vel.set(id, Math.hypot(dx, dy) > MAX_STEP_PX ? { vx: 0, vy: 0 } : { vx: dx * SIM_HZ, vy: dy * SIM_HZ });
+    };
+    for (const p of this.state.players.values()) add(p.id, p.x, p.y);
+    for (const m of this.movers.values()) add(m.id, m.x, m.y);
+    return vel;
+  }
+
   private sendSnapshots(): void {
+    let vel: Map<number, Velocity> | null = null;
     for (const player of this.state.players.values()) {
       if (player.bot) continue; // bots don't need snapshots
-      this.sendFn(player.id, encodeServer(this.buildSnapshot(player.id)));
+      vel ??= this.velocities();
+      this.sendFn(player.id, this.buildSnapshot(player.id), vel);
     }
-    if (this.spectators > 0) this.spectatorFn(encodeServer(this.buildSnapshot(null)));
+    if (this.spectators > 0) this.spectatorFn(this.buildSnapshot(null));
   }
 }

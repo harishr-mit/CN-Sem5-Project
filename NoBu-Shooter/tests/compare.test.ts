@@ -131,6 +131,20 @@ describe('Comparison presets (one setting each)', () => {
     expect(changedKeys(byId['prediction'])).toEqual(['ghost', 'prediction', 'reconciliation']);
     expect(changedKeys(byId['interpolation'])).toEqual(['interpolation']);
     expect(changedKeys(byId['redundancy'])).toEqual(['redundancy']);
+    // Phase 3 presets: identical toggles, only the sync model (or its rate) differs
+    for (const id of ['sync', 'bandwidth', 'staterate']) {
+      const p = byId[id];
+      expect(changedKeys(p)).toEqual([]);
+      for (const pane of p.panes) expect(pane.toggles).toEqual(p.panes[0].toggles);
+      expect(new Set(p.panes.map((x) => JSON.stringify(x.sync))).size).toBe(p.panes.length);
+    }
+    expect(byId['sync'].panes.map((x) => x.sync)).toEqual([{ model: 'full' }, { model: 'delta' }, { model: 'state', hz: 10 }]);
+    expect(byId['bandwidth'].panes.map((x) => x.sync.model)).toEqual(['full', 'delta']);
+    expect(byId['staterate'].panes.map((x) => x.sync)).toEqual([{ model: 'state', hz: 10 }, { model: 'state', hz: 30 }]);
+    // Phase 2 presets stay on full snapshots
+    for (const id of ['prediction', 'interpolation', 'redundancy']) {
+      for (const pane of byId[id].panes) expect(pane.sync).toEqual({ model: 'full' });
+    }
   });
 
   it('set the network the demo needs', () => {
@@ -139,6 +153,14 @@ describe('Comparison presets (one setting each)', () => {
     expect(byId['interpolation'].movers).toHaveLength(4);
     expect(byId['interpolation'].reference).toBe(true);
     expect(byId['redundancy'].network?.config).toEqual({ latencyMs: 50, lossPct: 10 });
+    // Phase 3: Full must exceed the cap, so every mover is on (docs/PHASE3_PLAN.md D9)
+    expect(byId['sync'].network).toEqual({ name: 'Nightmare' });
+    expect(byId['sync'].movers).toHaveLength(4);
+    expect(byId['sync'].reference).toBe(false); // 3 cells: the dock gets the 4th
+    expect(byId['bandwidth'].network?.config).toEqual({ latencyMs: 40, bandwidthKbps: 300 });
+    expect(byId['bandwidth'].movers).toHaveLength(4);
+    expect(byId['staterate'].network).toEqual({ name: 'Transatlantic' });
+    expect(byId['staterate'].movers).toEqual(['zigzag', 'reversal']);
   });
 
   it('Custom keeps the previous panes and adds default ones', () => {
@@ -148,6 +170,10 @@ describe('Comparison presets (one setting each)', () => {
     expect(custom.panes[0].toggles).toEqual(from.panes[0].toggles);
     expect(custom.panes[0].toggles).not.toBe(from.panes[0].toggles); // copied
     expect(custom.panes[2].toggles).toEqual(DEFAULT_TOGGLES);
+    expect(custom.panes[2].sync).toEqual({ model: 'full' });
+    const fromSync = customPreset(2, byId['staterate']);
+    expect(fromSync.panes[1].sync).toEqual({ model: 'state', hz: 30 });
+    expect(fromSync.panes[1].sync).not.toBe(byId['staterate'].panes[1].sync); // copied
     expect(custom.network).toBeNull();
     expect(custom.movers).toEqual(from.movers);
   });

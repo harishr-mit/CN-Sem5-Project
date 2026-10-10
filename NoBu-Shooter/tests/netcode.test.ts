@@ -13,6 +13,8 @@ import { Pipeline, LinkState, DEFAULT_LINK_CONFIG, type LinkConfig, type Clock }
 import { KEY } from '../shared/src/sim/movement.js';
 import { MOVER_PATTERNS } from '../shared/src/sim/movers.js';
 import NET from '../shared/src/config/net.js';
+import type { SyncSpec } from '../shared/src/sync/types.js';
+import type { MsgSnap } from '../shared/src/protocol/messages.js';
 
 const fakeClock: Clock = {
   now: () => Date.now(),
@@ -22,6 +24,8 @@ const fakeClock: Clock = {
 interface Harness {
   server: GameServer;
   clients: NetClient[];
+  /** Wire bytes (payload + 28) each client received, since connect. */
+  bytesDown: number[];
   /** Direct (unimpaired) spectator connection, when requested. */
   spectator: NetClient | null;
   corrections: number[];
@@ -34,13 +38,14 @@ let frameNo = 0;
 
 function makeHarness(
   link: Partial<LinkConfig>, clientCount = 1, seed = 7,
-  opts: { spectator?: boolean; room?: 'main' | 'lab'; noBots?: boolean } = {},
+  opts: { spectator?: boolean; room?: 'main' | 'lab'; noBots?: boolean; syncs?: SyncSpec[] } = {},
 ): Harness {
   const server = new GameServer(() => Date.now());
   // Main room without bots: two harness clients start a match on their own
   if (opts.noBots) (server.getRoom('main') as unknown as { roomCfg: { bots: boolean } }).roomCfg.bots = false;
   const clients: NetClient[] = [];
   const corrections: number[] = [];
+  const bytesDown: number[] = [];
 
   let spectator: NetClient | null = null;
   if (opts.spectator) {
@@ -60,10 +65,11 @@ function makeHarness(
     const down = new LinkState({ ...DEFAULT_LINK_CONFIG, ...link });
 
     // In-process transport routed through the emulator pipeline both ways
+    bytesDown.push(0);
     const transport: TransportFactory = (_url, h) => {
       const conn = server.addConnection(
         (text) => pipeline.process({ data: text, size: text.length + 28 }, down,
-          (p) => h.onMessage(p.data), () => {}, 's', 'down'),
+          (p) => { bytesDown[i] += p.data.length + 28; h.onMessage(p.data); }, () => {}, 's', 'down'),
         () => h.onClose(),
       );
       setTimeout(() => h.onOpen(), 0);
@@ -76,6 +82,7 @@ function makeHarness(
 
     const client = new NetClient({
       url: 'ws://harness', name: `T${i}`, room: opts.room ?? 'lab', transport, now: () => Date.now(),
+      ...(opts.syncs?.[i] ? { sync: opts.syncs[i] } : {}),
     });
     client.on('correction', (ev) => corrections.push(ev.errorPx));
     client.connect();
@@ -83,7 +90,7 @@ function makeHarness(
   }
 
   const h: Harness = {
-    server, clients, corrections, spectator,
+    server, clients, corrections, spectator, bytesDown,
     frame() {
       for (const c of clients) c.simStep();
       if (frameNo % 2 === 0) for (const c of clients) c.sendInputs(); // 30 Hz
@@ -442,5 +449,114 @@ describe('Netcode harness: weapon prediction (GAMERULES.md §6a)', () => {
     const { c } = shootThenSettle(h);
     expect(c.combatView.corrections).toBeGreaterThan(0);
     expect(c.predictedCombat).toEqual(c.latestSnapshot?.me);
+  });
+});
+
+describe('Netcode harness: sync models (PHASES.md Phase 3, docs/PHASE3_PLAN.md §6)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    frameNo = 0;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const FULL: SyncSpec = { model: 'full' };
+  const DELTA: SyncSpec = { model: 'delta' };
+  const STATE10: SyncSpec = { model: 'state', hz: 10 };
+  const STATE30: SyncSpec = { model: 'state', hz: 30 };
+
+  /** The world every viewer of the lab room shares, compared keyed by id. */
+  function world(s: MsgSnap) {
+    const byId = <T extends { id: number }>(a: T[]) => [...a].sort((x, y) => x.id - y.id);
+    return { tick: s.tick, st: s.st, match: s.match, players: byId(s.players), projectiles: byId(s.projectiles), pickups: s.pickups };
+  }
+
+  /** Lab with movers, a spectator (truth + clock) and one client per sync spec. */
+  function syncHarness(link: Partial<LinkConfig>, syncs: SyncSpec[], movers = [...MOVER_PATTERNS]) {
+    const h = makeHarness(link, syncs.length, 7, { spectator: true, syncs });
+    const ref = h.spectator!;
+    for (const c of h.clients) c.setTruthClock(() => ref.serverNow());
+    ref.setMovers(movers);
+    const truth = new Map<number, MsgSnap>();
+    ref.on('snap', (s) => truth.set(s.tick, s));
+    const seen = h.clients.map(() => [] as MsgSnap[]);
+    h.clients.forEach((c, i) => c.on('snap', (s) => seen[i].push(s)));
+    h.run(30);
+    return { h, truth, seen };
+  }
+
+  it('clean link: every model shows the server\'s world exactly, with zero corrections; live switch keeps the player', () => {
+    const { h, truth, seen } = syncHarness({ latencyMs: 30 }, [FULL, DELTA, STATE10]);
+    h.run(360, scriptedKeys);
+    h.run(60);
+    expect(h.corrections).toEqual([]);
+    for (let i = 0; i < 3; i++) {
+      expect(seen[i].length).toBeGreaterThan(i === 2 ? 40 : 150);
+      for (const s of seen[i]) if (truth.has(s.tick)) expect(world(s)).toEqual(world(truth.get(s.tick)!));
+    }
+    // Live switch: same player, no respawn, still exact
+    const [full] = h.clients;
+    const id = full.myPlayerId;
+    const life = full.latestSnapshot!.players.find((p) => p.id === id)!.life;
+    full.setSync(DELTA);
+    seen[0].length = 0;
+    h.run(120, scriptedKeys);
+    h.run(60);
+    expect(full.myPlayerId).toBe(id);
+    expect(full.latestSnapshot!.players.find((p) => p.id === id)!.life).toBe(life);
+    expect(h.server.rooms.get('lab')!.playerCount).toBe(3);
+    for (const s of seen[0]) if (truth.has(s.tick)) expect(world(s)).toEqual(world(truth.get(s.tick)!));
+    expect(h.corrections).toEqual([]);
+  });
+
+  it('bytes: delta ≤ 40 % of full, state 10 Hz ≤ 45 %, state 30 Hz ≥ full (lab, 4 players + 4 movers)', () => {
+    const { h } = syncHarness({ latencyMs: 20 }, [FULL, DELTA, STATE10, STATE30]);
+    const start = [...h.bytesDown];
+    h.run(600, scriptedKeys);
+    const [full, delta, s10, s30] = h.bytesDown.map((b, i) => b - start[i]);
+    expect(delta / full).toBeLessThanOrEqual(0.4);
+    expect(s10 / full).toBeLessThanOrEqual(0.45);
+    expect(s30).toBeGreaterThanOrEqual(full);
+  });
+
+  it('50 ms one-way: state draws movers ≥ 60 ms more current than full; 30 Hz overshoots less than 10 Hz', () => {
+    const { h } = syncHarness({ latencyMs: 50 }, [FULL, STATE10, STATE30], ['zigzag', 'reversal']);
+    h.run(480);
+    vi.advanceTimersByTime(250);
+    const [full, s10, s30] = h.clients.map((c) => c.metrics);
+    expect(full.moverSamples).toBeGreaterThan(0);
+    expect(s10.moverSamples).toBeGreaterThan(0);
+    expect(s10.moverLagMs).toBeLessThan(full.moverLagMs - 60);
+    expect(s30.moverLagMs).toBeLessThan(full.moverLagMs - 60);
+    expect(s10.moverOffPathPct).toBeGreaterThan(0);
+    expect(s30.moverOffPathPct).toBeLessThan(s10.moverOffPathPct);
+    expect(full.moverOffPathPct).toBeLessThanOrEqual(2);
+  });
+
+  it('Nightmare (400 kbps, 12 % burst loss): delta stays exact and fast; full queues (20 s)', () => {
+    const nightmare: Partial<LinkConfig> = {
+      latencyMs: 120, jitterMs: 50, lossPct: 12, lossModel: 'burst', burstLen: 4,
+      duplicatePct: 3, reorderPct: 5, bandwidthKbps: 400,
+    };
+    const { h, truth, seen } = syncHarness(nightmare, [FULL, DELTA, STATE10]);
+    // Loss is applied before the bandwidth cap, so 12 % loss leaves Full (≈ 451 kbps) just above
+    // 400 kbps: its queue takes ≈ 10–15 s to build up (measured: ack delay ≈ 700 vs ≈ 350 ms at 20 s)
+    h.run(600, scriptedKeys);
+    // The queue repeatedly overflows its 400 ms limit and drains: average one reading per second
+    const ack = [0, 0, 0];
+    for (let sec = 0; sec < 10; sec++) {
+      h.run(60, (f) => scriptedKeys(f + sec * 60));
+      h.clients.forEach((c, i) => { ack[i] += c.metrics.ackDelayMs / 10; });
+    }
+    const [, delta] = h.clients;
+    for (const c of h.clients) expect(c.connectionStatus).toBe('connected');
+    expect(seen[1].length).toBeGreaterThan(450); // 600 sent, minus ≈ 12 % burst loss
+    for (const s of seen[1]) if (truth.has(s.tick)) expect(world(s)).toEqual(world(truth.get(s.tick)!));
+    expect(delta.metrics.deltaMissingBase).toBe(0);
+    expect(ack[0]).toBeGreaterThan(ack[1] + 150);
+    expect(ack[2]).toBeLessThan(ack[0]);
   });
 });

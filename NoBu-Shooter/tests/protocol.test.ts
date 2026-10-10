@@ -107,4 +107,27 @@ describe('Wire Protocol Serialization & Validation (SPEC.md §8)', () => {
     expect(decodeClient(JSON.stringify({ t: 'lab', movers: 'circle' }))).toBeNull();
     expect(decodeClient(JSON.stringify({ t: 'lab' }))).toBeNull();
   });
+
+  it('validates the Phase 3 sync messages (docs/PHASE3_PLAN.md §2)', () => {
+    const hello = { t: 'hello', v: 1, name: 'A', room: 'lab', nonce: 'n' };
+    expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'delta' } }))).not.toBeNull();
+    expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'state', hz: 30 } }))).not.toBeNull();
+    expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'lockstep' } }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'state', hz: 20 } }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ ...hello, sync: 'delta' }))).toBeNull();
+
+    expect(decodeClient(JSON.stringify({ t: 'sync', model: 'full' }))).toEqual({ t: 'sync', model: 'full' });
+    expect(decodeClient(JSON.stringify({ t: 'sync', model: 'state', hz: 10, x: 1 }))).toEqual({ t: 'sync', model: 'state', hz: 10 });
+    expect(decodeClient(JSON.stringify({ t: 'sync', model: 'state', hz: '10' }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'sync' }))).toBeNull();
+
+    expect(decodeClient(JSON.stringify({ t: 'snapAck', tick: 42 }))).toEqual({ t: 'snapAck', tick: 42 });
+    expect(decodeClient(JSON.stringify({ t: 'snapAck', tick: -1 }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'snapAck', tick: 1.5 }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'snapAck' }))).toBeNull();
+
+    const input = { t: 'input', inputs: [{ s: 1, k: 0, a: 0, f: 0 }] };
+    expect(decodeClient(JSON.stringify({ ...input, sa: 12 }))).not.toBeNull();
+    expect(decodeClient(JSON.stringify({ ...input, sa: 'x' }))).toBeNull();
+  });
 });

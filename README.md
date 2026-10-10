@@ -1,10 +1,10 @@
 # NoBu Shooter
 
-A real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, and an active network impairment emulator (latency, jitter, packet loss, bandwidth limit, duplication, reordering) controlled live from an in-game **Network Lab**.
+A real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot vs state synchronisation (full / delta snapshots, state sync with extrapolation), and an active network impairment emulator (latency, jitter, packet loss, bandwidth limit, duplication, reordering) controlled live from an in-game **Network Lab**.
 
 > The game is the demo application; the networking is the point.
 
-**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases, each ending with a demoable checkpoint. Phase 1 (correct core netcode) is complete.
+**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases (plus the owner's Phase 2.5), each ending with a demoable checkpoint. Phases 1 (correct core netcode), 2 (Compare view), 2.5 (gameplay + textures) and 3 (sync models: full vs delta snapshots vs state sync with extrapolation) are complete; Phase 4 (presenter mode) is next.
 
 ---
 
@@ -80,17 +80,19 @@ Stop everything with `Ctrl+C` — all four ports are released. (If the launcher 
 Ensure your environment passes all test suites and the headless end-to-end simulation:
 
 ```bash
-# Run unit and integration tests (105 tests: sim, protocol, emulator pipeline, game rules,
-# weapons/ammo/reload, power-ups, map layouts,
+# Run unit and integration tests (130 tests: sim, protocol, emulator pipeline, game rules,
+# weapons/ammo/reload, power-ups, map layouts, sync models (delta/state encoders, extrapolation),
 # movement keys, movers/spectators, Compare layout/input/presets, and an end-to-end netcode
-# harness: real server + client + emulator pipeline on fake timers, incl. the twin-pane check)
+# harness: real server + client + emulator pipeline on fake timers, incl. the twin-pane check
+# and full vs delta vs state under Nightmare)
 npm test
 
 # Type-check server, emulator, shared code, tests and client
 npm run typecheck
 
 # Run the automated headless bot smoke test through the emulator under Nightmare preset
-# (also checks ammo, reload, bot shots, power-up pads and the map id)
+# (also checks ammo, reload, bot shots, power-ups, the map id, the lab movers, and a
+# delta-sync client that must decode the server's world exactly with far fewer bytes)
 npm run smoke
 
 # Re-pack the player animation atlas after changing frames in assets/sprites/player
@@ -112,6 +114,7 @@ npm run pack-assets
 | **Mute sounds** | `M` (volume in Settings, `Esc`) |
 | **Toggle Network Lab** | `Tab` |
 | **Netcode toggles** | `P` prediction, `C` reconciliation (was `R` until 2026-10-10; `R` is now reload), `I` interpolation, `G` ghost (while shown it replaces your cyan ring) |
+| **Sync model** | `Y` cycles Full → Delta → State 10 Hz → State 30 Hz, live (Network Lab → **SYNC MODEL**; remembered; default Full). Full = whole world every snapshot, Delta = only changes since the last acknowledged snapshot, State = records + velocity, extrapolated |
 | **Controls / Settings** | `F1` / `Esc` |
 | **Leave match** | **◄ LEAVE MATCH** (bottom-left of the arena), or `Esc` → **◄ LEAVE MATCH — BACK TO MAIN MENU** (end of the settings menu). Compare: **◄ EXIT** (top bar) |
 | **Network Presets** | Keys `1` through `5` |
@@ -120,7 +123,7 @@ npm run pack-assets
 | **Preset 3** | Mobile 4G (45 ms ± 25 ms jitter, 2% loss, 5 Mbps) |
 | **Preset 4** | Transatlantic (90 ms ± 8 ms jitter, 0.5% loss) |
 | **Preset 5** | Nightmare (120 ms ± 50 ms jitter, 12% burst loss, 3% dup, 5% reorder, 400 kbps) |
-| **Compare view** | **Network Lab — Compare** on the landing page. Inside: `Tab` network drawer, `1`–`5` presets, click a pane then `P` / `C` / `I` / `G` to toggle its settings, `T` truth rings |
+| **Compare view** | **Network Lab — Compare** on the landing page. Presets: Prediction, Interpolation, Redundancy, **Sync** (Full / Delta / State at Nightmare), **Bandwidth** (Full vs Delta at 300 kbps), **State Hz** (State 10 vs 30 Hz), Custom. Inside: `Tab` network drawer, `1`–`5` presets, click a pane then `P` / `C` / `I` / `G` to toggle its settings or `Y` to cycle its sync model, `T` truth rings. The dock shows a table and a live bandwidth chart with the emulator's cap |
 
 Latencies are one-way, applied in each direction (RTT ≈ 2 × latency).
 
@@ -140,13 +143,15 @@ CN-Sem5-Project/
 │   ├── PROTOCOL.md         # Wire protocol (JSON messages) and emulator control API
 │   ├── DEMO_SCRIPT.md      # Step-by-step walkthrough with expected numbers
 │   ├── ASSUMPTIONS.md      # Design decisions and their reasons
+│   ├── PHASE2_PLAN.md      # Phase 2 implementation plan (Compare view, movers)
+│   ├── PHASE3_PLAN.md      # Phase 3 implementation plan (sync models)
 │   └── archive/SPEC-v1.md  # Original v1 build spec (archived)
 └── NoBu-Shooter/           # Primary application workspace
     ├── assets/             # Textures, sprites, FX and sound effects (inventory: assets/README.md, licences: assets/CREDITS.md)
     ├── client/             # Phaser 3 + React HUD & Network Lab UI (Vite)
     ├── emulator/           # Standalone bidirectional network impairment proxy
     ├── server/             # Authoritative 60 Hz headless WebSocket game server
-    ├── shared/             # Deterministic simulation, math, and protocol codec
+    ├── shared/             # Deterministic simulation, protocol codec, sync models (full / delta / state)
     ├── scripts/            # Demo launcher, smoke test, headless bot
     └── tests/              # Vitest suites incl. the end-to-end netcode harness
 ```
@@ -180,7 +185,7 @@ CN-Sem5-Project/
 - **Dependencies not found after pulling**:
   Run `npm install` at root, or run `cd NoBu-Shooter && npm install`.
 - **`D` (or `P`, `R`, `C`, `1`–`5`) does nothing, while the arrow keys work**:
-  A browser extension is consuming the key before the page sees it. **Vimium** does exactly this: it maps `d` (scroll half page down), `r` (reload!), `p` (open clipboard URL) and digits (count prefix). Exclude the demo in Vimium: click the Vimium toolbar icon on the demo tab and choose *Exclude*, or add `http://localhost:5173/*` with an empty key list under Vimium Options → *Excluded URLs and keys*. A browser profile without such extensions works too.
+  A browser extension is consuming the key before the page sees it. **Vimium** does exactly this: it maps `d` (scroll half page down), `r` (reload!), `p` (open clipboard URL), `y` (copy URL — the sync-model key) and digits (count prefix). Exclude the demo in Vimium: click the Vimium toolbar icon on the demo tab and choose *Exclude*, or add `http://localhost:5173/*` and `http://127.0.0.1:5173/*` with an empty key list under Vimium Options → *Excluded URLs and keys*. A browser profile without such extensions works too.
 - **Canvas render error or blank page**:
   Hard refresh the browser (`Ctrl + F5`) to clear Vite cache. Ensure your browser supports WebGL / HTML5 Canvas.
 

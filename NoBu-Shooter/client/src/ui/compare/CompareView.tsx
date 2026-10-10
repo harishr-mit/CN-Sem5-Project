@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import NET from '@nobu/shared/config/net';
 import { MOVER_PATTERNS } from '@nobu/shared/sim';
 import type { MoverPattern } from '@nobu/shared/protocol';
+import { nextSync } from '@nobu/shared/sync';
 import { NetClient, type LocalMetrics, type PredictionToggle } from '../../net/NetClient.js';
 import { EmulatorClient } from '../../net/EmulatorClient.js';
 import type { ArenaSceneOptions } from '../../game/ArenaScene.js';
@@ -31,6 +32,9 @@ const SERVER_URL = `ws://127.0.0.1:${NET.ports.server}`;
 const BODY_PAD = 8;
 const GAP = 8;
 const HISTORY = 60;
+/** Bandwidth chart: 30 s at 5 Hz. */
+const BW_HISTORY = 150;
+const BW_SPAN_SEC = BW_HISTORY / 5;
 const MOVER_LABEL: Record<MoverPattern, string> = {
   circle: 'CIRCLE', zigzag: 'ZIGZAG', reversal: 'REVERSE', stopgo: 'STOP-GO',
 };
@@ -42,8 +46,8 @@ interface CompareViewProps {
 
 type MetricsMap = Record<string, LocalMetrics>;
 
-const barBtn = (active: boolean, color = 'var(--c-cyan)'): React.CSSProperties => ({
-  padding: '3px 7px',
+const barBtn = (active: boolean, color = 'var(--c-cyan)', narrow = false): React.CSSProperties => ({
+  padding: narrow ? '3px 5px' : '3px 7px',
   fontFamily: 'var(--font-mono)',
   fontSize: '0.68rem',
   cursor: 'pointer',
@@ -79,7 +83,10 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
   const [body, setBody] = useState({ w: 0, h: 0 });
   const [metrics, setMetrics] = useState<MetricsMap>({});
   const [lagHistory, setLagHistory] = useState<Record<string, number[]>>({});
+  const [bwHistory, setBwHistory] = useState<Record<string, number[]>>({});
   const emulatorStatus = useGameStore((s) => s.emulatorStatus);
+  const emulatorState = useGameStore((s) => s.emulatorState) as { defaults?: { bandwidthKbps?: number } } | null;
+  const capKbps = emulatorState?.defaults?.bandwidthKbps ?? 0;
 
   const paneIds = useMemo(() => preset.panes.map((p) => p.id), [preset]);
   const activeKey = paneIds.join('');
@@ -117,7 +124,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
     for (const id of PANE_IDS) clients[id].setTruthClock(() => reference.serverNow());
   }, [clients, reference]);
 
-  // Pane toggles follow the preset
+  // Pane toggles and sync models follow the preset (setSync before connect goes into the hello)
   useEffect(() => {
     for (const spec of preset.panes) {
       const c = clients[spec.id];
@@ -126,6 +133,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
       if (old.prediction !== spec.toggles.prediction || old.interpolation !== spec.toggles.interpolation) {
         c.resetLatencySamples();
       }
+      c.setSync(spec.sync);
     }
   }, [preset, clients]);
 
@@ -198,6 +206,13 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
         }
         return out;
       });
+      setBwHistory((prev) => {
+        const out: Record<string, number[]> = {};
+        for (const id of PANE_IDS) {
+          out[id] = [...(prev[id] ?? new Array(BW_HISTORY).fill(0)).slice(1 - BW_HISTORY), clients[id].metrics.bwDownKbps];
+        }
+        return out;
+      });
     }, 200);
     return () => clearInterval(timer);
   }, [clients, reference]);
@@ -219,12 +234,20 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
     setPreset(next);
   }, [preset]);
 
+  const cycleSync = useCallback((id: PaneId) => {
+    const next = customPreset(preset.panes.length, preset);
+    const pane = next.panes.find((p) => p.id === id);
+    if (!pane) return;
+    pane.sync = nextSync(pane.sync);
+    setPreset(next);
+  }, [preset]);
+
   const setCount = (n: number) => setPreset(customPreset(n, preset));
 
   const toggleMover = (m: MoverPattern) =>
     setMovers((cur) => (cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m]));
 
-  // Hotkeys: Tab = drawer; P/C/I/G = toggle on the selected pane; T = truth rings
+  // Hotkeys: Tab = drawer; P/C/I/G = toggle on the selected pane; Y = its sync model; T = truth rings
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target)) return;
@@ -235,10 +258,11 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
       else if (k === 'i') toggleSetting(selected, 'interpolation');
       else if (k === 'g') toggleSetting(selected, 'ghost');
       else if (k === 't') setShowTruth((v) => !v);
+      else if (k === 'y') cycleSync(selected);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selected, toggleSetting]);
+  }, [selected, toggleSetting, cycleSync]);
 
   // ── Render ──────────────────────────────────────────────────────
   const cells = preset.panes.length + (showRef ? 1 : 0);
@@ -247,17 +271,25 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
   const cellH = layout.canvasH + 56;
   const showMovers = movers.length > 0;
   const emptyMetrics = clients.A.metrics;
+  // The top bar holds 7 presets, pane counts, movers and toggles: tighten it below ~1400 px
+  const narrow = body.w > 0 && body.w < 1400;
+  const btn = (active: boolean, color?: string) => barBtn(active, color, narrow);
 
   const dockRows: DockRow[] = preset.panes.map((p) => ({
     id: p.id,
     title: p.title,
     color: PANE_COLORS[p.id].css,
     metrics: metrics[p.id] ?? emptyMetrics,
+    sync: p.sync,
     lagHistory: lagHistory[p.id] ?? new Array(HISTORY).fill(0),
+    bwHistory: bwHistory[p.id] ?? new Array(BW_HISTORY).fill(0),
   }));
 
   const dock = (w: number, h: number) => (
-    <CompareDock caption={preset.caption} rows={dockRows} showMovers={showMovers} width={w} height={h} />
+    <CompareDock
+      caption={preset.caption} rows={dockRows} showMovers={showMovers}
+      capKbps={capKbps} bwSpanSec={BW_SPAN_SEC} width={w} height={h}
+    />
   );
 
   return (
@@ -266,7 +298,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
       <div
         style={{
           height: 44, flex: '0 0 44px', boxSizing: 'border-box',
-          display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px',
+          display: 'flex', alignItems: 'center', gap: narrow ? 4 : 8, padding: narrow ? '0 8px' : '0 12px',
           borderBottom: '1px solid var(--c-border)', background: 'rgba(10, 8, 26, 0.9)',
           overflowX: 'auto', overflowY: 'hidden',
         }}
@@ -274,26 +306,26 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
         <button className="btn-ghost" onClick={onExit} title="Exit Compare" style={{ padding: '3px 10px', whiteSpace: 'nowrap' }}>◄ EXIT</button>
         <span style={{ width: 1, height: 20, background: 'var(--c-border)' }} />
         {COMPARE_PRESETS.map((p) => (
-          <button key={p.id} id={`cmp-preset-${p.id}`} title={p.title} style={barBtn(preset.id === p.id)} onClick={() => applyPreset(p)}>
-            {p.title.replace(' off vs on', '')}
+          <button key={p.id} id={`cmp-preset-${p.id}`} title={p.title} style={btn(preset.id === p.id)} onClick={() => applyPreset(p)}>
+            {p.label ?? p.title}
           </button>
         ))}
-        <button id="cmp-preset-custom" style={barBtn(preset.id === 'custom', 'var(--c-amber)')} onClick={() => applyPreset(customPreset(preset.panes.length, preset))}>Custom</button>
+        <button id="cmp-preset-custom" style={btn(preset.id === 'custom', 'var(--c-amber)')} onClick={() => applyPreset(customPreset(preset.panes.length, preset))}>Custom</button>
         <span style={{ width: 1, height: 20, background: 'var(--c-border)' }} />
         <span style={{ color: 'var(--c-text-muted)', fontSize: '0.68rem' }}>PANES</span>
         {[2, 3, 4].map((n) => (
-          <button key={n} style={barBtn(preset.panes.length === n, 'var(--c-amber)')} onClick={() => setCount(n)}>{n}</button>
+          <button key={n} style={btn(preset.panes.length === n, 'var(--c-amber)')} onClick={() => setCount(n)}>{n}</button>
         ))}
-        <button id="cmp-ref-toggle" title="Show the reference pane (spectator, direct to the server)" style={barBtn(showRef, REFERENCE_COLOR.css)} onClick={() => setShowRef((v) => !v)}>REF</button>
+        <button id="cmp-ref-toggle" title="Show the reference pane (spectator, direct to the server)" style={btn(showRef, REFERENCE_COLOR.css)} onClick={() => setShowRef((v) => !v)}>REF</button>
         <span style={{ width: 1, height: 20, background: 'var(--c-border)' }} />
         <span style={{ color: 'var(--c-text-muted)', fontSize: '0.68rem' }}>MOVE</span>
         {MOVER_PATTERNS.map((m) => (
-          <button key={m} style={barBtn(movers.includes(m), '#c6b5ff')} onClick={() => toggleMover(m)}>{MOVER_LABEL[m]}</button>
+          <button key={m} style={btn(movers.includes(m), '#c6b5ff')} onClick={() => toggleMover(m)}>{MOVER_LABEL[m]}</button>
         ))}
-        <button title="Dots at the last drawn positions" style={barBtn(showTrails, '#c6b5ff')} onClick={() => setShowTrails((v) => !v)}>TRAILS</button>
-        <button title="Ring at the exact true position [T]" style={barBtn(showTruth, '#c6b5ff')} onClick={() => setShowTruth((v) => !v)}>TRUTH</button>
+        <button title="Dots at the last drawn positions" style={btn(showTrails, '#c6b5ff')} onClick={() => setShowTrails((v) => !v)}>TRAILS</button>
+        <button title="Ring at the exact true position [T]" style={btn(showTruth, '#c6b5ff')} onClick={() => setShowTruth((v) => !v)}>TRUTH</button>
         <span style={{ flex: 1 }} />
-        <button id="cmp-lab-toggle" style={barBtn(drawerOpen, 'var(--c-violet)')} onClick={() => setDrawerOpen((o) => !o)}>LAB [TAB]</button>
+        <button id="cmp-lab-toggle" style={btn(drawerOpen, 'var(--c-violet)')} onClick={() => setDrawerOpen((o) => !o)}>LAB [TAB]</button>
       </div>
 
       {/* Body: pane grid + dock */}
@@ -323,9 +355,11 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
                   metrics={metrics[p.id] ?? emptyMetrics}
                   showMovers={showMovers}
                   toggles={p.toggles}
+                  sync={p.sync}
                   selected={selected === p.id}
                   onSelect={() => setSelected(p.id)}
                   onToggle={(key) => toggleSetting(p.id, key)}
+                  onCycleSync={() => cycleSync(p.id)}
                 />
               ))}
               {showRef && (

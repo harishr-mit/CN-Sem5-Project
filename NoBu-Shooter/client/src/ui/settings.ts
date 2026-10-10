@@ -1,3 +1,5 @@
+import { DEFAULT_SYNC, isSyncSpec, normalizeSync, type SyncSpec } from '@nobu/shared/sync';
+
 export interface UserSettings {
   mouseSensitivity: number;
   graphicsQuality: 'low' | 'medium' | 'high';
@@ -6,6 +8,8 @@ export interface UserSettings {
   soundVolume: number;
   /** Sound effects muted (`M`, GAMERULES.md §18). */
   muted: boolean;
+  /** Quick Match sync model (`Y`, PHASES.md Phase 3); default full. */
+  syncModel: SyncSpec;
 }
 
 const SETTINGS_KEY = 'nobu_shooter_settings';
@@ -17,6 +21,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   showParticleTrails: true,
   soundVolume: 80,
   muted: false,
+  syncModel: DEFAULT_SYNC,
 };
 
 export function loadSettings(): UserSettings {
@@ -25,10 +30,9 @@ export function loadSettings(): UserSettings {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw);
-    return {
-      ...DEFAULT_SETTINGS,
-      ...parsed,
-    };
+    const merged = { ...DEFAULT_SETTINGS, ...parsed } as UserSettings;
+    merged.syncModel = isSyncSpec(merged.syncModel) ? normalizeSync(merged.syncModel) : DEFAULT_SYNC;
+    return merged;
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

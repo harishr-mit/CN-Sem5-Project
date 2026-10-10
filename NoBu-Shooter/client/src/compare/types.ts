@@ -6,6 +6,7 @@
 import type { PredictionToggle } from '../net/NetClient.js';
 import type { LinkConfig } from '../net/EmulatorClient.js';
 import type { MoverPattern } from '@nobu/shared/protocol';
+import type { SyncSpec } from '@nobu/shared/sync';
 
 export type PaneId = 'A' | 'B' | 'C' | 'D';
 
@@ -17,8 +18,8 @@ export interface PaneSpec {
   title: string;
   /** Complete toggle set, so switching presets never leaves one behind. */
   toggles: PredictionToggle;
-  /** Reserved for Phase 3 (sync model per pane). */
-  sync?: 'full';
+  /** Sync model of this pane's connection (PHASES.md Phase 3). */
+  sync: SyncSpec;
 }
 
 /**
@@ -34,6 +35,8 @@ export interface CompareNetwork {
 export interface ComparePreset {
   id: string;
   title: string;
+  /** Short label for the top-bar button (default: the title). */
+  label?: string;
   /** One sentence for the top bar: what to watch. */
   caption: string;
   panes: PaneSpec[];

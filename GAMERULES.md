@@ -25,7 +25,7 @@ The game is deliberately simple. Its purpose is to make network effects (lag, lo
 | `Space` | Dash, while the Dash power-up is active (§6b). |
 | `M` | Mute / unmute sound effects (§18). Client-only. |
 
-`C`, `P`, `I`, `G`, `Tab`, `1`–`5` are Network Lab keys (README), not game actions. `C` toggles reconciliation (it was `R` before 2026-10-10).
+`C`, `P`, `I`, `G`, `Y`, `Tab`, `1`–`5` are Network Lab keys (README), not game actions. `C` toggles reconciliation (it was `R` before 2026-10-10); `Y` cycles the sync model (Phase 3).
 
 ---
 
@@ -277,6 +277,8 @@ The server is the final authority over positions, collisions, projectiles, hits,
 ```
 
 `s` is the input sequence number, `k` the movement key bitmask, `a` the aim angle and `f` the fire flag. Optional `r: 1` asks for a reload (§6a) and `d: 1` for a dash (§6b). The client never sends a position, a hit, a score or a time as a command. The full protocol is in `docs/PROTOCOL.md`.
+
+How the authoritative state reaches a client — full snapshots, delta snapshots or state sync with extrapolation (`PHASES.md` Phase 3, `docs/PROTOCOL.md` §3.5) — is a per-connection choice that changes only what that client receives and draws, never the game: the server simulates the same world for every model, and the client's prediction and reconciliation are the same in all three.
 
 ---
 

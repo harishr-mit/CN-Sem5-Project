@@ -11,16 +11,21 @@
 
 import { encodeClient, decodeServer } from '@nobu/shared/protocol';
 import {
-  stepPlayer, moverPath, initialCombat, copyCombat, sameCombat, stepCombat, speedMultiplier, WEAPONS,
+  stepPlayer, settlePosition, moverPath, initialCombat, copyCombat, sameCombat, stepCombat, speedMultiplier, WEAPONS,
 } from '@nobu/shared/sim';
 import type { MoverCfg, MoveCfg, CombatState } from '@nobu/shared/sim';
 import type {
   MsgSnap, PlayerSnap, ProjectileSnap, InputEntry,
   MsgWelcome, MsgPong, GameEvent, ClientMsg, MoverPattern, WeaponId, MapId,
+  MsgSnapDelta, MsgState, StateHz,
 } from '@nobu/shared/protocol';
+import {
+  DeltaDecoder, stateToSnap, normalizeSync, sameSync, DEFAULT_SYNC, type SyncSpec, type Velocity,
+} from '@nobu/shared/sync';
 import GAME, { mapDef } from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
 import { RemoteErrorTracker, type DrawnEntity } from './remoteError.js';
+import { Extrapolator } from './extrapolate.js';
 
 // ── Types ──────────────────────────────────────────────────────
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'timeout' | 'error';
@@ -39,6 +44,9 @@ export interface SnapshotEntry {
   arrivedAt: number;
   players: PlayerSnap[];
   projectiles: ProjectileSnap[];
+  /** State sync only: velocities (px/s) and the send rate. */
+  vel?: ReadonlyMap<number, Velocity>;
+  hz?: StateHz;
 }
 
 export interface LocalMetrics {
@@ -54,8 +62,17 @@ export interface LocalMetrics {
   maxErrorPx: number;
   inputToScreenMs: number;
   ackDelayMs: number;
+  /** Wire kbps: payload + 28 B per message, like the emulator (docs/PHASE3_PLAN.md D8). */
   bwUpKbps: number;
   bwDownKbps: number;
+  /** Average wire size of the world messages (snap / snapDelta / state) of the last second (bytes). */
+  msgBytesDown: number;
+  /** Delta sync: complete snapshots received in the last second although deltas were flowing (fallbacks). */
+  fullFallbacksPerSec: number;
+  /** Delta sync: deltas dropped because their base was unknown (since connect). */
+  deltaMissingBase: number;
+  /** World messages lost or skipped in the last second (gaps in the tick sequence). */
+  snapsLostPerSec: number;
   snapsMissed: number;
   duplicatesIgnored: number;
   reorderedIgnored: number;
@@ -67,6 +84,8 @@ export interface LocalMetrics {
   moverWobbleMs: number;
   moverErrorPx: number;
   moverFrozenPct: number;
+  /** Frames a moving mover was drawn off its path (extrapolation overshoot), %. */
+  moverOffPathPct: number;
   /** Delay samples behind the mover metrics (0 = no data). */
   moverSamples: number;
 }
@@ -142,6 +161,8 @@ export interface NetClientOptions {
   now?: () => number;
   /** Join as a spectator: snapshots only, no player (Compare reference pane). */
   spectate?: boolean;
+  /** Sync model (PHASES.md Phase 3); default full. Spectators always get full. */
+  sync?: SyncSpec;
 }
 
 interface Listeners {
@@ -182,6 +203,8 @@ const SNAP_EVERY_TICKS = Math.round(GAME.sim.hz / NET.snapshotHz);
 const METRICS_INTERVAL_MS = 200; // 5 Hz (SPEC.md §12)
 const SEEN_EVENTS_MAX = 1024;
 const LATENCY_SAMPLES = 30;
+/** Per-message overhead the emulator counts (UDP/IP headers, docs/ASSUMPTIONS.md #3). */
+const WIRE_OVERHEAD_BYTES = 28;
 const RTT_DISPLAY_SAMPLES = 6; // ~3 s, responsive to preset changes
 
 function mean(a: number[]): number {
@@ -244,6 +267,16 @@ export class NetClient {
   private devInvincible = false;
   /** A PICKUP for us arrived with this snapshot: its state change is not a misprediction. */
   private pickupArrived = false;
+
+  // Sync model (PHASES.md Phase 3)
+  private syncSpec: SyncSpec;
+  private deltaDecoder = new DeltaDecoder();
+  private lastAckSent = -1;
+  private extrapolator: Extrapolator;
+  /** World messages of the last second: wire size, and whether it was a delta fallback. */
+  private worldMsgs: { t: number; bytes: number; fallback: boolean }[] = [];
+  private lostTimes: { t: number; n: number }[] = [];
+  private lastMsgBytes = 0;
 
   // Snapshot buffer / clock
   private snapBuffer: SnapshotEntry[] = [];
@@ -309,7 +342,8 @@ export class NetClient {
     correctionsPerSec: 0, lastErrorPx: 0, recentErrorPx: 0, avgErrorPx: 0, maxErrorPx: 0,
     inputToScreenMs: 0, ackDelayMs: 0, bwUpKbps: 0, bwDownKbps: 0, snapsMissed: 0,
     duplicatesIgnored: 0, reorderedIgnored: 0, serverTickHz: 0, serverTickMs: 0,
-    moverLagMs: 0, moverWobbleMs: 0, moverErrorPx: 0, moverFrozenPct: 0, moverSamples: 0,
+    msgBytesDown: 0, fullFallbacksPerSec: 0, deltaMissingBase: 0, snapsLostPerSec: 0,
+    moverLagMs: 0, moverWobbleMs: 0, moverErrorPx: 0, moverFrozenPct: 0, moverOffPathPct: 0, moverSamples: 0,
   };
 
   constructor(opts: NetClientOptions) {
@@ -325,6 +359,15 @@ export class NetClient {
     this.armed = roomCfg.firing;
     this.map = mapDef(roomCfg.map ?? GAME.maps.rotation[0]).id;
     this.moveCfg = moveCfgFor(this.map);
+    this.syncSpec = normalizeSync(opts.sync ?? DEFAULT_SYNC);
+    this.extrapolator = new Extrapolator({
+      maxMs: NET.state.extrapolateMaxMs,
+      backMs: NET.state.extrapolateBackMs,
+      blendHalfLifeMs: NET.state.blendHalfLifeMs,
+      projectileSpeed: GAME.projectile.speed,
+      snapPx: NET.reconcile.snapThresholdPx,
+      settle: (pos) => settlePosition(pos, this.moveCfg),
+    });
   }
 
   // ── Events ─────────────────────────────────────────────────
@@ -358,7 +401,8 @@ export class NetClient {
       },
       onMessage: (text) => {
         if (!live()) return;
-        this.bytesRecv += text.length;
+        this.lastMsgBytes = text.length + WIRE_OVERHEAD_BYTES;
+        this.bytesRecv += this.lastMsgBytes;
         this.lastReceivedTime = this.now();
         if (this.connected && this.status !== 'connected') this.setStatus('connected');
         const msg = decodeServer(text);
@@ -397,19 +441,23 @@ export class NetClient {
     this.clockInitialized = false;
     this.lastRender = null;
     this.remoteError.reset();
+    this.deltaDecoder = new DeltaDecoder();
+    this.lastAckSent = -1;
+    this.extrapolator.reset();
   }
 
   private send(msg: ClientMsg): void {
     if (!this.transport) return;
     const text = encodeClient(msg);
     this.transport.send(text);
-    this.bytesSent += text.length;
+    this.bytesSent += text.length + WIRE_OVERHEAD_BYTES;
   }
 
   private startHello(): void {
     const sendHello = () => this.send({
       t: 'hello', v: 1, name: this.playerName, room: this.roomName, nonce: this.nonce,
       ...(this.spectating ? { spectate: true } : {}),
+      ...(!this.spectating && this.syncSpec.model !== 'full' ? { sync: this.syncSpec } : {}),
     });
     sendHello();
     this.helloTimer = setInterval(sendHello, NET.helloRetryMs);
@@ -430,7 +478,26 @@ export class NetClient {
   private handleServerMsg(type: string, msg: Record<string, unknown>): void {
     switch (type) {
       case 'welcome': this.onWelcome(msg as unknown as MsgWelcome); break;
-      case 'snap': this.onSnapReceived(msg as unknown as MsgSnap); break;
+      case 'snap': {
+        const snap = msg as unknown as MsgSnap;
+        // A complete snapshot while deltas were flowing = fallback (base lost or too old)
+        this.recordWorldMsg(this.syncSpec.model === 'delta' && this.deltaDecoder.newestTick >= 0);
+        this.deltaDecoder.store(snap);
+        this.onSnapReceived(snap);
+        break;
+      }
+      case 'snapDelta': {
+        this.recordWorldMsg(false);
+        const snap = this.deltaDecoder.decode(msg as unknown as MsgSnapDelta);
+        if (snap) this.onSnapReceived(snap);
+        break;
+      }
+      case 'state': {
+        this.recordWorldMsg(false);
+        const { snap, vel, hz } = stateToSnap(msg as unknown as MsgState);
+        this.onSnapReceived(snap, vel, hz);
+        break;
+      }
       case 'pong': this.onPong(msg as unknown as MsgPong); break;
       case 'error':
         console.warn('[client] Server error:', msg['code'], msg['msg']);
@@ -472,8 +539,13 @@ export class NetClient {
     this.metrics.serverTickMs = Math.round(msg.tickMs * 100) / 100;
   }
 
+  /** Bookkeeping for one world message (its bytes were already counted in onMessage). */
+  private recordWorldMsg(fallback: boolean): void {
+    this.worldMsgs.push({ t: this.now(), bytes: this.lastMsgBytes, fallback });
+  }
+
   // ── Snapshots ──────────────────────────────────────────────
-  private onSnapReceived(snap: MsgSnap): void {
+  private onSnapReceived(snap: MsgSnap, vel?: ReadonlyMap<number, Velocity>, hz?: StateHz): void {
     const now = this.now();
 
     // SPEC.md §8.3: ignore any snapshot not newer than the latest applied
@@ -483,8 +555,10 @@ export class NetClient {
       return;
     }
     if (this.latestAppliedTick !== -1) {
-      const gap = Math.round((snap.tick - this.latestAppliedTick) / SNAP_EVERY_TICKS) - 1;
-      if (gap > 0) this.snapsMissed += gap;
+      // State at 10 Hz arrives every 6 ticks; everything else every 2
+      const every = hz ? Math.round(GAME.sim.hz / hz) : SNAP_EVERY_TICKS;
+      const gap = Math.round((snap.tick - this.latestAppliedTick) / every) - 1;
+      if (gap > 0) { this.snapsMissed += gap; this.lostTimes.push({ t: now, n: gap }); }
     }
     this.latestAppliedTick = snap.tick;
     this.latestSnap = snap;
@@ -504,7 +578,11 @@ export class NetClient {
       this.clockOffset += (sample - this.clockOffset) * NET.clockSmoothing;
     }
 
-    this.snapBuffer.push({ st: snap.st, arrivedAt: now, players: snap.players, projectiles: snap.projectiles });
+    this.snapBuffer.push({
+      st: snap.st, arrivedAt: now, players: snap.players, projectiles: snap.projectiles,
+      ...(vel ? { vel, hz } : {}),
+    });
+    if (vel) this.extrapolator.push({ st: snap.st, players: snap.players, projectiles: snap.projectiles, vel });
     if (this.snapBuffer.length > NET.snapshotBufferSize) this.snapBuffer.shift();
 
     // Events are cosmetic and repeated for eventRedundancyMs: de-duplicate by eid
@@ -616,7 +694,8 @@ export class NetClient {
     const ackDelay = now - newestCreated;
     pushCapped(this.ackDelaySamples, ackDelay, LATENCY_SAMPLES);
     if (!this.toggles.prediction) {
-      const interp = this.toggles.interpolation ? NET.interpDelayMs : 0;
+      // State sync draws remote entities without the interpolation delay
+      const interp = this.toggles.interpolation && this.syncSpec.model !== 'state' ? NET.interpDelayMs : 0;
       pushCapped(this.inputToScreenSamples, ackDelay + interp + this.lastFrameMs, LATENCY_SAMPLES);
     }
   }
@@ -692,18 +771,47 @@ export class NetClient {
     if (this.connected && this.playerId !== null) this.send({ t: 'dev', invincible: on });
   }
 
-  /** Call at inputSendHz (30 Hz) to flush inputs to the server (SPEC.md §10.3). */
+  /**
+   * Call at inputSendHz (30 Hz) to flush inputs to the server (SPEC.md §10.3).
+   * In delta sync it also acknowledges the newest decoded snapshot: on the
+   * input message (`sa`), or alone (`snapAck`) when no input goes out.
+   */
   sendInputs(): void {
-    if (!this.connected || this.seq === this.lastSentSeq) return;
+    if (!this.connected) return;
+    const ackTick = this.syncSpec.model === 'delta' ? this.deltaDecoder.newestTick : -1;
+    const ack = ackTick > this.lastAckSent ? ackTick : null;
 
-    const toSend = this.toggles.redundancy
-      // All unacknowledged inputs, newest last, at most redundancyMax
-      ? this.pendingInputs.slice(-NET.redundancyMax)
-      // Only the inputs created since the last send (every input is sent once)
-      : this.pendingInputs.filter(i => i.s > this.lastSentSeq);
+    let toSend: InputEntry[] = [];
+    if (this.seq !== this.lastSentSeq) {
+      toSend = this.toggles.redundancy
+        // All unacknowledged inputs, newest last, at most redundancyMax
+        ? this.pendingInputs.slice(-NET.redundancyMax)
+        // Only the inputs created since the last send (every input is sent once)
+        : this.pendingInputs.filter(i => i.s > this.lastSentSeq);
+      this.lastSentSeq = this.seq;
+    }
 
-    this.lastSentSeq = this.seq;
-    if (toSend.length > 0) this.send({ t: 'input', inputs: toSend });
+    if (toSend.length > 0) this.send({ t: 'input', inputs: toSend, ...(ack !== null ? { sa: ack } : {}) });
+    else if (ack !== null) this.send({ t: 'snapAck', tick: ack });
+    if (ack !== null) this.lastAckSent = ack;
+  }
+
+  /**
+   * Switch the sync model live (PHASES.md Phase 3). The server answers with a
+   * self-contained message (full snapshot or state) in the new model.
+   */
+  setSync(spec: SyncSpec): void {
+    const next = normalizeSync(spec);
+    if (sameSync(next, this.syncSpec)) return;
+    this.syncSpec = next;
+    this.lastAckSent = -1;
+    this.extrapolator.reset();
+    this.remoteError.reset();
+    if (this.connected && !this.spectating) this.send({ t: 'sync', ...next });
+  }
+
+  get sync(): SyncSpec {
+    return { ...this.syncSpec };
   }
 
   perturb(dx: number, dy: number): void {
@@ -773,6 +881,10 @@ export class NetClient {
   private computeRenderState(): RenderState {
     const latest = this.latestSnap;
     const buf = this.snapBuffer;
+    // State sync: extrapolate from the newest state (no interpolation delay, docs/PHASE3_PLAN.md D6)
+    if (buf.length > 0 && buf[buf.length - 1].vel && this.extrapolator.current) {
+      return this.extrapolator.render(this.now() + this.clockOffset);
+    }
     if (!this.toggles.interpolation || buf.length === 0) {
       return { players: latest?.players ?? [], projectiles: latest?.projectiles ?? [] };
     }
@@ -865,6 +977,13 @@ export class NetClient {
     m.snapshotHz = this.snapshotTimes.length;
     m.correctionsPerSec = this.correctionTimes.length;
 
+    this.worldMsgs = this.worldMsgs.filter(w => now - w.t < 1000);
+    this.lostTimes = this.lostTimes.filter(l => now - l.t < 1000);
+    m.msgBytesDown = this.worldMsgs.length ? Math.round(mean(this.worldMsgs.map(w => w.bytes))) : 0;
+    m.fullFallbacksPerSec = this.worldMsgs.filter(w => w.fallback).length;
+    m.deltaMissingBase = this.deltaDecoder.missingBase;
+    m.snapsLostPerSec = this.lostTimes.reduce((a, l) => a + l.n, 0);
+
     const windowErrors = this.correctionErrors.filter(e => now - e.t < NET.metricsWindowMs).map(e => e.px);
     m.recentErrorPx = Math.round(Math.max(0, ...this.correctionErrors.filter(e => now - e.t < 1000).map(e => e.px)) * 10) / 10;
     m.avgErrorPx = Math.round(mean(windowErrors) * 10) / 10;
@@ -888,6 +1007,7 @@ export class NetClient {
     m.moverWobbleMs = re.wobbleMs;
     m.moverErrorPx = re.errorPx;
     m.moverFrozenPct = re.frozenPct;
+    m.moverOffPathPct = re.offPathPct;
     m.moverSamples = re.samples;
   }
 
