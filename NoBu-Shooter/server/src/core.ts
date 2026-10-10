@@ -177,6 +177,10 @@ export class GameServer {
         if (conn.room) conn.room.setMovers(msg.movers);
         break;
 
+      case 'dev':
+        if (conn.playerId !== null && conn.room) conn.room.setDev(conn.playerId, msg.invincible);
+        break;
+
       case 'bye':
         this.removeConnection(conn);
         conn.close();

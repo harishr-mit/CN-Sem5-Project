@@ -68,6 +68,20 @@ ws.on('message', (raw) => {
       if (msg.ack > highestAck) {
         highestAck = msg.ack;
       }
+      // Phase 2.5: own weapon state, other players' shots, power-ups, map
+      if (msg.me) {
+        sawMe = true;
+        minAmmo = Math.min(minAmmo, msg.me.ammo);
+        if (msg.me.reloadTicks > 0) sawReload = true;
+      }
+      if (msg.match?.map) mapSeen = msg.match.map;
+      maxPickups = Math.max(maxPickups, msg.pickups?.length ?? 0);
+      for (const ev of msg.events ?? []) {
+        if (seenEids.has(ev.eid)) continue;
+        seenEids.add(ev.eid);
+        if (ev.type === 'PLAYER_FIRE' && ev.playerId !== playerId) otherShots++;
+        if (ev.type === 'RELOAD_START' && ev.playerId !== playerId) otherReloads++;
+      }
     } else if (msg.t === 'pong') {
       serverTickHz = msg.tickHz || serverTickHz;
     }
@@ -75,6 +89,15 @@ ws.on('message', (raw) => {
     console.error('[bot] Malformed packet:', err);
   }
 });
+
+let sawMe = false;
+let minAmmo = Infinity;
+let sawReload = false;
+let mapSeen = null;
+let maxPickups = 0;
+let otherShots = 0;
+let otherReloads = 0;
+const seenEids = new Set();
 
 function send(data) {
   if (ws.readyState === WebSocket.OPEN) {
@@ -94,7 +117,8 @@ function startInputLoop() {
     for (let i = 0; i < 2; i++) {
       seq++;
       const k = [1, 8, 2, 4][Math.floor(seq / 30) % 4]; // small square
-      inputs.push({ s: seq, k, a: 0, f: 0 });
+      // Hold fire; ask for a reload every 3 s (GAMERULES.md §6a)
+      inputs.push({ s: seq, k, a: 0, f: 1, ...(seq % 180 === 0 ? { r: 1 } : {}) });
     }
     send({ t: 'input', inputs });
   }, 1000 / 30);
@@ -110,10 +134,13 @@ setTimeout(() => {
   console.log(`  Highest input ack:  ${highestAck} / ${seq}`);
   console.log(`  Last snapshot tick: ${lastSnapTick}`);
   console.log(`  Server tick rate:   ${serverTickHz} Hz`);
+  console.log(`  Map: ${mapSeen}; own ammo min ${minAmmo}, reload seen ${sawReload}; bot shots ${otherShots}, bot reloads ${otherReloads}; power-ups on the map (max) ${maxPickups}`);
 
   const tickOk = serverTickHz >= minTickHz;
   if (!tickOk) console.error(`[bot] Server tick rate ${serverTickHz} Hz is below ${minTickHz} Hz`);
-  const ok = snapshotsReceived > 50 && highestAck > 0 && tickOk;
+  const combatOk = sawMe && minAmmo < 8 && sawReload && otherShots > 0 && maxPickups > 0 && mapSeen !== null;
+  if (!combatOk) console.error('[bot] Phase 2.5 checks failed (ammo / reload / bot shots / pickups / map)');
+  const ok = snapshotsReceived > 50 && highestAck > 0 && tickOk && combatOk;
   if (ok) {
     console.log('\x1b[32m[bot] SMOKE TEST PASSED\x1b[0m');
     process.exit(0);

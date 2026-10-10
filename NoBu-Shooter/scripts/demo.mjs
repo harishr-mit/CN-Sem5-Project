@@ -19,6 +19,10 @@ const line = '══════════════════════
 console.log(`\x1b[36m${line}\n  NOBU SHOOTER — NETWORK MECHANICS DEMO ENVIRONMENT\n${line}\x1b[0m`);
 
 await assertPortsFree(Object.values(PORTS));
+// Developer tools (invincibility toggle in the Network Lab) exist only in the
+// demo: the server honours `dev` messages and the client shows the switch.
+process.env.NOBU_DEV = '1';
+process.env.VITE_NOBU_DEV = '1';
 console.log('Starting services...\n');
 
 const children = [

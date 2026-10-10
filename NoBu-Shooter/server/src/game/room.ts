@@ -4,14 +4,18 @@
  * SPEC.md §9, GAMERULES.md §2–§14.
  */
 
-import { stepPlayer, settlePosition, mulberry32, sweptCircleRect, sweptCircleCircle, segmentIntersectsRect, moverPath, MOVER_PATTERNS } from '@nobu/shared/sim';
-import type { Rect, Vec2, MoverPattern, MoverCfg } from '@nobu/shared/sim';
+import {
+  stepPlayer, settlePosition, mulberry32, sweptCircleRect, sweptCircleCircle, segmentIntersectsRect, moverPath, MOVER_PATTERNS,
+  initialCombat, copyCombat, stepCombat, speedMultiplier, pelletAngles, applyPowerup, WEAPONS,
+  powerupCap, pickPowerupKind, randomPowerupSpot,
+} from '@nobu/shared/sim';
+import type { Rect, Vec2, MoverPattern, MoverCfg, MoveCfg } from '@nobu/shared/sim';
 import type {
-  InputEntry, MsgSnap, PlayerSnap, ProjectileSnap,
-  MatchState, GameEvent, MatchResults, ScoreEntry,
+  InputEntry, MsgSnap, PlayerSnap, ProjectileSnap, PickupSnap,
+  MatchState, GameEvent, MatchResults, ScoreEntry, WeaponId,
 } from '@nobu/shared/protocol';
 import { encodeServer } from '@nobu/shared/protocol';
-import GAME from '@nobu/shared/config/game.js';
+import GAME, { mapDef, isMapId, type MapDef, type MapId } from '@nobu/shared/config/game.js';
 import NET from '@nobu/shared/config/net.js';
 import { BotController } from '../bots.js';
 import { pickSpawnPoint } from './spawn.js';
@@ -23,16 +27,13 @@ import { performance } from 'perf_hooks';
 const SIM_HZ = GAME.sim.hz;
 const SNAP_HZ = NET.snapshotHz;
 const SNAP_EVERY = Math.round(SIM_HZ / SNAP_HZ); // 2 ticks
-const OBSTACLES = GAME.obstacles as readonly Rect[] as Rect[];
 const ARENA_W = GAME.arena.width;
 const ARENA_H = GAME.arena.height;
 const P_RADIUS = GAME.player.radius;
 const PROJ_RADIUS = GAME.projectile.radius;
 const PROJ_SPEED = GAME.projectile.speed;
-const PROJ_LIFETIME_TICKS = Math.round(GAME.projectile.lifetimeMs * SIM_HZ / 1000);
 const RESPAWN_TICKS = Math.round(GAME.player.respawnDelayMs * SIM_HZ / 1000);
 const PROTECT_TICKS = Math.round(GAME.player.spawnProtectionMs * SIM_HZ / 1000);
-const FIRE_COOLDOWN_TICKS = Math.round(GAME.player.fireCooldownMs * SIM_HZ / 1000);
 const COUNTDOWN_TICKS = Math.round(GAME.match.countdownMs * SIM_HZ / 1000);
 const RUNNING_TICKS = Math.round(GAME.match.durationMs * SIM_HZ / 1000);
 const ENDED_TICKS = Math.round(GAME.match.endedMs * SIM_HZ / 1000);
@@ -44,15 +45,31 @@ const EVENT_REDUNDANCY_TICKS = Math.round(NET.eventRedundancyMs * SIM_HZ / 1000)
 const MAX_INPUTS_PER_MSG = NET.maxInputsPerMessage;
 const BACKLOG_THRESHOLD = NET.inputBacklogCatchup.threshold;
 const BACKLOG_MAX_PER_TICK = NET.inputBacklogCatchup.maxPerTick;
+const PICKUP_REACH = P_RADIUS + GAME.powerups.radius;
+const PICKUP_RESPAWN_TICKS = Math.round(GAME.powerups.respawnMs * SIM_HZ / 1000);
+/** Developer switches (dev message) are honoured only under `npm run demo`. */
+const DEV_MODE = typeof process !== 'undefined' && process.env.NOBU_DEV === '1';
 
-const MOVE_CFG = {
-  speed: GAME.player.speed,
-  radius: P_RADIUS,
-  arenaW: ARENA_W,
-  arenaH: ARENA_H,
-  obstacles: OBSTACLES,
-  hz: SIM_HZ,
-};
+function moveCfgFor(map: MapDef): MoveCfg {
+  return {
+    speed: GAME.player.speed,
+    radius: P_RADIUS,
+    arenaW: ARENA_W,
+    arenaH: ARENA_H,
+    obstacles: [...map.obstacles],
+    hz: SIM_HZ,
+  };
+}
+
+/**
+ * Map rotation for timed rooms (GAMERULES.md §3). `NOBU_MAPS=plaza,neon`
+ * overrides it (dev / rehearsal: play a chosen map without waiting).
+ */
+function mapRotation(): MapId[] {
+  const env = typeof process !== 'undefined' ? process.env.NOBU_MAPS : undefined;
+  const fromEnv = (env ?? '').split(',').map((m) => m.trim()).filter(isMapId);
+  return fromEnv.length > 0 ? fromEnv : [...GAME.maps.rotation];
+}
 
 const MOVER_CFG: MoverCfg = { speed: GAME.lab.moverSpeed, stopGo: GAME.lab.stopGo };
 
@@ -70,15 +87,35 @@ interface MoverState {
 
 let nextPlayerId = 1;
 
+interface RoomCfg {
+  bots: boolean;
+  firing: boolean;
+  timed: boolean;
+  movers: boolean;
+  /** Power-up pads (GAMERULES.md §6b). */
+  powerups: boolean;
+  /** Fixed map (lab); otherwise the rotation. */
+  map?: string;
+  /** Fixed spawn for every player (lab); otherwise GAMERULES.md §9 selection. */
+  spawn?: { x: number; y: number };
+}
+
 export class Room {
   readonly name: string;
-  readonly roomCfg: { bots: boolean; firing: boolean; timed: boolean; movers: boolean };
+  readonly roomCfg: RoomCfg;
 
   private state: RoomState;
   private botCtrl: BotController;
   private botSeqMap = new Map<number, number>();
   private rng = mulberry32(GAME.bots.seed + 1); // separate from bot rng
+  private pickupRng = mulberry32(GAME.bots.seed + 2);
   readonly metrics = new Metrics();
+
+  /** Current map geometry (changes only at COUNTDOWN, GAMERULES.md §3). */
+  private map: MapDef;
+  private moveCfg: MoveCfg;
+  private readonly rotation: MapId[];
+  private matchesStarted = 0;
 
   /** Scripted movers, keyed by pattern. Kept out of `players` (no player cap, no inputs). */
   private movers = new Map<MoverPattern, MoverState>();
@@ -94,16 +131,23 @@ export class Room {
     spectatorFn: SpectatorFn
   ) {
     this.name = name;
-    this.roomCfg = (GAME.rooms as Record<string, typeof this.roomCfg>)[name] ?? {
-      bots: false, firing: false, timed: false, movers: false,
+    this.roomCfg = (GAME.rooms as Record<string, RoomCfg>)[name] ?? {
+      bots: false, firing: false, timed: false, movers: false, powerups: false,
     };
     this.sendFn = sendFn;
     this.spectatorFn = spectatorFn;
-    this.botCtrl = new BotController();
+    this.rotation = this.roomCfg.map && isMapId(this.roomCfg.map) ? [this.roomCfg.map] : mapRotation();
+    this.map = mapDef(this.rotation[0]);
+    this.moveCfg = moveCfgFor(this.map);
+    this.botCtrl = new BotController(this.map);
 
     this.state = {
       // Untimed rooms (lab) are a sandbox that is always RUNNING (GAMERULES.md §14).
       matchState: this.roomCfg.timed ? 'WAITING' : 'RUNNING',
+      map: this.map.id,
+      pickups: [],
+      pickupRespawnTicks: 0,
+      nextPickupId: 1,
       tick: 0,
       serverTime: 0,
       countdownTicksLeft: 0,
@@ -123,6 +167,7 @@ export class Room {
   get playerCount(): number { return this.state.players.size; }
   get spectatorCount(): number { return this.spectators; }
   get activeMovers(): MoverPattern[] { return [...this.movers.keys()]; }
+  get mapId(): MapId { return this.map.id; }
 
   addSpectator(): void { this.spectators++; }
 
@@ -157,7 +202,7 @@ export class Room {
 
   addPlayer(name: string, isBot = false): number {
     const id = nextPlayerId++;
-    const spawnPos = pickSpawnPoint(this.state.players, this.rng);
+    const spawnPos = this.spawnFor();
     const p: PlayerState = {
       id, name: name.slice(0, GAME.player.maxNameLength), bot: isBot,
       x: spawnPos.x, y: spawnPos.y,
@@ -165,7 +210,10 @@ export class Room {
       life: 0,
       respawnTicksLeft: 0,
       protectionTicksLeft: this.state.matchState === 'RUNNING' && this.roomCfg.firing ? PROTECT_TICKS : 0,
-      fireCooldownTicks: 0,
+      combat: initialCombat(),
+      aim: 0,
+      shield: false,
+      invincible: false,
       score: 0,
       inputQueue: [],
       lastConsumedSeq: 0,
@@ -233,7 +281,7 @@ export class Room {
     if (!NET.debug.allowPerturb) return;
     const p = this.state.players.get(playerId);
     if (!p || !p.alive) return;
-    const pos = settlePosition({ x: p.x + dx, y: p.y + dy }, MOVE_CFG);
+    const pos = settlePosition({ x: p.x + dx, y: p.y + dy }, this.moveCfg);
     p.x = pos.x;
     p.y = pos.y;
   }
@@ -244,6 +292,7 @@ export class Room {
     const player = playerId === null ? undefined : players.get(playerId);
     const matchSnap = {
       state: matchState as MatchState,
+      map: this.map.id,
       timeLeftMs: matchState === 'RUNNING'
         ? (this.state.runningTicksLeft * 1000 / SIM_HZ)
         : matchState === 'COUNTDOWN'
@@ -258,6 +307,7 @@ export class Room {
       owner: proj.ownerId,
       x: proj.x, y: proj.y,
       dx: proj.dx, dy: proj.dy,
+      ...(proj.pierce ? { pierce: true as const } : {}),
     }));
     const playerSnaps: PlayerSnap[] = [...players.values()].map(p => ({
       id: p.id,
@@ -269,6 +319,12 @@ export class Room {
       protectMs: p.protectionTicksLeft * 1000 / SIM_HZ,
       respawnMs: p.respawnTicksLeft * 1000 / SIM_HZ,
       score: p.score,
+      aim: p.aim,
+      weapon: p.combat.weapon,
+      reloading: p.combat.reloadTicks > 0,
+      shield: p.shield,
+      fast: p.combat.speedTicks > 0,
+      ...(p.invincible ? { invincible: true as const } : {}),
     }));
     // Movers look like remote players to clients, so interpolation (and later
     // sync models) handle them without special cases.
@@ -276,9 +332,14 @@ export class Room {
       playerSnaps.push({
         id: m.id, name: m.pattern.toUpperCase(), bot: true,
         x: m.x, y: m.y, alive: true, life: 1,
-        protectMs: 0, respawnMs: 0, score: 0, mover: m.pattern,
+        protectMs: 0, respawnMs: 0, score: 0,
+        aim: 0, weapon: 'handgun', reloading: false, shield: false, fast: false,
+        mover: m.pattern,
       });
     }
+    const pickups: PickupSnap[] = [];
+    if (matchState === 'RUNNING') for (const pk of this.state.pickups) pickups.push({ ...pk });
+    const c = player?.combat;
     return {
       t: 'snap',
       tick,
@@ -287,6 +348,10 @@ export class Room {
       match: matchSnap,
       players: playerSnaps,
       projectiles: projSnaps,
+      pickups,
+      ...(c ? {
+        me: copyCombat(c),
+      } : {}),
       events,
     };
   }
@@ -326,25 +391,29 @@ export class Room {
         if (this.state.matchState === 'RUNNING' && p.alive) {
           // Quantize aim per spec
           const aimQ = Math.round(inp.a * 1000) / 1000;
-          const newPos = stepPlayer({ x: p.x, y: p.y }, inp.k, MOVE_CFG);
+          p.aim = aimQ;
+          // Movement, then weapon timers / reload / fire — the same per-input
+          // order as the client's prediction (shared/src/sim/combat.ts).
+          const mult = speedMultiplier(p.combat);
+          const cfg = mult === 1 ? this.moveCfg : { ...this.moveCfg, speed: this.moveCfg.speed * mult };
+          const newPos = stepPlayer({ x: p.x, y: p.y }, inp.k, cfg);
           p.x = newPos.x;
           p.y = newPos.y;
           this.metrics.counters.playerMoves++;
 
-          // Fire
-          if (
-            inp.f &&
-            this.roomCfg.firing &&
-            p.fireCooldownTicks === 0
-          ) {
-            this.spawnProjectile(p, aimQ);
+          const armed = this.roomCfg.firing;
+          const res = stepCombat(p.combat, armed && inp.f === 1, armed && inp.r === 1, inp.d === 1, inp.k !== 0);
+          if (res.fired) this.fireShot(p, aimQ, res.fired, res.pierce);
+          if (res.reloadStarted) {
+            this.emitEvent({ type: 'RELOAD_START', playerId: p.id, weapon: p.combat.weapon });
+            this.metrics.counters.reloads++;
           }
         }
       }
-
-      // Decrement cooldown
-      if (p.fireCooldownTicks > 0) p.fireCooldownTicks--;
     }
+
+    // 2a. Power-ups: pickups (after movement), the cap and refills
+    if (this.roomCfg.powerups && this.state.matchState === 'RUNNING') this.stepPickups();
 
     // 2b. Scripted movers follow their path in server time
     this.stepMovers();
@@ -405,7 +474,19 @@ export class Room {
     this.state.events = this.state.events.filter(e => e.tick >= cutoff);
   }
 
-  private spawnProjectile(owner: PlayerState, aim: number): void {
+  /** One accepted shot: one projectile per pellet (shotgun: a fixed fan, GAMERULES.md §6). */
+  private fireShot(owner: PlayerState, aim: number, weapon: WeaponId, pierce: boolean): void {
+    let firstId: number | undefined;
+    for (const angle of pelletAngles(weapon, aim)) {
+      const id = this.spawnProjectile(owner, angle, WEAPONS[weapon].lifetimeTicks, pierce);
+      firstId ??= id ?? undefined;
+    }
+    this.emitEvent({ type: 'PLAYER_FIRE', playerId: owner.id, projectileId: firstId, weapon, x: owner.x, y: owner.y });
+    this.metrics.counters.shots++;
+  }
+
+  /** Returns the projectile id, or null when the muzzle is inside an obstacle (destroyed at once). */
+  private spawnProjectile(owner: PlayerState, aim: number, lifetimeTicks: number, pierce: boolean): number | null {
     const cos = Math.cos(aim);
     const sin = Math.sin(aim);
     const spawnX = owner.x + cos * (P_RADIUS + PROJ_RADIUS + 1);
@@ -414,8 +495,10 @@ export class Room {
     // If spawn point crosses an obstacle, destroy immediately
     const ownerPos = { x: owner.x, y: owner.y };
     const spawnPos = { x: spawnX, y: spawnY };
-    for (const obs of OBSTACLES) {
-      if (segmentIntersectsRect(ownerPos, spawnPos, obs)) return;
+    if (!pierce) {
+      for (const obs of this.map.obstacles) {
+        if (segmentIntersectsRect(ownerPos, spawnPos, obs)) return null;
+      }
     }
 
     const id = this.state.nextProjectileId++;
@@ -423,12 +506,70 @@ export class Room {
       id, ownerId: owner.id,
       x: spawnX, y: spawnY,
       dx: cos, dy: sin,
-      ticksLeft: PROJ_LIFETIME_TICKS,
+      ticksLeft: lifetimeTicks,
+      pierce,
     });
-    owner.fireCooldownTicks = FIRE_COOLDOWN_TICKS;
-    this.emitEvent({ type: 'PLAYER_FIRE', playerId: owner.id, projectileId: id });
     this.emitEvent({ type: 'PROJECTILE_SPAWN', projectileId: id, x: spawnX, y: spawnY });
-    this.metrics.counters.shots++;
+    return id;
+  }
+
+  /**
+   * Power-ups (GAMERULES.md §6b): collect (lowest player id wins a same-tick
+   * tie), keep at most ⌊participants / 2⌋ on the map, and add one at a random
+   * spot `respawnMs` after the count drops below the cap.
+   */
+  private stepPickups(): void {
+    const st = this.state;
+    const byId = [...st.players.values()].filter((p) => p.alive).sort((a, b) => a.id - b.id);
+    st.pickups = st.pickups.filter((pk) => {
+      const taker = byId.find((p) => (p.x - pk.x) ** 2 + (p.y - pk.y) ** 2 < PICKUP_REACH * PICKUP_REACH);
+      if (!taker) return true;
+      if (applyPowerup(taker.combat, pk.kind).shield) taker.shield = true;
+      this.emitEvent({ type: 'PICKUP', playerId: taker.id, kind: pk.kind, x: pk.x, y: pk.y });
+      this.metrics.counters.pickups++;
+      return false;
+    });
+
+    const cap = powerupCap(st.players.size);
+    if (st.pickups.length > cap) st.pickups.splice(0, st.pickups.length - cap); // players left: drop the oldest
+    if (st.pickups.length < cap) {
+      if (st.pickupRespawnTicks <= 0) st.pickupRespawnTicks = PICKUP_RESPAWN_TICKS;
+      else if (--st.pickupRespawnTicks === 0) this.spawnPickup();
+    } else {
+      st.pickupRespawnTicks = 0;
+    }
+  }
+
+  private spawnPickup(): void {
+    const others = [...this.state.players.values()].filter((p) => p.alive);
+    const spot = randomPowerupSpot(this.pickupRng, this.map, this.state.pickups, others);
+    if (!spot) return;
+    this.state.pickups.push({ id: this.state.nextPickupId++, x: spot.x, y: spot.y, kind: pickPowerupKind(this.pickupRng) });
+  }
+
+  /** Match start: fill up to the cap at once; otherwise clear. */
+  private resetPickups(fill: boolean): void {
+    this.state.pickups = [];
+    this.state.pickupRespawnTicks = 0;
+    if (!this.roomCfg.powerups || !fill) return;
+    const cap = powerupCap(this.state.players.size);
+    for (let i = 0; i < cap; i++) this.spawnPickup();
+  }
+
+  /** Developer invincibility (only under `npm run demo`). Returns whether it was applied. */
+  setDev(playerId: number, invincible: boolean): boolean {
+    const p = this.state.players.get(playerId);
+    if (!DEV_MODE || !p) return false;
+    p.invincible = invincible;
+    return true;
+  }
+
+  /** Switch the geometry (COUNTDOWN only, so nobody is moving). */
+  private setMap(id: MapId): void {
+    this.map = mapDef(id);
+    this.moveCfg = moveCfgFor(this.map);
+    this.state.map = this.map.id;
+    this.botCtrl.setMap(this.map);
   }
 
   private stepProjectiles(): void {
@@ -447,8 +588,8 @@ export class Room {
       let hitType: 'obstacle' | 'boundary' | 'player' | null = null;
       let hitPlayer: PlayerState | null = null;
 
-      // Test obstacles (expanded by proj radius)
-      for (const obs of OBSTACLES) {
+      // Test obstacles (expanded by proj radius); piercing shots ignore them
+      for (const obs of proj.pierce ? [] : this.map.obstacles) {
         const t = sweptCircleRect(p0, p1, PROJ_RADIUS, obs);
         if (t !== null && t < hitT) { hitT = t; hitType = 'obstacle'; }
       }
@@ -493,7 +634,16 @@ export class Room {
         toRemove.push(proj.id);
 
         if (hitType === 'player' && hitPlayer) {
-          this.killPlayer(hitPlayer, proj.ownerId, hitX, hitY);
+          if (hitPlayer.invincible) {
+            // Developer invincibility: the hit shows, nothing else happens
+          } else if (hitPlayer.shield) {
+            // Shield power-up absorbs the hit (GAMERULES.md §6b)
+            hitPlayer.shield = false;
+            this.emitEvent({ type: 'SHIELD_HIT', victim: hitPlayer.id, killer: proj.ownerId, x: hitX, y: hitY });
+            this.metrics.counters.shieldBlocks++;
+          } else {
+            this.killPlayer(hitPlayer, proj.ownerId, hitX, hitY);
+          }
         }
       }
     }
@@ -505,6 +655,9 @@ export class Room {
     victim.alive = false;
     victim.respawnTicksLeft = RESPAWN_TICKS;
     victim.protectionTicksLeft = 0;
+    // Death removes every power-up effect (GAMERULES.md §6b) and refills the handgun
+    victim.combat = initialCombat();
+    victim.shield = false;
 
     const killer = this.state.players.get(killerId);
     if (killer) {
@@ -518,8 +671,14 @@ export class Room {
     this.metrics.counters.hits++;
   }
 
+  /** Lab: the fixed twin spawn. Otherwise GAMERULES.md §9. */
+  private spawnFor(excludeId?: number): { x: number; y: number } {
+    const fixed = this.roomCfg.spawn;
+    return fixed ? { x: fixed.x, y: fixed.y } : pickSpawnPoint(this.state.players, this.rng, this.map.spawnPoints, excludeId);
+  }
+
   private respawnPlayer(p: PlayerState): void {
-    const pos = pickSpawnPoint(this.state.players, this.rng, p.id);
+    const pos = this.spawnFor(p.id);
     p.x = pos.x;
     p.y = pos.y;
     p.alive = true;
@@ -542,13 +701,20 @@ export class Room {
     this.state.matchState = 'COUNTDOWN';
     this.state.countdownTicksLeft = COUNTDOWN_TICKS;
 
+    // Next map in the rotation (GAMERULES.md §3); the first match plays rotation[0]
+    this.setMap(this.rotation[this.matchesStarted++ % this.rotation.length]);
+    this.state.projectiles.clear();
+    this.resetPickups(false);
+
     // Place all players at spawn points
     for (const p of this.state.players.values()) {
-      const pos = pickSpawnPoint(this.state.players, this.rng, p.id);
+      const pos = this.spawnFor(p.id);
       p.x = pos.x; p.y = pos.y;
       p.alive = false; // can't move during countdown
       p.score = 0;
       p.life = 0;
+      p.combat = initialCombat();
+      p.shield = false;
     }
 
     // Add bots if room supports them
@@ -572,13 +738,15 @@ export class Room {
     this.state.matchState = 'RUNNING';
     this.state.runningTicksLeft = RUNNING_TICKS;
     for (const p of this.state.players.values()) {
-      const pos = pickSpawnPoint(this.state.players, this.rng, p.id);
+      const pos = this.spawnFor(p.id);
       p.x = pos.x; p.y = pos.y;
       p.alive = true;
       p.life = 1;
       p.protectionTicksLeft = PROTECT_TICKS;
-      p.fireCooldownTicks = 0;
+      p.combat = initialCombat();
+      p.shield = false;
     }
+    this.resetPickups(true);
     this.emitEvent({ type: 'MATCH_START' });
     this.metrics.counters.matchStarts++;
   }
@@ -587,8 +755,9 @@ export class Room {
     this.state.matchState = 'ENDED';
     this.state.endedTicksLeft = ENDED_TICKS;
 
-    // Remove all projectiles
+    // Remove all projectiles and power-ups
     this.state.projectiles.clear();
+    this.resetPickups(false);
 
     // Compute final scoreboard
     const all: ScoreEntry[] = [];

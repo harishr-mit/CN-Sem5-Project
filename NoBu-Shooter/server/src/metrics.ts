@@ -15,6 +15,9 @@ export interface MetricCounters {
   matchStarts: number;
   matchEnds: number;
   scoreUpdates: number;
+  reloads: number;
+  pickups: number;
+  shieldBlocks: number;
 }
 
 export interface TickPerf {
@@ -35,6 +38,7 @@ export class Metrics {
     shots: 0, hits: 0, deaths: 0, respawns: 0,
     playerJoins: 0, playerLeaves: 0, playerInputs: 0,
     playerMoves: 0, matchStarts: 0, matchEnds: 0, scoreUpdates: 0,
+    reloads: 0, pickups: 0, shieldBlocks: 0,
   };
 
   private tickTimes: number[] = [];

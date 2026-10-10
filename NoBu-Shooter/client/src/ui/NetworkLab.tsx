@@ -4,6 +4,8 @@ import type { EmulatorClient } from '../net/EmulatorClient.js';
 import { useGameStore } from './store.js';
 import { Sparkline } from './Sparkline.js';
 import { EmulatorControls } from './EmulatorControls.js';
+import { isTypingTarget } from '../game/input.js';
+import { DEV_TOOLS } from '../dev.js';
 
 interface NetworkLabProps {
   netClient: NetClient;
@@ -24,6 +26,7 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
 
   // Netcode toggles
   const [toggles, setToggles] = useState({ ...netClient.toggles });
+  const [devInvincible, setDevInvincible] = useState(false);
 
   // Sparkline history buffers (60 samples ~ 12s at 5 Hz)
   const [rttHistory, setRttHistory] = useState<number[]>(() => new Array(60).fill(0));
@@ -38,15 +41,15 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
   // Keyboard hotkeys for presets and toggles per SPEC.md §13.2
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger when typing in inputs
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Don't trigger while typing in a text field (sliders and checkboxes are fine)
+      if (isTypingTarget(e.target)) return;
 
       if (e.key === 'Tab') {
         e.preventDefault();
         onToggleOpen();
       } else if (e.key === 'p' || e.key === 'P') {
         toggleNetcode('prediction');
-      } else if (e.key === 'r' || e.key === 'R') {
+      } else if (e.key === 'c' || e.key === 'C') {
         toggleNetcode('reconciliation');
       } else if (e.key === 'i' || e.key === 'I') {
         toggleNetcode('interpolation');
@@ -179,7 +182,7 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
           </div>
 
           <div className="toggle-row">
-            <label htmlFor="toggle-recon">Reconciliation [R]</label>
+            <label htmlFor="toggle-recon">Reconciliation [C]</label>
             <label className="toggle">
               <input
                 id="toggle-recon"
@@ -230,6 +233,29 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
             </label>
           </div>
         </div>
+
+        {/* Developer switches: only under `npm run demo` (dev.ts) */}
+        {DEV_TOOLS && (
+          <div className="lab-section" id="lab-dev-section">
+            <div className="lab-section-title" style={{ color: 'var(--c-amber)' }}>DEVELOPER (npm run demo only)</div>
+            <div className="toggle-row">
+              <label htmlFor="toggle-dev-invincible">Invincible (hits don't kill you)</label>
+              <label className="toggle">
+                <input
+                  id="toggle-dev-invincible"
+                  type="checkbox"
+                  checked={devInvincible}
+                  onChange={() => {
+                    const next = !devInvincible;
+                    setDevInvincible(next);
+                    netClient.setDevInvincible(next);
+                  }}
+                />
+                <span className="toggle-slider" />
+              </label>
+            </div>
+          </div>
+        )}
 
         {/* Section 5: Metric Tiles */}
         <div className="lab-section">

@@ -7,7 +7,7 @@ import { PANE_CHROME_PX } from '../../compare/layout.js';
 
 const CHIPS: { key: keyof PredictionToggle; label: string; hint: string }[] = [
   { key: 'prediction', label: 'P', hint: 'Prediction [P]' },
-  { key: 'reconciliation', label: 'R', hint: 'Reconciliation [R]' },
+  { key: 'reconciliation', label: 'C', hint: 'Reconciliation [C]' },
   { key: 'interpolation', label: 'I', hint: 'Interpolation [I]' },
   { key: 'redundancy', label: 'Rd', hint: 'Input redundancy' },
   { key: 'ghost', label: 'G', hint: 'Ghost [G]' },

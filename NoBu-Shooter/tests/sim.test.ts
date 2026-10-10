@@ -8,7 +8,7 @@ const MOVE_CFG = {
   radius: GAME.player.radius,
   arenaW: GAME.arena.width,
   arenaH: GAME.arena.height,
-  obstacles: GAME.obstacles as { x: number; y: number; w: number; h: number }[],
+  obstacles: GAME.maps.neon.obstacles as { x: number; y: number; w: number; h: number }[],
   hz: GAME.sim.hz,
 };
 

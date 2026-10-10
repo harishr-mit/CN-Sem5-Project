@@ -11,7 +11,7 @@
 
 import GAME from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
-import { KEY } from '@nobu/shared/sim';
+import { movementCode, keysFromCodes, isTypingTarget } from '../game/input.js';
 
 export interface DrivenClient {
   keys: number;
@@ -35,22 +35,10 @@ const SEND_EVERY = Math.max(1, Math.round(GAME.sim.hz / NET.inputSendHz));
 /** After a stall (hidden tab) don't try to catch up more than this. */
 const MAX_FRAME_MS = 250;
 
-const KEY_BITS: Record<string, number> = {
-  KeyW: KEY.UP, ArrowUp: KEY.UP,
-  KeyS: KEY.DOWN, ArrowDown: KEY.DOWN,
-  KeyA: KEY.LEFT, ArrowLeft: KEY.LEFT,
-  KeyD: KEY.RIGHT, ArrowRight: KEY.RIGHT,
-};
-
 const rafScheduler: FrameScheduler = {
   request: (cb) => requestAnimationFrame(cb),
   cancel: (id) => cancelAnimationFrame(id),
 };
-
-function isTyping(target: EventTarget | null): boolean {
-  const el = target as { tagName?: string } | null;
-  return el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.tagName === 'SELECT';
-}
 
 export class InputDriver {
   /** Current key bitmask (up=1, down=2, left=4, right=8). */
@@ -121,15 +109,18 @@ export class InputDriver {
   };
 
   private onKeyDown = (e: Event): void => {
-    const code = (e as KeyboardEvent).code;
-    if (!(code in KEY_BITS) || isTyping(e.target)) return;
-    if (code.startsWith('Arrow')) e.preventDefault(); // don't scroll the page
+    // Same key mapping and text-field rule as Quick Match (input.ts): a
+    // focused slider or checkbox does not swallow movement keys.
+    const code = movementCode(e as KeyboardEvent);
+    if (!code || isTypingTarget(e.target)) return;
+    if (code.startsWith('Arrow')) e.preventDefault(); // don't scroll the page or nudge a slider
     this.pressed.add(code);
     this.updateKeys();
   };
 
   private onKeyUp = (e: Event): void => {
-    this.pressed.delete((e as KeyboardEvent).code);
+    const code = movementCode(e as KeyboardEvent);
+    if (code) this.pressed.delete(code);
     this.updateKeys();
   };
 
@@ -140,8 +131,6 @@ export class InputDriver {
   };
 
   private updateKeys(): void {
-    let keys = 0;
-    for (const code of this.pressed) keys |= KEY_BITS[code];
-    this.keys = keys;
+    this.keys = keysFromCodes(this.pressed);
   }
 }

@@ -21,13 +21,14 @@ Shared context for every agent working in this directory. Read this file **befor
 
 ## Current Status
 
-* **Last updated:** 2026-10-09 (Claude Opus 5.5) — **Phases 1 and 2 of `PHASES.md` complete.** Next: Phase 3 (T32). Phase 2 plan, decisions and deviations: `docs/PHASE2_PLAN.md`.
-* **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot-vs-state sync models, and a standalone network emulator (latency, jitter, loss, bandwidth, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (working branch `game`).
+* **Last updated:** 2026-10-10 (Claude Opus 5.5) — **Phases 1, 2 and 2.5 of `PHASES.md` complete**, plus the owner's Phase 2.5 revision 2 (T58–T60: random power-up spots capped at ⌊players/2⌋, weighted kinds, 1 + 1 magazines, infinite pistol reloads, Piercing + Dash instead of Ammo, ring rules, developer Invincible switch under `npm run demo` only). Keys: `R` reload, `Space` dash, `C` reconciliation, `M` mute. **Next: Phase 3 (T32)** — full-snapshot baseline ≈ 2.1 kB / ≈ 510 kbps (docs/ASSUMPTIONS.md #40).
+* **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot-vs-state sync models, and a standalone network emulator (latency, jitter, loss, bandwidth, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (`main` holds everything as of T49; earlier work branches: `game`, `game-phase2plus`).
 * **Plan:** `PHASES.md` — six phases, each with a demo checkpoint and exit criteria. `GAMERULES.md` = gameplay rules. v1 spec archived at `docs/archive/SPEC-v1.md`.
 * **Architecture:** Browser (Phaser + React) ⇄ Emulator (:9000 data, :9001 control) ⇄ Authoritative server (:8080). Server core is transport-agnostic (`server/src/core.ts`); `NetClient` is headless (injectable transport/clock).
-* **Commands (from repo root or `NoBu-Shooter/`):** `npm run demo`, `npm test` (57 tests incl. end-to-end netcode harness), `npm run typecheck`, `npm run smoke` (bot under Nightmare + lab spectator/movers check).
+* **Assets:** `NoBu-Shooter/assets/` (`README.md` inventory, `CREDITS.md` licences — the survivor avatar is CC-BY 3.0 and must stay credited).
+* **Commands (from repo root or `NoBu-Shooter/`):** `npm run demo` (`NOBU_MAPS=plaza` picks the map), `npm test` (105 tests incl. end-to-end netcode harness), `npm run typecheck`, `npm run smoke` (bot under Nightmare incl. ammo/reload/pads + lab spectator/movers check), `npm run pack-assets` (player atlas).
 * **Verification tooling:** no Playwright MCP is attached to agents; browser checks were done with `playwright-core` installed in the session scratchpad (NOT the repo) driving local Chrome (`channel: 'chrome'`). Phase 4 adds `npm run shots` to the repo.
-* **Blockers / Notes:** none. Dev-mode React StrictMode prints harmless "closed before established" WebSocket warnings in the Compare view (documented in `docs/ASSUMPTIONS.md` #18). The owner committed mid-Phase-2 work as `127fc29` ("credit exhausted - broken commit"); the Phase 2 work after it is uncommitted at the end of this run.
+* **Blockers / Notes:** none. Dev-mode React StrictMode prints harmless "closed before established" WebSocket warnings in the Compare view (documented in `docs/ASSUMPTIONS.md` #18). Task IDs T37–T39 were used twice (Phase 2 on `game-phase2plus`, bug fixes on `game`); the bug fixes are listed as T46–T48.
 
 ## Task List
 
@@ -67,7 +68,6 @@ Shared context for every agent working in this directory. Read this file **befor
 * [ ] T34: **Phase 5** — UDP adapters, emulator UDP mode, network-player swarm, emulator dashboard + README (PHASES.md U1–U7)
 * [ ] T35: **Phase 6** — Lockstep (S4), final docs, rehearsal (PHASES.md L1–L5)
 * [x] T36: Docs: archive SPEC.md → `docs/archive/SPEC-v1.md`, ROADMAP.md → `PHASES.md`, remove duplicate `NoBu-Shooter/docs/` and stale root `tests/`, update README/PROTOCOL/DEMO_SCRIPT/ASSUMPTIONS
-
 * [x] T37: Quick Phase 1 verification + Phase 2 implementation plan (`docs/PHASE2_PLAN.md`)
 * [x] T38: Phase 2 docs — PHASES.md / PHASE2_PLAN.md reflect the approved decisions D1–D7
 * [x] T39: Phase 2 step 1 — shared movers, Room movers + spectators, `lab` message, protocol validators (plan tests 1–4)
@@ -77,12 +77,98 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T43: Phase 2 step 5 — UI: EmulatorControls extraction, CompareView/ComparePane/PaneMetricsBar/CompareDock, App/Landing, delete ABCompare
 * [x] T44: Phase 2 step 6 — smoke extension, browser check (1280×720, 1920×1080), docs (PROTOCOL, DEMO_SCRIPT, ASSUMPTIONS, GAMERULES, README), exit
 
+* [x] T45: Esc/F1 menus didn't scroll (inherited `pointer-events: none`); add Back to main menu to the Esc menu
+* [x] T46 (`T37` on branch `game`): Bug — `D` key does not move right (arrow keys work). Root cause on this machine: Vimium (Chrome Profile 15) maps `d`; game input hardened anyway (page-level `KeyboardEvent.code` tracker)
+* [x] T47 (`T38` on branch `game`): Bug — no way back to the landing page once a match has started (+ HUD buttons and Settings/Controls modals were unclickable)
+* [x] T48 (`T39` on branch `game`): Bug — A/B compare panes don't mirror each other; emulator parameters not applied correctly to both panes
+* [x] T49: Merge `origin/game` (bug fixes T46–T48, never merged) into `main` (Phase 2 + T45); reconcile overlaps, verify startup/tests/smoke/browser, commit
+
+* [x] T50: Create `NoBu-Shooter/assets/` (texture drop folder + wanted-asset list in its README) ahead of Phase 4 P3
+* [x] T51: Prune and rename the owner-supplied assets in `NoBu-Shooter/assets/` (keep only what the game will use); update its README/CREDITS
+* [x] T52: **Phase 2.5 A0+A1** — asset pipeline (Vite serves `assets/`, preload manifest with fallback) + player look (survivor body/feet anims, colour ring, local shoulder marker, shield bubble, FX, drone target) — GAMERULES §17
+* [x] T53: **Phase 2.5 A3** — weapons + ammo + reload (`R`, input flag `r`, predicted ammo, HUD) — GAMERULES §6, §6a
+* [x] T54: **Phase 2.5 A4** — power-ups (pads, 5 kinds, server pickups, speed in prediction, HUD) — GAMERULES §6b
+* [x] T55: **Phase 2.5 A2** — maps `neon`/`warehouse`/`plaza`/`overgrown`, rotation, map id in snapshot — GAMERULES §3, §15
+* [x] T56: **Phase 2.5 A5** — sound (event map, distance volume, mute `M`, Settings volume, audio unlock) — GAMERULES §18
+* [x] T57: Owner revision: GAMERULES/PHASES/README/docs for Phase 2.5, AGENTS.md docs-sync rule, reconciliation key `R` → `C`, process the second batch of owner assets (sounds, pickup icons), CREDITS
+* [x] T58: Rings — none in Compare; in Quick Match the ghost (G) replaces the local player's colour ring while shown
+* [x] T59: Power-up rework — random spawn spots, cap ⌊players/2⌋, 10 s refill, weighted kinds (rifle rarest, speed commonest), power weapons = 1+1 magazines then pistol, pistol infinite reserve; Ammo replaced by Piercing + Dash (owner choice)
+* [x] T60: Developer toggle (only under `npm run demo`): invincible
+
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
 
 ## Change Log
 
 <!-- Newest first. Copy the template below for each entry. -->
+
+### 2026-10-10 — Claude (Opus 5.5) — T58–T60: rings, power-up rework, developer toggle
+
+* **Task:** Owner: no colour rings in Compare; the ghost (original-position circle) toggleable in Quick Match and replacing the local colour ring while shown; power-ups at random spots; rifle rarer, Speed more often; power-up weapons revert after 1 + 1 magazines (or the timer); pistol reloads forever; at most players/2 power-ups at a time; replace Ammo (owner chose **both Dash and Piercing**, refill **10 s**); a developer toggle only in `npm run demo` making the player invincible.
+* **Status:** DONE — typecheck clean, **105/105 tests**, `npm run smoke` PASSED (4 players → max 2 power-ups). Browser (scratchpad playwright-core + local Chrome, demo started and stopped by the check script): Developer section present, Invincible → HUD `DEV: INVINCIBLE`, tag `[DEV]`, alive after 4 s among bots; pistol reserve `∞`; ghost on → no cyan ring, `G` off → cyan ring; Compare without colour rings; `Space` doesn't scroll; 0 console errors; all assets loaded. Ports free, no leftover processes.
+* **Shared:** `config/game.json` + regenerated `game.ts` (`powerups`: 6 kinds, `weights`, `perPlayers`, 10 s `respawnMs`, spot rules incl. `hudKeepOut`, `piercingMs`, `dashMs`, `dash`; maps lost `pickupPoints`; `MapDef` too). `sim/combat.ts` rewritten (reserve/INFINITE_RESERVE, 1 + 1 magazines → pistol, piercing, dash burst/cooldown, `stepCombat(..., dash, moving)`). New `sim/powerups.ts` (`powerupCap`, `pickPowerupKind`, `isValidPowerupSpot`, `randomPowerupSpot`). `protocol/messages.ts`: input `d`, `MsgDev`, `SelfCombatSnap = CombatState`, `PlayerSnap.invincible`, `ProjectileSnap.pierce`, pickup ids unique.
+* **Server:** `game/room.ts` (pickups list + cap + refill timer replace pads, piercing projectiles, dash input, invincible hits, `setDev` gated by `NOBU_DEV`), `game/state.ts` (`PickupState`, `pickups`, `pickupRespawnTicks`, `nextPickupId`, `invincible`, `pierce`), `core.ts` (`dev` message). `scripts/demo.mjs` sets `NOBU_DEV=1` / `VITE_NOBU_DEV=1`.
+* **Client:** `net/NetClient.ts` (dash request + sticky `d`, `setDevInvincible` re-sent on welcome, `combatView` reserve/pierce/dash/invincible), `game/PlayerView.ts` (`ring` flag), `game/ArenaScene.ts` (ring rules, `Space` dash, piercing tint, `[DEV]` tag), `game/MapView.ts` (pad rings removed), new `dev.ts`, `ui/NetworkLab.tsx` (Developer section), `ui/Hud.tsx` (reserve, PIERCING/DASH/DEV chips, LAST MAGAZINE), `ui/ControlsOverlay.tsx`, `ui/Landing.tsx`, `styles/global.css`.
+* **Assets:** new `sprites/pickups/piercing.png`, `dash.png` (SVG badges rendered with headless Chrome; sources in the scratchpad `assets-original-3/`); `pickups/ammo.png` removed (backed up there).
+* **Tests:** `combat.test.ts` (reserve, 1 + 1 magazines for rifle and shotgun, manual reload, piercing, dash timing, cap + weights), `maps.test.ts` (random spots valid + reachable, HUD keep-out; pads removed), `rules.test.ts` (random power-ups/cap/10 s refill/new cap after joins, dev refused without NOBU_DEV + invincible hits; bot-movement check now uses the furthest distance in the window — a bot that circled back failed the old end-to-start check), `netcode.test.ts` (dash predicted with 0 corrections), `protocol.test.ts` (`d`, `dev`, full `me`). `scripts/headless-bot.mjs` wording.
+* **Docs:** `GAMERULES.md` (revision 2 note, controls `Space`, §3, §4 `reserve`, §6 table, §6a, §6b rewritten, §13 `d`, §15 regenerated, §16, §17 rings/power-ups, new §19 developer toggle), `docs/PROTOCOL.md` (`d`, `dev`, `me`, `pierce`, `invincible`, pickups), `docs/ASSUMPTIONS.md` (#43–#48), `docs/DEMO_SCRIPT.md` §10, `README.md`, `PHASES.md` (revision 2 note), `NoBu-Shooter/assets/{README,CREDITS}.md`, `log.md`.
+
+### 2026-10-10 — Claude (Opus 5.5) — Phase 2.5: gameplay + textures (T52–T56)
+
+* **Task:** Owner: implement all of Phase 2.5 (not just T52); shotgun = 3 bullets with a decent spread.
+* **Status:** DONE — typecheck clean, **96/96 tests** (was 64), `npm run smoke` PASSED (Nightmare; new checks: own ammo reached 0 and reloaded, bot shots, 4 pads filled, map id). Browser (scratchpad `playwright-core` 1.48.2 + local Chrome; NOT in the repo): Quick Match neon/warehouse/plaza/overgrown at 60 fps, 0 console errors, all assets loaded, fire 1.2 s → 8/8 → 4/8, `R` → 8/8; Compare 2 panes and 4 panes + REF at 60 fps (1920×1080), Phase 2 numbers unchanged (A frozen 69 % / lag 78 ms vs B 4 % / 158 ms). Demo stopped after every check; ports 5173/8080/9000/9001 free.
+* **Shared:** `shared/src/config/game.json` + `game.ts` (regenerated mirror + helpers `mapDef`, `MapId`, `WeaponId`, `PowerupKind`): `weapons` (shotgun 3 pellets, 20°, 600 ms), `powerups`, `maps` (neon + 3 new mirrored layouts with props, spawns, pads), rooms `powerups`/`map`; removed `player.fireCooldownMs`, `projectile.lifetimeMs`, top-level `obstacles`/`spawnPoints`. New `shared/src/sim/combat.ts` (per-input weapon/ammo/reload/power-up step; exported from `sim/index.ts`). `shared/src/protocol/messages.ts`: input `r`, `PlayerSnap.aim/weapon/reloading/shield/fast`, `SelfCombatSnap` (`snap.me`), `PickupSnap` (`snap.pickups`), `match.map`, events `RELOAD_START`/`PICKUP`/`SHIELD_HIT`, event `weapon`/`kind`.
+* **Server:** `game/room.ts` (per-map geometry, map rotation at COUNTDOWN + `NOBU_MAPS` override, combat per consumed input, `fireShot` pellets, shield absorbs hits, pads: fill/pickup/respawn, snapshot fields), `game/state.ts` (`combat`, `aim`, `shield`, `PadState`, `map`, `pads`), `game/spawn.ts` (map spawn points), `bots.ts` (per-map line of sight + wander), `metrics.ts` (reloads/pickups/shieldBlocks).
+* **Client:** `net/NetClient.ts` (per-map prediction geometry, combat prediction + replay, sticky `r`, `fire(weapon)`/`reload`/`dryFire` events, `combatView`, `requestReload`, aim interpolation, PICKUP adoption); new `game/assets.ts` (manifest, fallbacks, animations), `game/MapView.ts`, `game/PlayerView.ts`, `game/audio.ts`, `game/playerColors.ts`; `game/ArenaScene.ts` rewritten around them (Compare behaviour kept); `game/GameContainer.tsx` (Compare `noAudio`); `ui/Hud.tsx` (weapon panel, ammo correction flash, map name, coloured scoreboard, "SPAWN PROTECTED"), `ui/App.tsx` (`M`, sound prefs), `ui/SettingsPanel.tsx` (mute), `ui/settings.ts` (`muted`), `ui/ControlsOverlay.tsx` (R, M, power-ups), `ui/Landing.tsx` (hint + Credits modal), `styles/global.css`; `client/vite.config.ts` (`publicDir: ../assets`).
+* **Assets/tools:** new `scripts/pack-assets.mjs` + `npm run pack-assets` (NoBu-Shooter and root `package.json`), dev dependency `pngjs@^7.0.0` (local, `NoBu-Shooter/package.json` + lock); generated `assets/packed/player.{png,json}` (245 frames, 2048×1024, per-frame pivots — checked on a preview sheet). `scripts/headless-bot.mjs` fires, reloads and checks the new fields.
+* **Tests:** new `tests/combat.test.ts` (8), `tests/maps.test.ts` (17: symmetry, clearance, reachability), `tests/rules.test.ts` (+5: rotation, reload, shotgun, pads tie/respawn, shield), `tests/netcode.test.ts` (+2 weapon-prediction harness; `makeHarness` gained `room`/`noBots`), `tests/protocol.test.ts` (new fields, `r`), `tests/{sim,movers}.test.ts` (neon obstacles path).
+* **Docs:** `GAMERULES.md` (revision note → implemented; §6 shotgun row; §6a reload prediction; §15 = actual game.json + `NOBU_MAPS`; §17 atlas), `PHASES.md` (2.5 done + result, Phase 3 next + baseline), `docs/PROTOCOL.md`, `docs/ASSUMPTIONS.md` (#33 updated, #36–#42), `docs/DEMO_SCRIPT.md` (§10), `README.md` (controls, maps, tests, pack-assets), `NoBu-Shooter/assets/{README,CREDITS}.md`, `log.md`.
+* **Notes:** Snapshots grew +36 % (≈ 1.58 → 2.14 kB, ≈ 510 kbps), above Nightmare's 400 kbps cap — Quick Match under Nightmare queues more until Phase 3. Sound trims not checked by ear; 8 human players not measured (bots fill to 4). `npm install` printed an `allow-scripts` notice for esbuild's postinstall (pre-existing, nothing changed). Stopping a backgrounded `npm run demo` via the task tool left `demo.mjs` orphaned once on Windows (stopped by PID; children exited via parent-watch) — later checks spawned and killed the launcher directly.
+
+### 2026-10-10 — Claude (Opus 5.5) — T57: Phase 2.5 rules/docs, `R` → `C`, second asset batch
+
+* **Task:** Owner: (1) update the rules and every other doc for reload, power-ups, more maps, per-player colours + local marker, sound; add an AGENTS.md rule to keep docs in sync with requirement changes; (2) `R` = reload, `C` = reconciliation toggle; (3) unnamed assets are CC0; (4) do the texture/gameplay work (T52–T56) before Phase 3. Use and rename the new sounds/assets; respawn, power-up end and UI click stay silent.
+* **Status:** DONE — typecheck clean, **64/64 tests**. No processes left running (headless Chrome renders exited; checked no `chrome.exe` with a scratchpad profile remained). Gameplay itself (T52–T56) is not implemented yet.
+* **Code:** reconciliation hotkey `R` → `C` in `client/src/ui/NetworkLab.tsx` (handler + label), `client/src/ui/compare/CompareView.tsx` (handler + comment), `client/src/ui/compare/ComparePane.tsx` (chip label/tooltip), `client/src/ui/ControlsOverlay.tsx`, `client/src/compare/presets.ts` (Custom caption). `R` is unbound until T53.
+* **Docs:** `GAMERULES.md` (revision note; §1 objective + controls `R`/`M`; §3 maps table + rotation/symmetry rules; §4 new player fields + appearance; §5 speed multiplier; §6 weapons table; new §6a ammo/reload, §6b power-ups; §7 shield + pellet lifetime; §8 shield bubble; §12 bots reload; §13 input `r`; §14 rooms; §15 *Phase 2.5 additions* block; §16 rewritten; new §17 look, §18 sound), `PHASES.md` (status, overview row 2.5, new Phase 2.5 section A0–A6 with checkpoint/exit criteria, Phase 3 S0 covers new state, Phase 4 P3 moved to A0, DoD G4), `README.md` (controls `R`/`M`/`C`, Compare row, repo tree `assets/`, Vimium note, new Credits section), `docs/DEMO_SCRIPT.md` (`R` → `C` ×4), `docs/ASSUMPTIONS.md` (#31–#35), `AGENTS.md` (new "Requirements & Docs Sync" section), `NoBu-Shooter/assets/README.md` (rewritten inventory incl. sounds/pickups), `NoBu-Shooter/assets/CREDITS.md` (all rows filled; owner: unnamed = CC0).
+* **Assets (second batch):** sounds trimmed/normalised to mono 16-bit WAV with Python `wave` (stdlib) → `sfx/{shoot_handgun,shoot_rifle,reload_handgun,reload_rifle,reload_shotgun,hit,pickup}.wav`; renamed `sfx/death.ogg`, `sfx/dry_fire.mp3`. Pickup icons rendered with local Chrome headless (`--screenshot`, transparent background, scratchpad profile) → `sprites/pickups/{shield,rapid_fire,ammo}.png` (cropped from `qubodup_ringicons.svg`), `spread_shot.png` (from `spread.png`), `speed.png` (bolt projected from `speed.obj`). Unused: the ring sheet's health/signal/target icons. Originals moved to the session scratchpad (`assets-original-2/`, temporary).
+* **Notes:** Sound trims were chosen from loudness envelopes, not by listening — check them by ear in T56. No shotgun shot sound was supplied; the rifle shot at 0.7× rate stands in (§18). Weapon/power-up numbers are agent guesses (ASSUMPTIONS #33).
+
+### 2026-10-10 — Claude (Opus 5.5) — T51: Prune and rename owner assets
+
+* **Task:** Owner pasted assets (457 files, 28 MB) and asked to remove what is not needed and rename the rest; also wants reload, powerups, more maps, per-player colours with a local-player marker, and asked about SFX.
+* **Status:** DONE — 262 files kept (~11 MB). Originals backed up in the session scratchpad (`scratchpad/assets-original/`, temporary). No code changes.
+* **Kept + renamed:** Top-Down Survivor (Riley Gombart, CC-BY 3.0) handgun/rifle/shotgun × idle/move/shoot/reload → `sprites/player/body/<weapon>/<anim>/NN.png`; feet idle/run/strafe_left/strafe_right → `sprites/player/feet/<anim>/NN.png`; fx → `fx/{bullet,muzzle_flash_strip4,shield_bubble,spark_strip9}.png`; floors → `textures/floors/{stone_cracked,stone_beige,brick_herringbone}.png` (`stone_beige` downscaled 2048 → 1024 with .NET System.Drawing, 6.8 → 2.2 MB); RC Art Rough Props + Metal Box → `textures/props/*.png`; bullseye → `sprites/drone_target.png`.
+* **Removed:** survivor flashlight + knife sets, all `meleeattack` anims (no melee), `feet/walk` (one move speed); `FloorTilesNormal/Spacular`, `MarbleBeigeNormal` (lighting maps, no diffuse use); `brickfloor2` (duplicate style of herringbone); RC `glass panel`, `GlassBreak*` (destructible obstacles out of scope), `RoughProps all.png` (sheet duplicate), RC info/links txt (source recorded in CREDITS.md).
+* **Files:** `NoBu-Shooter/assets/**` (above), `NoBu-Shooter/assets/README.md` (rewritten: inventory + still-wanted pickups/SFX), `NoBu-Shooter/assets/CREDITS.md` (licences; 8 rows TODO for the owner), `log.md` (T51–T56).
+* **Notes:** Reload, ammo, power-ups and multiple weapons are listed under GAMERULES §16 "Deliberately NOT included", and `R` is the reconciliation toggle; T53/T54 wait for the owner. `.gitignore` unchanged (assets are tracked).
+
+### 2026-10-10 — Claude (Opus 5.5) — T50: Texture drop folder
+
+* **Task:** Owner: before Phase 3, create `NoBu-Shooter/assets/` and list the textures wanted plus where to get them; the owner adds the files.
+* **Status:** DONE — folders and docs only, no code changes. Wiring the files into the game is still Phase 4 P3 (manifest + procedural fallback).
+* **Files:** created `NoBu-Shooter/assets/README.md` (rules, 9 wanted files mapped to the `// TEXTURE:` markers in `ArenaScene.ts`), `NoBu-Shooter/assets/CREDITS.md` (licence table), `NoBu-Shooter/assets/{sprites,fx,textures}/.gitkeep`; edited `PHASES.md` P3 (path `client/public/assets/` → `NoBu-Shooter/assets/`), `log.md`.
+* **Notes:** Assets are tracked in git (not dependencies); `.gitignore` unchanged. Remote players use 8 colours, so the player sprite should be grey/white and tinted at runtime.
+
+### 2026-10-10 — Claude (Opus 5.5) — T49: Merge branch `game` (bug fixes T46–T48) into `main`
+
+* **Task:** Owner: the bug-fix commit `818e7c4` on `game` ("bug fix run 09-10-2026") was never merged; Phase 2 (`game-phase2plus`, PR #3) and T45 were built without it. Fetch, merge `game` into `main`, make the overlaps coherent, verify startup, commit.
+* **Status:** DONE — typecheck clean, **64/64 tests**, smoke PASSED (Nightmare 61 Hz; 4 movers exactly on their paths), `npm run demo` starts all four services, browser check 23/23 (scratchpad `playwright-core` 1.48.2 + local Chrome, NOT in the repo) + Esc menu scroll at 1280×380. Demo stopped; ports 5173/8080/9000/9001 clear; no node / headless Chrome left.
+* **Git:** `git fetch --all --prune`; T45 (uncommitted on `game-phase2plus`) stashed (`stash@{0}`, also saved as a patch in the session scratchpad); local `main` fast-forwarded 31ba8fe → 18a29b0 (= `origin/main`); `git merge --no-ff --no-commit origin/game` → 14 conflicts, resolved by hand; T45 folded back in; one merge commit on local `main` (not pushed).
+* **Resolution (what was kept from `game`):**
+  - T46 keys: `client/src/game/input.ts` (page-level tracker by `KeyboardEvent.code`) now drives Quick Match in `ArenaScene`; Phaser keyboard disabled in `GameContainer` (`input: { keyboard: false }`); `pointerupoutside` releases fire. The A/B-only parts (shared `PointerState`, `hidePlayersOf`, absolute-rAF tick stepping) were dropped: Phase 2's `InputDriver` + `dimOthers` already cover them. `InputDriver` now reuses `movementCode` / `keysFromCodes` / `isTypingTarget`.
+  - Hotkeys in `NetworkLab`, `EmulatorControls`, `CompareView` (and movement in `InputDriver`) use `isTypingTarget`: a focused slider/checkbox no longer swallows `Tab`, `1`–`5`, `P`/`R`/`I`/`G` or movement (arrows no longer nudge the slider). Main still had this bug.
+  - T47 leave: `Hud` ◄ LEAVE MATCH + clickable action bar + ◄ BACK TO MENU on the connection overlay; `store.resetSession()`; Esc/F1 only in the match view. Merged with T45: one handler (`handleLeaveMatch`, T45's duplicate `handleExitToMenu` dropped), one prop (`onLeave`), one Esc-menu button **◄ LEAVE MATCH — BACK TO MAIN MENU** at the end of the menu (T45 placement), T45's fixed/scrollable modal layout in `SettingsPanel` and `ControlsOverlay`.
+  - T48: `EmulatorClient` stale-socket guard (StrictMode) kept as is. Lab fixed spawn kept but **moved (640, 520) → (880, 360)**: the old point lies on Phase 2's zigzag mover lane (≈ 32 px); the new one is ≥ 108 px from every mover path and clear of obstacles (new test in `tests/movers.test.ts`). `RoomCfg` now has `movers` + `spawn`. `ABCompare.tsx` stays deleted; `NetworkLab`'s `compareClients` mode dropped (Compare has its own dock).
+* **Files:** `NoBu-Shooter/client/src/game/{ArenaScene.ts,GameContainer.tsx,input.ts}` (input.ts: `PointerState` removed, header updated), `client/src/compare/InputDriver.ts`, `client/src/net/EmulatorClient.ts`, `client/src/ui/{App,ControlsOverlay,EmulatorControls,Hud,NetworkLab,SettingsPanel}.tsx`, `client/src/ui/compare/CompareView.tsx`, `client/src/ui/store.ts`, `server/src/game/room.ts`, `shared/src/config/game.{json,ts}`, tests `input.test.ts` (new from `game`), `movers.test.ts` (+lab spawn clearance), `netcode.test.ts` (twin tests renamed for Compare), `rules.test.ts`; docs `README.md` (64 tests, leave row, Compare row moved back inside the controls table — it sat after the "Latencies" line and rendered as stray text), `GAMERULES.md` §14 + §15 (rooms block synced with `game.json`: movers, `lab` block, spawn), `PHASES.md` (stray `@@` in the title from `818e7c4`; status + Phase 2 row → done), `docs/ASSUMPTIONS.md` (#18 + new #28–#30), `docs/DEMO_SCRIPT.md` §8, `docs/PROTOCOL.md` (lab spawn), `docs/PHASE2_PLAN.md` §9, `log.md` (T45 entry restored from the stash, T46–T48 renumbered, this entry).
+* **Notes:** The browser probe must send `ping`s — the server drops silent connections after 5 s (`NET.timeoutMs`); the first run's failures were the probe, not the game. The Phase 2 entry below mentions a PHASES.md "Result table"; it was never committed (not in `127fc29`, `7ff1aaa` or `origin/main`) and was not reconstructed.
+
+### 2026-10-10 — Claude (Opus 5.5) — T45: Esc/F1 menus didn't scroll; add Back to main menu
+
+* **Task:** Owner report: no way back to the main menu from Quick Match; the Esc and F1 menus couldn't be scrolled
+* **Status:** DONE — client typecheck clean, 57/57 tests, browser-verified at 1280×600 (F1 scrolls 0 → 168 px with the wheel; the Esc menu shows the new button; clicking it returns to the landing page, the server logs the player leaving, and a second Quick Match starts normally; no console errors). Demo stopped, ports clear.
+* **Cause:** both modals use the `.overlay` class, which sets `pointer-events: none` (meant for HUD text overlays). It is inherited, so wheel events went through the modal to the game. The Settings modal also had no height limit or scroll. There was no back-to-menu button anywhere in Quick Match (none had been removed).
+* **Files:** `NoBu-Shooter/client/src/ui/SettingsPanel.tsx` (overlay `pointerEvents: 'auto'`, `position: fixed`, modal `maxHeight: 100%` + `overflowY: auto`; new `onExitToMenu` prop and **◄ BACK TO MAIN MENU** button), `NoBu-Shooter/client/src/ui/ControlsOverlay.tsx` (same overlay/scroll fix), `NoBu-Shooter/client/src/ui/App.tsx` (`handleExitToMenu`: closes modals, drops the clients, whose effect cleanups disconnect them, then shows the landing page), `docs/DEMO_SCRIPT.md` §8 step 1, `README.md` controls table.
 
 ### 2026-10-09 — Claude (Opus 5.5) — Phase 2 implementation (T31, T38–T44)
 
@@ -110,6 +196,31 @@ Shared context for every agent working in this directory. Read this file **befor
   - Plan decisions D1–D7: movers as `PlayerSnap` with `mover` field (outside `state.players`); mover paths pure functions of server time (`shared/src/sim/movers.ts`); remote error = lag / wobble / frozen % against the exact true position (a single mean error would rate interpolation worse: ≈ 30 px vs ≈ 13 px at 50 ± 30 ms); reference pane = spectator (`hello.spectate`), always connected as the server clock; one shared `InputDriver` for all panes; one-setting comparison presets (Prediction preset now ≈ 340 ms vs 17 ms, not 236 ms); 16:9-exact pane layout + dock.
   - Mover paths and pane layouts checked with a scratchpad script against `game.json` (clearance ≥ 20 px; layouts at 1280×720 / 1920×1080).
 * **Notes / Errors:** none. The startup git snapshot listed untracked `client/src/game/input.ts` / `tests/input.test.ts`; they do not exist on this branch (snapshot was stale).
+
+### 2026-10-09 — Claude (Opus 5.5) — Bug fixes T37–T39 (outside the phase plan)
+
+* **Task:** `D` key not moving right; no way back to the landing page; A/B panes not mirrored / emulator settings not applied to both panes
+* **Status:** DONE — 33/33 tests, typecheck clean, smoke PASSED (Nightmare, 60 Hz), browser-verified in Chrome (scratchpad Playwright script, 26 checks pass), all ports clear
+* **Findings:**
+  - T37: in headless Chrome `D` already worked; the user's Chrome Profile 15 has **Vimium 2.4.2**, which maps `d` (and `r` reload, `p`, digits) and swallows the keydown before any page code. Not fixable from the page → README troubleshooting. Independently, Phaser's keyboard manager `preventDefault`s captured keys and skips already-prevented events, so a second canvas never got WASD/arrows (pane B in A/B sent only `k=0`).
+  - T38: no leave control existed; also `.hud`/`.overlay` have `pointer-events: none`, so the HUD CONTROLS/SETTINGS buttons and the Settings/Controls modals were never clickable.
+  - T39: A/B players spawned at opposite spawn points and each pane drew the other twin as a remote; pane B got no keys; aim came only from the hovered canvas; the Lab's P/R/I/G/nudge silently acted on pane B only; `EmulatorClient` under StrictMode leaked a 2nd control socket (stale onclose → reconnect) and flashed "EMULATOR OFF"; with 10 % loss and no redundancy the twins drift ~40 px apart.
+* **Files (created):** `NoBu-Shooter/client/src/game/input.ts` (page-level movement keys by `KeyboardEvent.code`, capture phase, blur release; shared `PointerState`), `NoBu-Shooter/tests/input.test.ts`
+* **Files (edited):**
+  - `client/src/game/ArenaScene.ts` — uses `input.ts`; 60 Hz sim + 30 Hz send on absolute rAF tick boundaries (A/B panes step together; ≤ 6 ticks catch-up); `hidePlayersOf`; `pointerupoutside` releases fire
+  - `client/src/game/GameContainer.tsx` — `pointer`/`hidePlayersOf` props; Phaser `input.keyboard: false`
+  - `client/src/net/EmulatorClient.ts` — stale-socket guard, retry timer cleared on close, status `connecting`/`offline`
+  - `client/src/ui/App.tsx` — `handleLeaveMatch`; store reset on client teardown; Esc/F1 only in match view; `?` key fixed
+  - `client/src/ui/Hud.tsx` — ◄ LEAVE MATCH, clickable action bar, ◄ BACK TO MENU in the connection overlay
+  - `client/src/ui/SettingsPanel.tsx`, `ControlsOverlay.tsx` — leave button; modals take clicks (`pointerEvents: 'auto'`)
+  - `client/src/ui/store.ts` — `resetSession()`
+  - `client/src/ui/NetworkLab.tsx` — `compareClients` mode (fixed per-pane netcode, redundancy + nudge to both panes, P/R/I/G off); hotkeys ignore only text fields
+  - `client/src/ui/ABCompare.tsx` — twins (shared pointer, hidden twin, redundancy on), ⟲ RE-SYNC TWINS, per-pane metrics bar (+ack, loss ↑↓ per session, bw)
+  - `server/src/game/room.ts` — `spawnFor()`: fixed `rooms.lab.spawn` for lab
+  - `shared/src/config/game.ts` + `game.json` — `rooms.lab.spawn = (640, 520)`
+  - `tests/rules.test.ts` (+lab twin spawn), `tests/netcode.test.ts` (+2 A/B twin tests; verified the loss one fails with redundancy off: 518.6 vs 559.9 px)
+  - Docs: `README.md` (controls, A/B, Vimium troubleshooting, 33 tests), `GAMERULES.md` §9/§14/§15, `docs/ASSUMPTIONS.md` #18–20, `docs/DEMO_SCRIPT.md` §8, `docs/PROTOCOL.md` (lab spawn), `PHASES.md` (Phase 2 groundwork note)
+* **Measured (browser, A/B at Transatlantic):** both panes RTT ≈ 196–198 ms; Input → Screen 237 ms (A) vs 17 ms (B); both emulator sessions at 90/90 ms; twin positions identical after movement (0 px gap, also after Nightmare + redundancy); exactly 1 control socket.
 
 ### 2026-10-09 — Claude (Opus 5.5) — Phase 1 complete (T27–T30, T36) + PHASES.md
 

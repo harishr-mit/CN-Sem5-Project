@@ -10,13 +10,15 @@
  */
 
 import { encodeClient, decodeServer } from '@nobu/shared/protocol';
-import { stepPlayer, moverPath } from '@nobu/shared/sim';
-import type { MoverCfg } from '@nobu/shared/sim';
+import {
+  stepPlayer, moverPath, initialCombat, copyCombat, sameCombat, stepCombat, speedMultiplier, WEAPONS,
+} from '@nobu/shared/sim';
+import type { MoverCfg, MoveCfg, CombatState } from '@nobu/shared/sim';
 import type {
   MsgSnap, PlayerSnap, ProjectileSnap, InputEntry,
-  MsgWelcome, MsgPong, GameEvent, ClientMsg, MoverPattern,
+  MsgWelcome, MsgPong, GameEvent, ClientMsg, MoverPattern, WeaponId, MapId,
 } from '@nobu/shared/protocol';
-import GAME from '@nobu/shared/config/game';
+import GAME, { mapDef } from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
 import { RemoteErrorTracker, type DrawnEntity } from './remoteError.js';
 
@@ -80,6 +82,29 @@ export interface RenderState {
   projectiles: ProjectileSnap[];
 }
 
+/** The local player's weapon state for the HUD (GAMERULES.md §6–§6b). */
+export interface CombatView {
+  weapon: WeaponId;
+  ammo: number;
+  magazine: number;
+  /** Spare rounds; null = unlimited (the default weapon). */
+  reserve: number | null;
+  /** Reload progress 0–1, or null when not reloading. */
+  reload: number | null;
+  /** Remaining power-up weapon time (ms), 0 for the default weapon. */
+  weaponMsLeft: number;
+  speedMsLeft: number;
+  pierceMsLeft: number;
+  dashMsLeft: number;
+  /** A dash is available now (Dash active, not cooling down). */
+  dashReady: boolean;
+  shield: boolean;
+  /** Developer invincibility is on (server-confirmed). */
+  invincible: boolean;
+  /** Times the server corrected the predicted ammo/weapon state (monotonic). */
+  corrections: number;
+}
+
 /** Minimal message transport (WebSocket in the browser, in-process in tests). */
 export interface ClientTransport {
   send(text: string): void;
@@ -125,17 +150,30 @@ interface Listeners {
   snap: (snap: MsgSnap) => void;
   event: (ev: GameEvent) => void;
   correction: (ev: CorrectionEvent) => void;
-  fire: () => void;
+  /** A predicted shot of the local player (prediction on only). */
+  fire: (weapon: WeaponId) => void;
+  /** A predicted reload start (prediction on only). */
+  reload: (weapon: WeaponId) => void;
+  /** Fire pressed with an empty magazine or during a reload (cosmetic click). */
+  dryFire: () => void;
 }
 
-const MOVE_CFG = {
-  speed: GAME.player.speed,
-  radius: GAME.player.radius,
-  arenaW: GAME.arena.width,
-  arenaH: GAME.arena.height,
-  obstacles: GAME.obstacles as unknown as { x: number; y: number; w: number; h: number }[],
-  hz: GAME.sim.hz,
-};
+function moveCfgFor(map: MapId): MoveCfg {
+  return {
+    speed: GAME.player.speed,
+    radius: GAME.player.radius,
+    arenaW: GAME.arena.width,
+    arenaH: GAME.arena.height,
+    obstacles: [...mapDef(map).obstacles],
+    hz: GAME.sim.hz,
+  };
+}
+
+function withSpeed(cfg: MoveCfg, mult: number): MoveCfg {
+  return mult === 1 ? cfg : { ...cfg, speed: cfg.speed * mult };
+}
+
+const TICK_MS = 1000 / GAME.sim.hz;
 
 const MOVER_CFG: MoverCfg = { speed: GAME.lab.moverSpeed, stopGo: GAME.lab.stopGo };
 
@@ -171,6 +209,7 @@ export class NetClient {
   private listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = {
     status: new Set(), welcome: new Set(), snap: new Set(),
     event: new Set(), correction: new Set(), fire: new Set(),
+    reload: new Set(), dryFire: new Set(),
   };
 
   // Connection state
@@ -187,6 +226,24 @@ export class NetClient {
   private seq = 0;
   private lastSentSeq = 0;
   private lastLife = -1;
+
+  // Map geometry for prediction (from the snapshot, GAMERULES.md §3)
+  private map: MapId;
+  private moveCfg: MoveCfg;
+  /** Firing allowed in this room (the lab room is movement-only). */
+  private readonly armed: boolean;
+
+  // Weapon / ammo prediction (shared/src/sim/combat.ts)
+  private combat: CombatState = initialCombat();
+  private serverCombat: CombatState = initialCombat();
+  private combatCorrections = 0;
+  private reloadRequested = false;
+  private dashRequested = false;
+  private prevFireDown = false;
+  /** Developer switch (npm run demo); re-sent after every (re)connect. */
+  private devInvincible = false;
+  /** A PICKUP for us arrived with this snapshot: its state change is not a misprediction. */
+  private pickupArrived = false;
 
   // Snapshot buffer / clock
   private snapBuffer: SnapshotEntry[] = [];
@@ -241,7 +298,6 @@ export class NetClient {
   aimAngle = 0;
   fireDown = false;
 
-  private localFireCooldown = 0;
   private helloTimer: ReturnType<typeof setInterval> | null = null;
   private giveUpTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -265,6 +321,10 @@ export class NetClient {
     this.now = opts.now ?? (() => performance.now());
     this.nonce = Math.random().toString(36).slice(2);
     this.label = `${opts.labelPrefix ?? opts.name}-${this.nonce.slice(0, 4)}`;
+    const roomCfg = GAME.rooms[this.roomName] as { firing: boolean; map?: string };
+    this.armed = roomCfg.firing;
+    this.map = mapDef(roomCfg.map ?? GAME.maps.rotation[0]).id;
+    this.moveCfg = moveCfgFor(this.map);
   }
 
   // ── Events ─────────────────────────────────────────────────
@@ -327,6 +387,9 @@ export class NetClient {
     this.playerId = null;
     this.lastLife = -1;
     this.pendingInputs = [];
+    this.combat = initialCombat();
+    this.serverCombat = initialCombat();
+    this.reloadRequested = false;
     this.inputCreatedAt.clear();
     this.snapBuffer = [];
     this.latestSnap = null;
@@ -396,6 +459,7 @@ export class NetClient {
     this.metricsTimer = setInterval(() => this.updateMetrics(), METRICS_INTERVAL_MS);
 
     this.setStatus('connected');
+    if (this.devInvincible && this.playerId !== null) this.send({ t: 'dev', invincible: true });
     this.emit('welcome', msg.playerId);
   }
 
@@ -425,6 +489,11 @@ export class NetClient {
     this.latestAppliedTick = snap.tick;
     this.latestSnap = snap;
     this.snapshotTimes.push(now);
+    if (snap.match.map && snap.match.map !== this.map) {
+      // New map (only at COUNTDOWN, when nobody moves)
+      this.map = snap.match.map;
+      this.moveCfg = moveCfgFor(this.map);
+    }
 
     // Clock offset: EMA of (server time − local arrival time) (SPEC.md §10.5)
     const sample = snap.st - now;
@@ -444,6 +513,7 @@ export class NetClient {
       this.seenEids.add(ev.eid);
       this.seenEidOrder.push(ev.eid);
       if (this.seenEidOrder.length > SEEN_EVENTS_MAX) this.seenEids.delete(this.seenEidOrder.shift()!);
+      if (ev.type === 'PICKUP' && ev.playerId === this.playerId) this.pickupArrived = true;
       this.emit('event', ev);
     }
 
@@ -459,6 +529,7 @@ export class NetClient {
     this.authX = me.x;
     this.authY = me.y;
     this.recordAck(snap.ack, now);
+    if (snap.me) this.serverCombat = { ...snap.me };
 
     // Step 2: life change = hard reset (spawn / respawn teleport, not a correction)
     if (me.life !== this.lastLife) {
@@ -468,18 +539,38 @@ export class NetClient {
       this.smoothOffsetX = 0;
       this.smoothOffsetY = 0;
       this.pendingInputs = [];
+      this.combat = copyCombat(this.serverCombat);
       return;
     }
 
     // Step 3: drop acknowledged inputs
     this.pendingInputs = this.pendingInputs.filter(i => i.s > snap.ack);
 
+    // Weapon state: replay the pending inputs on the server's state, always
+    // (also with reconciliation off — an ammo counter that never heals would
+    // only confuse). Speed changes movement, so the position replay below
+    // uses the multiplier of each replayed input.
+    const combat = copyCombat(this.serverCombat);
+    const mults: number[] = [];
+    for (const inp of this.pendingInputs) {
+      mults.push(speedMultiplier(combat));
+      stepCombat(combat, this.armed && inp.f === 1, this.armed && inp.r === 1, inp.d === 1, inp.k !== 0);
+    }
+    const pickup = this.pickupArrived;
+    this.pickupArrived = false;
+    if (snap.me && !sameCombat(combat, this.combat)) {
+      // Power-ups are never predicted (GAMERULES.md §6b): adopt them silently
+      if (!pickup && (combat.ammo !== this.combat.ammo || combat.weapon !== this.combat.weapon ||
+          (combat.reloadTicks > 0) !== (this.combat.reloadTicks > 0))) this.combatCorrections++;
+      this.combat = combat;
+    }
+
     if (!this.toggles.reconciliation) return;
 
     // Steps 4–5: replay pending inputs on top of the authoritative state
     const before = { x: this.predictedX, y: this.predictedY };
     let pos = { x: me.x, y: me.y };
-    for (const inp of this.pendingInputs) pos = stepPlayer(pos, inp.k, MOVE_CFG);
+    this.pendingInputs.forEach((inp, i) => { pos = stepPlayer(pos, inp.k, withSpeed(this.moveCfg, mults[i])); });
 
     // With prediction off nothing was predicted, so there is nothing to correct.
     if (!this.toggles.prediction) {
@@ -544,32 +635,61 @@ export class NetClient {
     const alpha = Math.pow(0.5, SIM_STEP_MS / NET.reconcile.smoothHalfLifeMs);
     this.smoothOffsetX *= alpha;
     this.smoothOffsetY *= alpha;
-    if (this.localFireCooldown > 0) this.localFireCooldown -= SIM_STEP_MS;
 
-    if (!matchRunning || !isAlive) return;
+    const pressed = this.fireDown && !this.prevFireDown;
+    this.prevFireDown = this.fireDown;
+    if (!matchRunning || !isAlive) { this.reloadRequested = false; this.dashRequested = false; return; }
 
-    const fire: 0 | 1 = (this.fireDown && this.localFireCooldown <= 0) ? 1 : 0;
-    if (fire) {
-      this.localFireCooldown = GAME.player.fireCooldownMs;
-      this.emit('fire');
-    }
+    // Fire is sent while held: the server and the prediction both apply the
+    // weapon's cooldown and magazine (shared/src/sim/combat.ts). Reload is
+    // re-sent on every input of a predicted reload, so one lost input can't
+    // cancel it (the server ignores it while already reloading or full).
+    const fire: 0 | 1 = this.fireDown && this.armed ? 1 : 0;
+    const reload = this.armed && (this.reloadRequested || this.combat.reloadTicks > 0);
+    this.reloadRequested = false;
+    // Dash: re-sent during the predicted burst, like reload (ignored while bursting/cooling down)
+    const dash = (this.dashRequested && this.combat.dashTicks > 0) || this.combat.dashBurstTicks > 0;
+    this.dashRequested = false;
 
     const inp: InputEntry = {
       s: ++this.seq,
       k: this.keys,
       a: Math.round(this.aimAngle * 1000) / 1000,
       f: fire,
+      ...(reload ? { r: 1 as const } : {}),
+      ...(dash ? { d: 1 as const } : {}),
     };
     const now = this.now();
     this.pendingInputs.push(inp);
     this.inputCreatedAt.set(inp.s, now);
     if (this.unpresentedInputAt === null) this.unpresentedInputAt = now;
 
+    const mult = speedMultiplier(this.combat);
+    const res = stepCombat(this.combat, fire === 1, reload, dash, inp.k !== 0);
     if (this.toggles.prediction) {
-      const pos = stepPlayer({ x: this.predictedX, y: this.predictedY }, inp.k, MOVE_CFG);
+      const pos = stepPlayer({ x: this.predictedX, y: this.predictedY }, inp.k, withSpeed(this.moveCfg, mult));
       this.predictedX = pos.x;
       this.predictedY = pos.y;
+      if (res.fired) this.emit('fire', res.fired);
+      if (res.reloadStarted) this.emit('reload', this.combat.weapon);
     }
+    if (res.dryFire && pressed) this.emit('dryFire');
+  }
+
+  /** Ask for a reload (R). Sent with the next input (GAMERULES.md §6a). */
+  requestReload(): void {
+    this.reloadRequested = true;
+  }
+
+  /** Ask for a dash (Space, Dash power-up). Sent with the next input. */
+  requestDash(): void {
+    this.dashRequested = true;
+  }
+
+  /** Developer invincibility; the server honours it only under `npm run demo`. */
+  setDevInvincible(on: boolean): void {
+    this.devInvincible = on;
+    if (this.connected && this.playerId !== null) this.send({ t: 'dev', invincible: on });
   }
 
   /** Call at inputSendHz (30 Hz) to flush inputs to the server (SPEC.md §10.3). */
@@ -700,7 +820,11 @@ export class NetClient {
       }
       // Respawn teleport or death: don't slide across the arena
       if (lp.life !== hp.life || lp.alive !== hp.alive) players.push(t < 1 ? lp : hp);
-      else players.push({ ...hp, x: lerp(lp.x, hp.x), y: lerp(lp.y, hp.y) });
+      else {
+        // Aim: shortest way round the circle
+        const da = Math.atan2(Math.sin(hp.aim - lp.aim), Math.cos(hp.aim - lp.aim));
+        players.push({ ...hp, x: lerp(lp.x, hp.x), y: lerp(lp.y, hp.y), aim: lp.aim + da * t });
+      }
     }
     const projectiles: ProjectileSnap[] = [];
     for (const hp of hi.projectiles) {
@@ -773,6 +897,33 @@ export class NetClient {
     this.ackDelaySamples = [];
     this.remoteError.reset();
   }
+
+  /** Weapon state to show: predicted with prediction on, the server's otherwise. */
+  get combatView(): CombatView {
+    const c = this.toggles.prediction ? this.combat : this.serverCombat;
+    const w = WEAPONS[c.weapon];
+    const me = this.latestSnap?.players.find((p) => p.id === this.playerId);
+    return {
+      weapon: c.weapon,
+      ammo: c.ammo,
+      magazine: w.magazine,
+      reserve: c.reserve < 0 ? null : c.reserve,
+      reload: c.reloadTicks > 0 ? 1 - c.reloadTicks / w.reloadTicks : null,
+      weaponMsLeft: c.weaponTicks * TICK_MS,
+      speedMsLeft: c.speedTicks * TICK_MS,
+      pierceMsLeft: c.pierceTicks * TICK_MS,
+      dashMsLeft: c.dashTicks * TICK_MS,
+      dashReady: c.dashTicks > 0 && c.dashCooldownTicks === 0 && c.dashBurstTicks === 0,
+      shield: me?.shield ?? false,
+      invincible: me?.invincible ?? false,
+      corrections: this.combatCorrections,
+    };
+  }
+
+  /** Predicted weapon state (tests). */
+  get predictedCombat(): CombatState { return copyCombat(this.combat); }
+  get mapId(): MapId { return this.map; }
+  get room(): 'main' | 'lab' { return this.roomName; }
 
   get isConnected(): boolean { return this.connected; }
   get isSpectator(): boolean { return this.spectating; }

@@ -263,7 +263,7 @@ The phase rules from `PHASES.md` apply, plus these:
 - The packet strip in Compare, name tags (Phase 4).
 - Choosing a sync model per pane (Phase 3; `PaneSpec.sync` is reserved).
 - Presenter hotkeys for comparison presets (Phase 4).
-- An "align players" lab command that puts every pane's player on the same spawn point. It would show that prediction does not change when inputs reach the server. Easy to add later; optional.
+- An "align players" lab command that puts every pane's player on the same spawn point. It would show that prediction does not change when inputs reach the server. Easy to add later; optional. *(Done differently on 2026-10-10: the merged `game` bug fix spawns every lab player at `rooms.lab.spawn`; `ASSUMPTIONS.md` #29.)*
 
 ## 10. Deviations from this plan
 

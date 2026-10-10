@@ -9,12 +9,13 @@ import GAME from '@nobu/shared/config/game.js';
 
 type Rng = () => number;
 
-const spawnPoints: readonly { x: number; y: number }[] = GAME.spawnPoints;
 const MIN_SEP = GAME.spawnMinSeparationPx;
 
+/** `spawnPoints` are the current map's (GAMERULES.md §3). */
 export function pickSpawnPoint(
   players: Map<number, PlayerState>,
   rng: Rng,
+  spawnPoints: readonly { x: number; y: number }[],
   excludeId?: number
 ): { x: number; y: number } {
   const alivePositions: { x: number; y: number }[] = [];

@@ -46,7 +46,7 @@ describe('Wire Protocol Serialization & Validation (SPEC.md §8)', () => {
       tick: 400,
       st: 13340.5,
       ack: 99,
-      match: { state: 'RUNNING', timeLeftMs: 120000, results: null },
+      match: { state: 'RUNNING', map: 'neon', timeLeftMs: 120000, results: null },
       players: [
         {
           id: 1,
@@ -59,9 +59,16 @@ describe('Wire Protocol Serialization & Validation (SPEC.md §8)', () => {
           protectMs: 0,
           respawnMs: 0,
           score: 3,
+          aim: 0.5,
+          weapon: 'shotgun',
+          reloading: false,
+          shield: true,
+          fast: false,
         },
       ],
       projectiles: [],
+      pickups: [{ id: 7, x: 440, y: 360, kind: 'dash' }],
+      me: { weapon: 'shotgun', weaponTicks: 300, ammo: 4, reserve: 5, reloadTicks: 0, cooldownTicks: 10, speedTicks: 0, pierceTicks: 0, dashTicks: 200, dashBurstTicks: 0, dashCooldownTicks: 30 },
       events: [],
     });
 
@@ -79,6 +86,12 @@ describe('Wire Protocol Serialization & Validation (SPEC.md §8)', () => {
     expect(decodeClient(JSON.stringify({ t: 'unknown_type' }))).toBeNull();
     expect(decodeClient(JSON.stringify({ t: 'hello', v: 999 }))).toBeNull();
     expect(decodeClient(JSON.stringify({ t: 'input', inputs: 'not-an-array' }))).toBeNull();
+    // Reload flag (GAMERULES.md §6a): optional, 0 or 1
+    expect(decodeClient(JSON.stringify({ t: 'input', inputs: [{ s: 1, k: 0, a: 0, f: 0, r: 1 }] }))).not.toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'input', inputs: [{ s: 1, k: 0, a: 0, f: 0, r: 2 }] }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'input', inputs: [{ s: 1, k: 8, a: 0, f: 0, d: 1 }] }))).not.toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'dev', invincible: true }))).toEqual({ t: 'dev', invincible: true });
+    expect(decodeClient(JSON.stringify({ t: 'dev', invincible: 'yes' }))).toBeNull();
   });
 
   it('validates hello.spectate and the lab message (PHASES.md C2, C3)', () => {

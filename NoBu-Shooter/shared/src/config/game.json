@@ -13,32 +13,143 @@
     "speed": 200,
     "respawnDelayMs": 2000,
     "spawnProtectionMs": 1000,
-    "fireCooldownMs": 300,
     "maxNameLength": 12
   },
-  "projectile": { "radius": 4, "speed": 600, "lifetimeMs": 2000 },
+  "projectile": { "radius": 4, "speed": 600 },
+  "weapons": {
+    "default": "handgun",
+    "handgun": { "magazine": 8,  "fireCooldownMs": 300, "reloadMs": 1200, "pellets": 1, "spreadDeg": 0,  "lifetimeMs": 2000 },
+    "rifle":   { "magazine": 30, "fireCooldownMs": 100, "reloadMs": 1500, "pellets": 1, "spreadDeg": 0,  "lifetimeMs": 2000 },
+    "shotgun": { "magazine": 5,  "fireCooldownMs": 700, "reloadMs": 1000, "pellets": 3, "spreadDeg": 20, "lifetimeMs": 600 }
+  },
+  "powerups": {
+    "kinds": ["rapid_fire", "spread_shot", "shield", "speed", "piercing", "dash"],
+    "weights": { "rapid_fire": 1, "spread_shot": 2, "shield": 2, "speed": 4, "piercing": 2, "dash": 3 },
+    "radius": 14,
+    "perPlayers": 2,
+    "respawnMs": 10000,
+    "obstacleClearancePx": 24,
+    "edgeMarginPx": 40,
+    "minSeparationPx": 160,
+    "playerClearancePx": 80,
+    "hudKeepOut": [
+      { "id": "score",      "x": 0,    "y": 0,   "w": 120, "h": 90  },
+      { "id": "timer",      "x": 540,  "y": 0,   "w": 200, "h": 90  },
+      { "id": "scoreboard", "x": 1060, "y": 0,   "w": 220, "h": 150 },
+      { "id": "buttons",    "x": 0,    "y": 640, "w": 440, "h": 80  },
+      { "id": "weapon",     "x": 1060, "y": 600, "w": 220, "h": 120 }
+    ],
+    "weaponMs": 10000,
+    "speedMs": 6000,
+    "speedMultiplier": 1.5,
+    "piercingMs": 8000,
+    "dashMs": 10000,
+    "dash": { "multiplier": 3, "burstMs": 150, "cooldownMs": 2000 }
+  },
   "scoring": { "pointsPerKill": 1 },
-  "obstacles": [
-    { "id": "center",    "x": 600,  "y": 310, "w": 80,  "h": 100 },
-    { "id": "pillarTL",  "x": 240,  "y": 140, "w": 80,  "h": 80  },
-    { "id": "pillarTR",  "x": 960,  "y": 140, "w": 80,  "h": 80  },
-    { "id": "pillarBL",  "x": 240,  "y": 500, "w": 80,  "h": 80  },
-    { "id": "pillarBR",  "x": 960,  "y": 500, "w": 80,  "h": 80  },
-    { "id": "wallL",     "x": 120,  "y": 330, "w": 120, "h": 60  },
-    { "id": "wallR",     "x": 1040, "y": 330, "w": 120, "h": 60  },
-    { "id": "barTop",    "x": 540,  "y": 100, "w": 200, "h": 24  },
-    { "id": "barBottom", "x": 540,  "y": 596, "w": 200, "h": 24  }
-  ],
-  "spawnPoints": [
-    { "x": 80,   "y": 80  },
-    { "x": 1200, "y": 80  },
-    { "x": 80,   "y": 640 },
-    { "x": 1200, "y": 640 },
-    { "x": 640,  "y": 52  },
-    { "x": 640,  "y": 668 },
-    { "x": 60,   "y": 360 },
-    { "x": 1220, "y": 360 }
-  ],
+  "maps": {
+    "rotation": ["neon", "warehouse", "plaza", "overgrown"],
+    "neon": {
+      "name": "Neon",
+      "floor": null,
+      "obstacles": [
+        { "id": "center",    "x": 600,  "y": 310, "w": 80,  "h": 100 },
+        { "id": "pillarTL",  "x": 240,  "y": 140, "w": 80,  "h": 80  },
+        { "id": "pillarTR",  "x": 960,  "y": 140, "w": 80,  "h": 80  },
+        { "id": "pillarBL",  "x": 240,  "y": 500, "w": 80,  "h": 80  },
+        { "id": "pillarBR",  "x": 960,  "y": 500, "w": 80,  "h": 80  },
+        { "id": "wallL",     "x": 120,  "y": 330, "w": 120, "h": 60  },
+        { "id": "wallR",     "x": 1040, "y": 330, "w": 120, "h": 60  },
+        { "id": "barTop",    "x": 540,  "y": 100, "w": 200, "h": 24  },
+        { "id": "barBottom", "x": 540,  "y": 596, "w": 200, "h": 24  }
+      ],
+      "spawnPoints": [
+        { "x": 80,   "y": 80  },
+        { "x": 1200, "y": 80  },
+        { "x": 80,   "y": 640 },
+        { "x": 1200, "y": 640 },
+        { "x": 640,  "y": 52  },
+        { "x": 640,  "y": 668 },
+        { "x": 60,   "y": 360 },
+        { "x": 1220, "y": 360 }
+      ]
+    },
+    "warehouse": {
+      "name": "Warehouse",
+      "floor": "stone_cracked",
+      "obstacles": [
+        { "id": "cage",     "x": 592,  "y": 312, "w": 96,  "h": 96,  "prop": "cage_storage" },
+        { "id": "crateTL",  "x": 300,  "y": 150, "w": 96,  "h": 96,  "prop": "crate_metal" },
+        { "id": "crateTR",  "x": 884,  "y": 150, "w": 96,  "h": 96,  "prop": "crate_metal" },
+        { "id": "crateBL",  "x": 300,  "y": 474, "w": 96,  "h": 96,  "prop": "crate_metal" },
+        { "id": "crateBR",  "x": 884,  "y": 474, "w": 96,  "h": 96,  "prop": "crate_metal" },
+        { "id": "boxesL",   "x": 150,  "y": 280, "w": 80,  "h": 160, "prop": "box_storage" },
+        { "id": "boxesR",   "x": 1050, "y": 280, "w": 80,  "h": 160, "prop": "box_storage" },
+        { "id": "boxesTop", "x": 560,  "y": 100, "w": 160, "h": 80,  "prop": "box_storage" },
+        { "id": "boxesBot", "x": 560,  "y": 540, "w": 160, "h": 80,  "prop": "box_storage" }
+      ],
+      "spawnPoints": [
+        { "x": 70,   "y": 70  },
+        { "x": 1210, "y": 70  },
+        { "x": 70,   "y": 650 },
+        { "x": 1210, "y": 650 },
+        { "x": 640,  "y": 40  },
+        { "x": 640,  "y": 680 },
+        { "x": 50,   "y": 360 },
+        { "x": 1230, "y": 360 }
+      ]
+    },
+    "plaza": {
+      "name": "Plaza",
+      "floor": "stone_beige",
+      "obstacles": [
+        { "id": "tank",       "x": 599,  "y": 293, "w": 82,  "h": 134, "prop": "tank_fuel" },
+        { "id": "barrierTL",  "x": 330,  "y": 180, "w": 72,  "h": 96,  "prop": "barrier_metal" },
+        { "id": "barrierTR",  "x": 878,  "y": 180, "w": 72,  "h": 96,  "prop": "barrier_metal" },
+        { "id": "barrierBL",  "x": 330,  "y": 444, "w": 72,  "h": 96,  "prop": "barrier_metal" },
+        { "id": "barrierBR",  "x": 878,  "y": 444, "w": 72,  "h": 96,  "prop": "barrier_metal" },
+        { "id": "barrelsTop", "x": 571,  "y": 110, "w": 138, "h": 68,  "prop": "barrel_oil" },
+        { "id": "barrelsBot", "x": 571,  "y": 542, "w": 138, "h": 68,  "prop": "barrel_oil" },
+        { "id": "toxicL",     "x": 150,  "y": 326, "w": 46,  "h": 68,  "prop": "barrel_toxic" },
+        { "id": "toxicR",     "x": 1084, "y": 326, "w": 46,  "h": 68,  "prop": "barrel_toxic" }
+      ],
+      "spawnPoints": [
+        { "x": 70,   "y": 70  },
+        { "x": 1210, "y": 70  },
+        { "x": 70,   "y": 650 },
+        { "x": 1210, "y": 650 },
+        { "x": 640,  "y": 45  },
+        { "x": 640,  "y": 675 },
+        { "x": 50,   "y": 360 },
+        { "x": 1230, "y": 360 }
+      ]
+    },
+    "overgrown": {
+      "name": "Overgrown",
+      "floor": "brick_herringbone",
+      "obstacles": [
+        { "id": "cabinets",  "x": 596,  "y": 304, "w": 88,  "h": 112, "prop": "cabinet_electric_1" },
+        { "id": "rowTop",    "x": 530,  "y": 150, "w": 220, "h": 56,  "prop": "cabinet_electric_2" },
+        { "id": "rowBot",    "x": 530,  "y": 514, "w": 220, "h": 56,  "prop": "cabinet_electric_2" },
+        { "id": "boxesTL",   "x": 260,  "y": 120, "w": 80,  "h": 160, "prop": "box_storage" },
+        { "id": "boxesTR",   "x": 940,  "y": 120, "w": 80,  "h": 160, "prop": "box_storage" },
+        { "id": "boxesBL",   "x": 260,  "y": 440, "w": 80,  "h": 160, "prop": "box_storage" },
+        { "id": "boxesBR",   "x": 940,  "y": 440, "w": 80,  "h": 160, "prop": "box_storage" },
+        { "id": "toxicL",    "x": 120,  "y": 326, "w": 46,  "h": 68,  "prop": "barrel_toxic" },
+        { "id": "toxicR",    "x": 1114, "y": 326, "w": 46,  "h": 68,  "prop": "barrel_toxic" }
+      ],
+      "spawnPoints": [
+        { "x": 70,   "y": 70  },
+        { "x": 1210, "y": 70  },
+        { "x": 70,   "y": 650 },
+        { "x": 1210, "y": 650 },
+        { "x": 640,  "y": 60  },
+        { "x": 640,  "y": 660 },
+        { "x": 50,   "y": 360 },
+        { "x": 1230, "y": 360 }
+      ]
+    }
+  },
   "spawnMinSeparationPx": 64,
   "bots": {
     "targetParticipants": 4,
@@ -49,8 +160,8 @@
     "seed": 1337
   },
   "rooms": {
-    "main": { "bots": true,  "firing": true,  "timed": true,  "movers": false },
-    "lab":  { "bots": false, "firing": false, "timed": false, "movers": true  }
+    "main": { "bots": true,  "firing": true,  "timed": true,  "movers": false, "powerups": true },
+    "lab":  { "bots": false, "firing": false, "timed": false, "movers": true,  "powerups": false, "map": "neon", "spawn": { "x": 880, "y": 360 } }
   },
   "lab": {
     "moverSpeed": 200,

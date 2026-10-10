@@ -1,10 +1,10 @@
 # NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
-**Status:** Phase 1 done (2026-10-09). Phase 2 in progress — implementation plan `docs/PHASE2_PLAN.md`, decisions D1–D7 approved by the owner on 2026-10-09.
+**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. **Next: Phase 3.**
 **Replaces:** `ROADMAP.md` (draft of 2026-10-09). The v1 build spec is archived at `docs/archive/SPEC-v1.md`. `GAMERULES.md` remains the source of truth for gameplay.
 
-The project moves in six phases. Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
+The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10-10. Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
 
 ---
 
@@ -23,9 +23,10 @@ The project moves in six phases. Each phase ends with something you can **show**
 |---|---|---|---|---|
 | 0 | v1 build | Game, emulator and Network Lab boot; visually good, but key numbers are wrong | — | done (before 2026-10-09) |
 | 1 | **Correct core netcode** | Prediction/reconciliation demo with honest numbers: 0 corrections on a clean network, corrections under loss, A/B shows 17 ms vs 236 ms | G2 | **done 2026-10-09** |
-| 2 | **Compare view + scripted movers** | 2–4 synchronised panes plus a ground-truth reference pane, with moving targets that make interpolation visible | G1 foundation, G2 | in progress |
-| 3 | **Sync models: snapshot vs state** | Full snapshots vs delta snapshots vs state sync with extrapolation, side by side, with a live bandwidth chart | G1 | planned |
-| 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena, texture-ready assets | G4 | planned |
+| 2 | **Compare view + scripted movers** | 2–4 synchronised panes plus a ground-truth reference pane, with moving targets that make interpolation visible | G1 foundation, G2 | **done 2026-10-09** |
+| 2.5 | **Gameplay + textures** | Textured survivor avatars with colour rings and a local-player marker, four rotating maps, ammo + reload, five power-ups, sound effects | G4 (and netcode material for G1/G2) | **done 2026-10-10** |
+| 3 | **Sync models: snapshot vs state** | Full snapshots vs delta snapshots vs state sync with extrapolation, side by side, with a live bandwidth chart | G1 | **next** |
+| 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena and UI | G4 | planned |
 | 5 | **Realistic transport + standalone emulator** | Real UDP between Node "network players", emulator and server. The emulator dashboard works with no game running | G3 | planned |
 | 6 | **Lockstep + final verification** | Deterministic lockstep freezing under 2–5 % loss beside snapshot sync. Full rehearsal and docs | G1, all | planned |
 
@@ -139,6 +140,34 @@ R10 covered:
 
 ---
 
+## Phase 2.5 — Gameplay + textures (owner request) ✅ (2026-10-10)
+
+**Goal:** the game looks and plays like a finished shooter before the sync-model work, so Phase 3's encoders are built against the final game state (weapons, ammo, pickups, map id) instead of being reworked later.
+
+Rules: `GAMERULES.md` revision 2026-10-10 (§3 maps, §6 weapons, §6a ammo/reload, §6b power-ups, §17 look, §18 sound). Assets: `NoBu-Shooter/assets/` (`README.md` = inventory, `CREDITS.md` = licences). The `lab` room and the Compare view stay movement-only on the `neon` map, so the Phase 2 demos are unchanged.
+
+| ID | Task | log.md |
+|---|---|---|
+| A0 | **Asset pipeline** (was Phase 4 P3): Vite serves `NoBu-Shooter/assets/`; a `preload()` manifest loads textures, animations and sounds; every key falls back to the procedural drawing (or silence) when its file is missing. The `// TEXTURE:` markers stay. | T52 |
+| A1 | **Player look**: survivor body + feet animations per weapon/state, rotated to aim; colour ring + coloured name tag; cyan shoulder marker for the local player; shield bubble for spawn protection; bullet, muzzle flash, spark FX; drone target for movers. | T52 |
+| A2 | **Maps**: `maps` config (`neon` + `warehouse`, `plaza`, `overgrown`), floor + obstacle skins, rotation per match, map id in the snapshot; tests for clearance and symmetry. | T55 |
+| A3 | **Weapons, ammo, reload**: `weapons` config, input flag `r`, server ammo/reload/cooldown, shotgun fan, client-predicted ammo with reconciliation, HUD ammo + reload bar; key `R` (reconciliation moved to `C`). | T53 |
+| A4 | **Power-ups**: pads, seeded spawns, server-decided pickups, five effects, speed in prediction, HUD timers, pickup icons. | T54 |
+| A5 | **Sound**: event → sound map (§18), distance volume, voice cap, mute `M`, Settings volume, audio unlock on first click. Respawn, power-up end and UI clicks are silent. | T56 |
+| A6 | Protocol + docs + credits: `docs/PROTOCOL.md` (input `r`, player fields, pickups, map id), README controls/credits, Credits screen, `docs/DEMO_SCRIPT.md`, `docs/ASSUMPTIONS.md`. | T52–T56 |
+
+Suggested order: A0 + A1 → A2 → A3 → A4 → A5 (A6 alongside each).
+
+**Demo checkpoint:** Quick Match on each map in turn: distinct-looking players with colour rings and your marker, reload with `R`, grab Rapid Fire / Spread Shot and see the rifle/shotgun animations and sounds. Under Transatlantic, run over a contested pickup and watch the server give it to the other player; the HUD ammo counter corrects itself when a predicted shot is rejected.
+
+**Exit criteria:** the phase rules; Quick Match stays at ≥ 55 fps on the dev laptop with 8 players and textures; snapshot size growth from the new fields recorded in `docs/ASSUMPTIONS.md` (it feeds the Phase 3 bandwidth baseline); smoke passes under Nightmare with bots firing and reloading.
+
+**Result (met):** 96 tests (new: `combat`, `maps`, Phase 2.5 rules, weapon-prediction harness — 0 ammo corrections on a clean link, corrections that converge at 20 % loss), typecheck clean, smoke passes under Nightmare with the new ammo/reload/bot-shot/pad/map checks. Browser (local Chrome): Quick Match on all four maps at 60 fps (4 players), no console errors, every asset loaded; Compare 2 panes and 4 panes + REF at 60 fps at 1920×1080 with unchanged Phase 2 numbers. Snapshot growth +36 % (ASSUMPTIONS #40). Owner change during the phase: shotgun = 3 pellets with a 20° spread. Not measured: 8 human players (bots fill to 4).
+
+**Revision 2 (owner, 2026-10-10, T58–T60):** power-ups at random spots, capped at ⌊players / 2⌋ with a 10 s refill and weighted kinds; power-up weapons = 1 + 1 magazines; pistol reloads forever; Ammo replaced by Piercing + Dash; no colour rings in Compare, ghost replaces the local ring in Quick Match; developer Invincible switch under `npm run demo` only. 105 tests, smoke and a browser check pass.
+
+---
+
 ## Phase 3 — Sync models: snapshot vs state (G1)
 
 **Goal:** show the trade-offs between synchronisation strategies with measurements.
@@ -155,7 +184,7 @@ R10 covered:
 
 | ID | Task |
 |---|---|
-| S0 | Sync-model interface (`shared/src/sync/`): a server encoder and client decoder pair, selected per connection in `hello` (`sync: "full" \| "delta" \| "state"`). |
+| S0 | Sync-model interface (`shared/src/sync/`): a server encoder and client decoder pair, selected per connection in `hello` (`sync: "full" \| "delta" \| "state"`). Encoders cover the Phase 2.5 state too (`players[].aim/weapon/reloading/shield/fast`, `me`, `pickups`, `match.map`). Baseline: full snapshots ≈ 2.1 kB / ≈ 510 kbps in a 4-player match. |
 | S1 | Protocol messages `snapDelta`, `state` and client `snapAck`, with validators. Documented in `docs/PROTOCOL.md`. |
 | S2 | Delta encoder/decoder with baseline tracking and a full-snapshot fallback. |
 | S3 | State encoder (position + velocity, configurable rate) and an extrapolating client renderer with error blending. |
@@ -176,7 +205,7 @@ R10 covered:
 |---|---|
 | P1 | **Presenter mode**: a scripted sequence of steps (data file mirroring `docs/DEMO_SCRIPT.md`). Each step sets presets, toggles, the Compare layout and the sync model automatically, and shows a caption ("Watch the amber ghost lag behind…"). `N` / `B` move to the next or previous step; `H` hides the captions. Optional: different network conditions per pane (the emulator already targets sessions by label). |
 | P2 | Arena: name tags, remote aim chevrons, death markers, a respawn pulse, glow/bloom (Phaser FX) with automatic degrade, and consistent player colours across the scoreboard and arena. |
-| P3 | **Texture-ready assets**: a `preload()` manifest (`client/public/assets/manifest.json`). Each sprite key falls back to the current procedural drawing when its file is missing, so new textures drop in without code changes. The `// TEXTURE:` markers stay. |
+| P3 | ~~Texture-ready assets~~ — moved to Phase 2.5 (A0). |
 | P4 | Lab panel: collapsible sections, no scroll at 1920×1080, compact at 1280×720, and a projector font-scale setting. |
 | P5 | Packet strip: queue-depth bar, visible reorder overtakes, legend. |
 | P6 | Landing page: Quick Match, Compare, Presenter, Emulator dashboard (Phase 5). |
@@ -235,7 +264,7 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 - [ ] G1: four sync models are selectable and comparable side by side with measured bandwidth, latency and error.
 - [ ] G2: 0 corrections on a clean network; corrections under loss that converge; redundancy removes them (covered by tests and visible in the UI).
 - [ ] G3: the emulator runs standalone (WS + UDP) with its own dashboard and README, and the game is just one client of it.
-- [ ] G4: Presenter mode runs the whole talk; screenshots pass the visual checklist; textures drop in through the manifest.
+- [ ] G4: Presenter mode runs the whole talk; screenshots pass the visual checklist; textures and sounds drop in through the manifest (Phase 2.5).
 - [ ] `npm run demo`, `npm test`, `npm run typecheck`, `npm run smoke` and `npm run shots` pass from a fresh clone.
 
 ---

@@ -12,9 +12,23 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
     {
       category: 'PILOT & COMBAT',
       items: [
-        { keys: ['W', 'A', 'S', 'D'], desc: 'Move pilot / Thrusters (or Arrow Keys)' },
-        { keys: ['MOUSE'], desc: 'Aim weapon turret' },
-        { keys: ['LMB'], desc: 'Fire laser cannon' },
+        { keys: ['W', 'A', 'S', 'D'], desc: 'Move (or Arrow Keys)' },
+        { keys: ['MOUSE'], desc: 'Aim' },
+        { keys: ['LMB'], desc: 'Fire (hold) — magazine reloads itself when empty' },
+        { keys: ['R'], desc: 'Reload (the pistol has unlimited reloads)' },
+        { keys: ['SPACE'], desc: 'Dash (with the Dash power-up)' },
+        { keys: ['M'], desc: 'Mute / unmute sound effects' },
+      ],
+    },
+    {
+      category: 'POWER-UPS (walk over one; up to 1 per 2 players)',
+      items: [
+        { keys: ['RAPID'], desc: 'Rifle for 10 s or 2 magazines (rarest)' },
+        { keys: ['SPREAD'], desc: 'Shotgun for 10 s or 2 magazines — 3 pellets per shot' },
+        { keys: ['SHIELD'], desc: 'Absorbs the next hit' },
+        { keys: ['SPEED'], desc: '1.5× speed for 6 s (most common)' },
+        { keys: ['PIERCE'], desc: 'Bullets pass through obstacles for 8 s' },
+        { keys: ['DASH'], desc: 'For 10 s: SPACE = short burst (2 s cooldown)' },
       ],
     },
     {
@@ -32,7 +46,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
       category: 'NETCODE ENGINE TOGGLES',
       items: [
         { keys: ['P'], desc: 'Toggle Client-Side Prediction' },
-        { keys: ['R'], desc: 'Toggle Server Reconciliation' },
+        { keys: ['C'], desc: 'Toggle Server Reconciliation' },
         { keys: ['I'], desc: 'Toggle Snapshot Interpolation' },
         { keys: ['G'], desc: 'Toggle Ghost Player (Server True Position)' },
       ],
@@ -40,7 +54,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
     {
       category: 'SYSTEM SHORTCUTS',
       items: [
-        { keys: ['ESC'], desc: 'Open System Settings' },
+        { keys: ['ESC'], desc: 'Open System Settings (includes Leave Match)' },
         { keys: ['F1', '?'], desc: 'Toggle this Controls Guide' },
       ],
     },
@@ -50,6 +64,11 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
     <div
       className="overlay"
       style={{
+        // .overlay is click-through (pointer-events: none, inherited) for HUD
+        // text; a modal must take clicks and wheel events, or they reach the game
+        pointerEvents: 'auto',
+        position: 'fixed',
+        padding: 'var(--sp-l)',
         zIndex: 1000,
         backgroundColor: 'rgba(5, 5, 15, 0.82)',
         backdropFilter: 'blur(8px)',
@@ -70,8 +89,9 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
           boxShadow: '0 0 25px rgba(0, 229, 255, 0.35), inset 0 0 15px rgba(124, 77, 255, 0.05)',
           borderRadius: 'var(--panel-radius)',
           width: 'clamp(340px, 92vw, 560px)',
-          maxHeight: '90vh',
+          maxHeight: '100%',
           overflowY: 'auto',
+          overscrollBehavior: 'contain',
           padding: 'var(--sp-xl)',
           display: 'flex',
           flexDirection: 'column',
