@@ -89,11 +89,23 @@ Forces server-side misprediction to demonstrate reconciliation.
 }
 ```
 
-### 2.6 `dev` (Developer Switches)
-Honoured only when the server runs with `NOBU_DEV=1` (`npm run demo`); ignored otherwise (`GAMERULES.md` §19). The client re-sends it after every reconnect.
+### 2.6 `dev` (Developer Switches and Presenter Commands)
+Honoured only when the server runs with `NOBU_DEV=1` (`npm run demo`); ignored otherwise (`GAMERULES.md` §19). Every field is optional; at least one must be present (an empty or unknown-only `dev` is rejected as a bad message).
 ```json
 { "t": "dev", "invincible": true }
+{ "t": "dev", "give": "speed" }
+{ "t": "dev", "endless": true }
+{ "t": "dev", "restart": true, "map": "plaza" }
 ```
+| Field | Acts on | Meaning |
+|---|---|---|
+| `invincible` (bool) | the sender's player | Hits never kill (re-sent by the client after every reconnect) |
+| `give` (power-up kind) | the sender's player | Apply that power-up now, exactly like a pickup, with a `PICKUP` event at the player's position (alive player, running match, rooms with power-ups) |
+| `endless` (bool) | the room | Presenter: stop / restart the match clock; while stopped, snapshots carry `match.endless: true` and a frozen `timeLeftMs`. Cleared when the last human leaves; re-sent by the client after a reconnect |
+| `restart` (`true`) | the room | Presenter: timed rooms begin a new match on the same map through the countdown (scores 0); the lab puts every player back on its spawn (new `life`) |
+| `map` (map id) | the room | Presenter: like `restart`, on that map (the rotation index does not move) |
+
+Room commands may also come from a spectator (the Compare reference pane); player switches need a player.
 
 ### 2.7 `lab` (Scripted Movers)
 Selects the active scripted movers (PHASES.md C3). Accepted only in rooms with `movers: true` in `game.json` (only `lab`); ignored elsewhere. Any connection in the room may send it, spectators included.
@@ -211,6 +223,9 @@ Broadcast at 30 Hz.
   ]
 }
 ```
+
+While a Presenter has stopped the match clock (`dev.endless`, §2.6), `match` also carries `"endless": true` and `timeLeftMs` stays frozen.
+
 - `tick`: Monotonic simulation tick. Snapshots with `tick <= lastAppliedTick` are dropped.
 - `ack`: Highest input sequence processed for the recipient client (`0` in spectator snapshots).
 - `players[].mover` (optional): set only on scripted lab movers (`"circle"`, `"zigzag"`, `"reversal"`, `"stopgo"`). Movers look like remote players (`bot: true`, `alive: true`, `life: 1`, `score: 0`) so interpolation treats them like any other remote entity. Their position is exactly `moverPath(pattern, tick / 60)` from `shared/src/sim/movers.ts`, so clients can compute the true position at any server time.

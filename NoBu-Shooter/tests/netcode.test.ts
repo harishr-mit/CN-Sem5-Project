@@ -560,3 +560,32 @@ describe('Netcode harness: sync models (PHASES.md Phase 3, docs/PHASE3_PLAN.md Â
     expect(ack[2]).toBeLessThan(ack[0]);
   });
 });
+
+describe('Netcode harness: Presenter restart / map switch (owner, 2026-10-11)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    frameNo = 0;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubEnv('NOBU_DEV', '1');
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  for (const [name, room] of [['main (countdown)', 'main'], ['lab (immediate)', 'lab']] as const) {
+    it(`${name}: the restart teleport is a respawn for the client, not a correction`, () => {
+      const h = makeHarness({ latencyMs: 50, lossPct: 10 }, 2, 7, { room, noBots: true });
+      for (let f = 0; f < 300 && h.clients[0].latestSnapshot?.match.state !== 'RUNNING'; f++) h.frame();
+      // Walk right for 2 s, then restart on another map while still holding the key
+      h.run(120, () => KEY.RIGHT);
+      const before = h.corrections.length;
+      h.clients[0].devRestart('plaza');
+      h.run(240, (f) => (f < 60 ? KEY.RIGHT : 0));
+      const big = h.corrections.slice(before).filter((px) => px >= NET.reconcile.snapThresholdPx);
+      expect(h.clients[0].latestSnapshot?.match.map).toBe('plaza');
+      expect(big).toEqual([]);
+    });
+  }
+});

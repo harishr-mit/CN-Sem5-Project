@@ -9,6 +9,17 @@ import { DEV_TOOLS } from '../dev.js';
 import { SYNC_CYCLE, nextSync, sameSync, syncLabel, type SyncSpec } from '@nobu/shared/sync';
 import { loadSettings, saveSettings } from './settings.js';
 import { LabSection } from './LabSection.js';
+import { POWERUP_KINDS, type PowerupKind } from '@nobu/shared/config/game';
+
+/** Developer "give power-up" chips (GAMERULES.md §19): label and colour per kind. */
+const GIVE: Record<PowerupKind, { label: string; color: string }> = {
+  rapid_fire: { label: 'RAPID', color: '#8fa3c0' },
+  spread_shot: { label: 'SPREAD', color: '#ff9a3c' },
+  shield: { label: 'SHIELD', color: '#39ff14' },
+  speed: { label: 'SPEED', color: '#ffd400' },
+  piercing: { label: 'PIERCE', color: '#b388ff' },
+  dash: { label: 'DASH', color: '#2fd6ff' },
+};
 
 interface NetworkLabProps {
   netClient: NetClient;
@@ -17,6 +28,23 @@ interface NetworkLabProps {
   onToggleOpen: () => void;
 }
 
+
+/**
+ * The four sync choices in two groups (owner, 2026-10-11): Full and Delta are
+ * two encodings of interpolated snapshots; State sync is a different model
+ * (records + velocity, extrapolated) whose only option is its rate. A
+ * connection receives exactly one stream, so exactly one chip is lit.
+ */
+const SYNC_GROUPS: { title: string; sub: string; specs: SyncSpec[]; label: (s: SyncSpec) => string }[] = [
+  {
+    title: 'SNAPSHOTS', sub: 'interpolated', specs: SYNC_CYCLE.filter((s) => s.model !== 'state'),
+    label: (s) => syncLabel(s),
+  },
+  {
+    title: 'STATE SYNC', sub: 'extrapolated', specs: SYNC_CYCLE.filter((s) => s.model === 'state'),
+    label: (s) => (s.model === 'state' ? `${s.hz} Hz` : syncLabel(s)),
+  },
+];
 
 const SYNC_HINT: Record<SyncSpec['model'], string> = {
   full: 'Whole world every snapshot, interpolated',
@@ -193,19 +221,26 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
 
         {/* Sync model (PHASES.md Phase 3): switched live, the player stays in the match */}
         <LabSection id="sync" domId="lab-sync-section" title="SYNC MODEL [Y]" summary={syncLabel(sync)}>
-          <div className="presets-row">
-            {SYNC_CYCLE.map((spec) => (
-              <button
-                key={syncLabel(spec)}
-                className={`preset-chip ${sameSync(spec, sync) ? 'active' : ''}`}
-                title={SYNC_HINT[spec.model]}
-                onClick={() => changeSync(spec)}
-              >
-                {syncLabel(spec)}
-              </button>
+          <div className="sync-groups">
+            {SYNC_GROUPS.map((g) => (
+              <div key={g.title} className="sync-group">
+                <div className="sync-group-title">{g.title} <span>· {g.sub}</span></div>
+                <div className="presets-row">
+                  {g.specs.map((spec) => (
+                    <button
+                      key={syncLabel(spec)}
+                      className={`preset-chip ${sameSync(spec, sync) ? 'active' : ''}`}
+                      title={`${syncLabel(spec)}: ${SYNC_HINT[spec.model]}`}
+                      onClick={() => changeSync(spec)}
+                    >
+                      {g.label(spec)}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
-          <div style={{ fontSize: '0.66rem', color: 'var(--c-text-muted)', marginTop: 4 }}>
+          <div className="sync-hint" style={{ fontSize: '0.66rem', color: 'var(--c-text-muted)', marginTop: 4 }}>
             {SYNC_HINT[sync.model]} · {metrics.msgBytesDown} B/msg
           </div>
         </LabSection>
@@ -303,6 +338,26 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
                 />
                 <span className="toggle-slider" />
               </label>
+            </div>
+            {/* Give a power-up as if picked up (server-side, same PICKUP event) */}
+            <div className="dev-give" id="lab-dev-give">
+              <div className="dev-give-title">GIVE POWER-UP (running match, alive)</div>
+              <div className="presets-row">
+                {POWERUP_KINDS.map((kind) => (
+                  <button
+                    key={kind}
+                    id={`dev-give-${kind}`}
+                    className="preset-chip dev-give-chip"
+                    style={{ borderColor: GIVE[kind].color, color: GIVE[kind].color }}
+                    title={`Give ${kind.replace('_', ' ')} now`}
+                    onMouseDown={(e) => e.preventDefault() /* keep keyboard focus on the game */}
+                    onClick={() => netClient.devGive(kind)}
+                  >
+                    <img src={`/sprites/pickups/${kind}.png`} alt="" aria-hidden />
+                    {GIVE[kind].label}
+                  </button>
+                ))}
+              </div>
             </div>
           </LabSection>
         )}

@@ -194,7 +194,8 @@ export class GameServer {
         break;
 
       case 'dev':
-        if (conn.playerId !== null && conn.room) conn.room.setDev(conn.playerId, msg.invincible);
+        // Player switches need a player; room commands (Presenter) may come from a spectator
+        if (conn.room) conn.room.devCommand(conn.playerId, msg);
         break;
 
       case 'bye':

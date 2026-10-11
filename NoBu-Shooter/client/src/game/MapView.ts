@@ -10,7 +10,7 @@
 
 import Phaser from 'phaser';
 import GAME, { mapDef, type MapId, type ObstacleDef } from '@nobu/shared/config/game';
-import { TEX, has } from './assets.js';
+import { TEX, has, loadMapArt } from './assets.js';
 
 const ARENA_W = GAME.arena.width;
 const ARENA_H = GAME.arena.height;
@@ -43,6 +43,8 @@ export class MapView {
   private objects: Phaser.GameObjects.GameObject[] = [];
   /** The neon grid pulses (its alpha), so keep a handle on it. */
   private grid: Phaser.GameObjects.Image | null = null;
+  /** Maps whose art was requested at runtime (once each, even if a file is missing). */
+  private requested = new Set<MapId>();
 
   constructor(private readonly scene: Phaser.Scene) {}
 
@@ -53,6 +55,17 @@ export class MapView {
     this.mapId = id;
     const map = mapDef(id);
     const textured = map.floor !== null && has(this.scene, TEX.floor(map.floor));
+
+    // Art not loaded (Compare panes after a Presenter map switch): draw the
+    // fallback now, load the map's files and rebuild when they arrive.
+    if (map.floor !== null && !textured && !this.requested.has(id)) {
+      this.requested.add(id);
+      loadMapArt(this.scene, id, () => {
+        if (this.mapId !== id) return;
+        this.mapId = null;
+        this.show(id);
+      });
+    }
 
     if (textured) {
       this.add(this.scene.add.tileSprite(0, 0, ARENA_W, ARENA_H, TEX.floor(map.floor!)).setOrigin(0, 0).setDepth(DEPTH.floor));

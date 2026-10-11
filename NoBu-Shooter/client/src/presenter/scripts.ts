@@ -37,6 +37,7 @@ export const QUICK_SCRIPT: PresenterScript = {
   title: 'Presenter — Quick Match',
   view: 'game',
   invincible: true,
+  endless: true,
   steps: [
     quick('Q1', 'Baseline',
       'No impairment. Move around: what you see is exactly what the server computes.',
@@ -104,6 +105,7 @@ export const COMPARE_SCRIPT: PresenterScript = {
   title: 'Presenter — Compare',
   view: 'compare',
   invincible: false,
+  endless: false, // the lab room has no match clock
   steps: COMPARE_PRESETS.map((p, i) => ({
     id: `C${i + 1}`,
     title: p.title,

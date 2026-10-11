@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Room } from '../server/src/game/room.js';
 import GAME from '../shared/src/config/game.json';
 import { mapDef } from '../shared/src/config/game.js';
@@ -295,5 +295,149 @@ describe('Phase 2.5 rules: maps, weapons, reload, power-ups', () => {
     for (let i = 0; i < 20; i++) room.tick();
     expect(target.alive).toBe(false);
     expect(target.combat.weapon).toBe('handgun');
+  });
+});
+
+// ── Owner revision 2026-10-11: developer / Presenter commands (GAMERULES.md §19) ──
+
+type DevPlayer = { x: number; y: number; alive: boolean; score: number; life: number };
+type DevInternals = {
+  state: { map: string; matchState: string; runningTicksLeft: number; players: Map<number, DevPlayer> };
+};
+
+describe('Developer / Presenter commands (dev message, npm run demo only)', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('are refused without NOBU_DEV', () => {
+    const { room, it, a } = runningMain();
+    expect(room.devCommand(a, { give: 'speed', endless: true, restart: true })).toBe(false);
+    expect(room.isEndless).toBe(false);
+    expect(it.state.matchState).toBe('RUNNING');
+    expect(it.state.players.get(a)!.combat.speedTicks).toBe(0);
+  });
+
+  it('give: applies the power-up like a pickup and emits PICKUP for that player', () => {
+    vi.stubEnv('NOBU_DEV', '1');
+    const { room, it, a } = runningMain();
+    const me = it.state.players.get(a)!;
+    expect(room.devCommand(a, { give: 'rapid_fire' })).toBe(true);
+    expect(me.combat.weapon).toBe('rifle');
+    expect(it.state.events.some((e) => e.type === 'PICKUP' && e.playerId === a && e.kind === 'rapid_fire')).toBe(true);
+    room.devCommand(a, { give: 'shield' });
+    expect(me.shield).toBe(true);
+    // Not while dead, and never from a spectator (no player)
+    me.alive = false;
+    expect(room.devCommand(a, { give: 'speed' })).toBe(false);
+    expect(room.devCommand(null, { give: 'speed' })).toBe(false);
+  });
+
+  it('endless: the clock stops (snapshot says so) and runs again when switched off', () => {
+    vi.stubEnv('NOBU_DEV', '1');
+    const { room, it, a } = runningMain();
+    const d = it as unknown as DevInternals;
+    room.devCommand(a, { endless: true });
+    d.state.runningTicksLeft = 5;
+    for (let i = 0; i < 30; i++) room.tick();
+    expect(it.state.matchState).toBe('RUNNING');
+    const snap = room.buildSnapshot(a);
+    expect(snap.match.endless).toBe(true);
+    expect(snap.match.timeLeftMs).toBeCloseTo(5 * 1000 / GAME.sim.hz);
+    room.devCommand(a, { endless: false });
+    expect(room.buildSnapshot(a).match.endless).toBeUndefined();
+    for (let i = 0; i < 10; i++) room.tick();
+    expect(it.state.matchState).toBe('ENDED');
+  });
+
+  it('endless is cleared when the last human leaves (a closed presenter tab)', () => {
+    vi.stubEnv('NOBU_DEV', '1');
+    const { room, a, b } = runningMain();
+    room.devCommand(a, { endless: true });
+    room.removePlayer(a);
+    expect(room.isEndless).toBe(true); // B is still there
+    room.removePlayer(b);
+    expect(room.isEndless).toBe(false);
+  });
+
+  it('restart: a new match on the same map (countdown, scores 0); the rotation does not move', () => {
+    vi.stubEnv('NOBU_DEV', '1');
+    const { room, it, a, b } = runningMain();
+    const d = it as unknown as DevInternals;
+    const first = it.state.map;
+    d.state.players.get(a)!.score = 3;
+    room.devCommand(b, { restart: true });
+    expect(it.state.matchState).toBe('COUNTDOWN');
+    expect(it.state.map).toBe(first);
+    expect(d.state.players.get(a)!.score).toBe(0);
+    for (let i = 0; i < 200 && it.state.matchState !== 'RUNNING'; i++) room.tick();
+    expect(it.state.matchState).toBe('RUNNING');
+    expect(d.state.players.get(a)!.alive).toBe(true);
+  });
+
+  it('map: restarts on that map; the next normal match continues the rotation', () => {
+    vi.stubEnv('NOBU_DEV', '1');
+    const { room, it, a } = runningMain();
+    room.devCommand(a, { map: 'plaza' });
+    expect(it.state.matchState).toBe('COUNTDOWN');
+    expect(it.state.map).toBe('plaza');
+    expect(room.buildSnapshot(a).match.map).toBe('plaza');
+    // End of that match → the rotation's second map (the explicit map didn't count)
+    for (let i = 0; i < 200 && it.state.matchState !== 'RUNNING'; i++) room.tick();
+    it.state.matchState = 'ENDED';
+    it.state.endedTicksLeft = 1;
+    room.tick();
+    expect(it.state.matchState).toBe('COUNTDOWN');
+    expect(it.state.map).toBe(GAME.maps.rotation[1]);
+  });
+
+  it('lab: restart / map put every player back on the spawn (new life) — also from a spectator', () => {
+    vi.stubEnv('NOBU_DEV', '1');
+    const lab = new Room('lab', () => {}, () => {});
+    const d = lab as unknown as DevInternals;
+    const p = lab.addPlayer('A_1', false);
+    lab.addSpectator();
+    lab.tick();
+    const me = d.state.players.get(p)!;
+    me.x = 200; me.y = 600;
+    const life = me.life;
+    expect(lab.devCommand(null, { map: 'warehouse' })).toBe(true);
+    expect(d.state.map).toBe('warehouse');
+    expect(lab.buildSnapshot(null).match.map).toBe('warehouse');
+    expect({ x: me.x, y: me.y }).toEqual(GAME.rooms.lab.spawn);
+    expect(me.life).toBe(life + 1);
+    expect(d.state.matchState).toBe('RUNNING'); // the lab stays a sandbox
+    me.x = 100;
+    lab.devCommand(null, { restart: true });
+    expect(me.x).toBe(GAME.rooms.lab.spawn.x);
+    expect(d.state.map).toBe('warehouse'); // restart keeps the map
+  });
+
+  it('COUNTDOWN keeps players alive at their spawn with a new life; GO starts them there (GAMERULES.md §2)', () => {
+    const { room, it, a } = runningMain();
+    const d = it as unknown as DevInternals;
+    const me = d.state.players.get(a)!;
+    const lifeBefore = me.life;
+    it.state.matchState = 'ENDED';
+    it.state.endedTicksLeft = 1;
+    room.tick();
+    expect(it.state.matchState).toBe('COUNTDOWN');
+    expect(me.alive).toBe(true);
+    expect(me.life).toBe(lifeBefore + 1); // clients hard-reset instead of correcting
+    const at = { x: me.x, y: me.y };
+    room.receiveInput(a, [{ s: 999, k: 8, a: 0, f: 0 }]); // movement is ignored
+    for (let i = 0; i < 200 && it.state.matchState !== 'RUNNING'; i++) room.tick();
+    expect(it.state.matchState).toBe('RUNNING');
+    expect({ x: me.x, y: me.y }).toEqual(at); // no second teleport at GO
+    expect(me.life).toBe(lifeBefore + 1);
+  });
+
+  it('the lab spawn is clear of obstacles on every map (Compare map switching)', () => {
+    const { x, y } = GAME.rooms.lab.spawn;
+    for (const id of GAME.maps.rotation) {
+      for (const o of mapDef(id).obstacles) {
+        const dx = Math.max(o.x - x, 0, x - (o.x + o.w));
+        const dy = Math.max(o.y - y, 0, y - (o.y + o.h));
+        expect(Math.hypot(dx, dy), `${id}`).toBeGreaterThan(GAME.player.radius + 20);
+      }
+    }
   });
 });

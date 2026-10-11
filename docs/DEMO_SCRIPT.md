@@ -23,7 +23,7 @@ Reference: `PHASES.md` (this script grows with each phase). Since Phase 4 the sa
 | Interpolation Toggle | `I` |
 | Ghost Overlay Toggle | `G` |
 | Sync model (Full → Delta → State 10 → State 30) | `Y` (Quick Match: Network Lab; Compare: the selected pane) |
-| Presenter mode | `N` next step, `B` previous step, `H` hide the caption, **END** button to leave (§12) |
+| Presenter mode | `N` next step, `B` previous step, `H` hide the caption; bar buttons **⟲ RESTART**, map, **END** (§12) |
 | Projector | Settings (`Esc`) → **UI Scale** 100 / 115 / 130 %; Graphics Quality *high* = arena glow |
 
 ---
@@ -109,7 +109,7 @@ Reference: `PHASES.md` (this script grows with each phase). Since Phase 4 the sa
 Rehearsal tip: `NOBU_MAPS=warehouse npm run demo` starts on a chosen map (the rotation is `neon → warehouse → plaza → overgrown`, one map per match).
 1. In Quick Match, hold fire: the HUD (bottom-right) counts the handgun down from 8/8 (`∞` spare), the magazine reloads itself at 0, and `R` reloads early (amber bar, reload sound).
 2. Power-ups appear at random spots, at most one per two players (2 in a 4-player match), a new one 10 s after each pickup. Walk over one: **Rapid Fire** (rifle, rare) or **Spread Shot** (shotgun, 3 pellets) — 10 s or two magazines, then back to the pistol; **Shield** (green bubble absorbs one hit); **Speed** (×1.5, pulsing ring); **Piercing** (violet bullets through walls); **Dash** (`Space`). A chip shows what is active.
-   - Rehearsal: under `npm run demo` the Network Lab has a **Developer → Invincible** switch, so you can talk without being shot (your tag reads `[DEV]`).
+   - Rehearsal: under `npm run demo` the Network Lab has a **Developer → Invincible** switch, so you can talk without being shot (your tag reads `[DEV]`), and **Give power-up** buttons, so you can show any power-up without hunting for it.
 3. Press `4` (Transatlantic) and pick up **Speed**: the first moves after the pickup are predicted at normal speed, so a small correction line appears — pickups are decided by the server and are never predicted.
 4. Press `5` (Nightmare), turn **Input Redundancy OFF** and hold fire: some shots are lost on the way up; the server never fired them, so the ammo counter **flashes amber** as the prediction is corrected (occasional flashes; at 20 % loss the netcode harness sees several per 10 s of firing). Turn redundancy ON: the flashes stop.
 5. Note the bandwidth under Nightmare: full snapshots of a 4-player match are ≈ 510 kbps, above the 400 kbps cap, so the ack delay grows — press `Y` for delta snapshots (§7 step 4).
@@ -127,6 +127,11 @@ Open **NETWORK LAB — COMPARE**. Each pane's header shows its sync model (click
 
 ### 12. Presenter Mode (Phase 4)
 Start from the landing page. Each step sets everything at once (network, all netcode toggles, sync model — or, in Compare, a whole preset), so `N` and `B` always show the same thing; between steps every normal key still works and lasts until the next step. The caption bar (between the arena and the packet strip, or under the Compare grid) shows the step counter, what to watch, the expected numbers and a step timer — some effects need ≈ 15 s. `H` hides it; **END** goes back to the landing page.
+
+- **⟲ RESTART** puts the game back to its starting case and the talk back to step 1: Quick Match begins a new match on the same map (3 s countdown, scores 0); Compare puts every pane's player back on the spawn and clears the charts.
+- **Map** buttons (Neon, Warehouse, Plaza, Overgrown; the current one is lit) restart the game on that map; the talk stays on its step and the step timer restarts. In Compare the drones keep their paths, which were laid out for Neon — on the other maps they fly over some props.
+- In Quick Match the **match clock is stopped** while presenting (the HUD shows ∞), so the match never ends mid-talk; END starts the clock again.
+- These and Invincible need `npm run demo` (the bar says so otherwise).
 
 **Presenter — Quick Match** (12 steps; turns on the developer **Invincible** switch so bots can't interrupt — `[DEV]` tag, needs `npm run demo`; turned off again on END). Walk around while you talk.
 

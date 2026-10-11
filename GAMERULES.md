@@ -42,13 +42,14 @@ WAITING ──(participants >= 2)──► COUNTDOWN ──(3 s)──► RUNNIN
 | State | Behavior |
 |---|---|
 | `WAITING` | Fewer than `minParticipants` participants. Players cannot move or fire. UI shows "WAITING FOR PLAYERS". |
-| `COUNTDOWN` | 3 s ("3, 2, 1, GO!"). All players are placed at spawn points. Movement and firing are ignored. |
+| `COUNTDOWN` | 3 s ("3, 2, 1, GO!"). All players are placed at spawn points (alive and visible, with a new `life` number so clients treat it as a respawn) and start the match from there. Movement and firing are ignored. |
 | `RUNNING` | Normal play for exactly 180 s. The server owns the timer. |
 | `ENDED` | Movement, firing and projectile spawning are ignored. Remaining projectiles are removed. Final scores are computed and broadcast. Lasts 10 s. |
 
 - A **participant** is a human player or a bot. Bots count toward the 2-participant minimum (§12), so one human alone can play against bots.
 - **Late join:** a human may join at any time. During `RUNNING` they spawn immediately with score 0. During `COUNTDOWN` or `ENDED` they join the next match flow normally.
 - **Restart:** after `ENDED` the room automatically returns to `COUNTDOWN` with all scores reset to 0 and all players re-spawned. No lobby, no vote.
+- **Presenter (owner, 2026-10-11; `npm run demo` only, §19):** Presenter — Quick Match stops the match clock (the HUD shows ∞; a 3-minute match would end mid-talk) and starts it again on END. Its **RESTART** begins a new match on the same map through the countdown; choosing a **map** on the Presenter bar does the same on that map. Neither moves the normal rotation.
 - **Demo shortcut:** `match.durationMs` is configuration. The default is 180 000. Setting it lower (for example 60 000 via a URL parameter `?match=60`) must work without code changes.
 - When the last human leaves, the room removes all bots and returns to `WAITING`.
 
@@ -520,5 +521,5 @@ Sounds are cosmetic. The client triggers them from its own predicted actions (ow
 
 ## 19. Developer toggle (demo only)
 
-`npm run demo` starts the server with `NOBU_DEV=1` and the client with `VITE_NOBU_DEV=1`. Only then does the Network Lab show a **Developer** section with an **Invincible** switch (message `dev`, `docs/PROTOCOL.md`): hits on that player are still shown, but never kill or use up a shield. The player's name tag reads `[DEV]` for everyone and their HUD shows `DEV: INVINCIBLE`. Without `NOBU_DEV=1` (tests, smoke, any other way of running the server) the server ignores the message. **Presenter — Quick Match** switches it on for the whole script (owner, Phase 4) and off again when the presenter leaves.
+`npm run demo` starts the server with `NOBU_DEV=1` and the client with `VITE_NOBU_DEV=1`. Only then does the Network Lab show a **Developer** section with an **Invincible** switch (message `dev`, `docs/PROTOCOL.md`): hits on that player are still shown, but never kill or use up a shield. The same section has **Give power-up** buttons (owner, 2026-10-11): the server applies the chosen power-up to your player exactly as if you had walked over it (same effect, same `PICKUP` event; alive, running match only). The player's name tag reads `[DEV]` for everyone and their HUD shows `DEV: INVINCIBLE`. Without `NOBU_DEV=1` (tests, smoke, any other way of running the server) the server ignores the message. **Presenter — Quick Match** switches it on for the whole script (owner, Phase 4) and off again when the presenter leaves. The Presenter's room commands — stopped match clock, RESTART, map switching (§2) — go through the same `dev` message and need `npm run demo` too; in the Compare view they act on the lab room (§14), which then shows the chosen map and puts every pane's player back on its spawn.
 

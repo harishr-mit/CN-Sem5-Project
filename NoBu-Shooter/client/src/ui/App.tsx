@@ -21,6 +21,7 @@ import { PRESENTER_SCRIPTS } from '../presenter/scripts.js';
 import type { PresenterScript } from '../presenter/types.js';
 import { PresenterBar } from './presenter/PresenterBar.js';
 import { quickStage, compareStage } from './presenter/stages.js';
+import type { MapId } from '@nobu/shared/protocol';
 
 const EMULATOR_DATA_URL = 'ws://127.0.0.1:9000';
 
@@ -38,6 +39,9 @@ export const App: React.FC = () => {
   const [presenterVersion, setPresenterVersion] = useState(0);
   const [presenterHidden, setPresenterHidden] = useState(false);
   const [presetRequest, setPresetRequest] = useState<{ id: string; seq: number } | undefined>(undefined);
+  // Compare presenter: RESTART / map switch requests, and the lab map reported back
+  const [restartRequest, setRestartRequest] = useState<{ map?: MapId; seq: number } | undefined>(undefined);
+  const [compareMap, setCompareMap] = useState<MapId | null>(null);
   const emulatorStatus = useGameStore((s) => s.emulatorStatus);
 
   // Clients
@@ -69,6 +73,7 @@ export const App: React.FC = () => {
   const handleStartPresenter = (id: PresenterScript['id'], name: string) => {
     setPresenterHidden(false);
     setPresetRequest(undefined);
+    setRestartRequest(undefined);
     setPresenterId(id);
     if (PRESENTER_SCRIPTS[id].view === 'game') handleStartQuickMatch(name);
     else handleStartCompare(name);
@@ -146,8 +151,12 @@ export const App: React.FC = () => {
       if (!netClient || !emulatorClient) return;
       stage = quickStage(netClient, emulatorClient, DEV_TOOLS);
     } else {
-      let seq = 0;
-      stage = compareStage((id) => setPresetRequest({ id, seq: ++seq }));
+      let presetSeq = 0;
+      let restartSeq = 0;
+      stage = compareStage(
+        (id) => setPresetRequest({ id, seq: ++presetSeq }),
+        (map) => setRestartRequest({ map, seq: ++restartSeq }),
+      );
     }
     const c = new PresenterController(script, stage);
     c.onChange = () => setPresenterVersion((v) => v + 1);
@@ -181,7 +190,10 @@ export const App: React.FC = () => {
     <PresenterBar
       controller={presenter}
       version={presenterVersion}
-      notice={presenter.script.invincible && !DEV_TOOLS ? 'Invincible needs npm run demo — bots can hit you in this run.' : null}
+      notice={DEV_TOOLS ? null : presenter.script.view === 'game'
+        ? 'Invincible, the stopped match clock, RESTART and map switching need npm run demo — this run uses normal 3-minute matches.'
+        : 'Map switching needs npm run demo; RESTART here only resets the panes and charts.'}
+      currentMap={() => (presenter.script.view === 'game' ? netClient?.mapId ?? null : compareMap)}
       onEnd={() => {
         if (presenter.script.view === 'game') handleLeaveMatch();
         else { setPresenterId(null); setView('landing'); }
@@ -209,6 +221,8 @@ export const App: React.FC = () => {
       <CompareView
         playerName={playerName}
         presetRequest={presetRequest}
+        restartRequest={restartRequest}
+        onMapChange={setCompareMap}
         footer={presenterBar}
         onExit={() => {
           setPresenterId(null);

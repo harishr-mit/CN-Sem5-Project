@@ -5,7 +5,7 @@
  */
 
 import { isMoverPattern, type MoverPattern } from '../sim/movers.js';
-import type { WeaponId, PowerupKind, MapId } from '../config/game.js';
+import { isPowerupKind, isMapId, type WeaponId, type PowerupKind, type MapId } from '../config/game.js';
 import type { CombatState } from '../sim/combat.js';
 import { isSyncModel, isStateHz, isSyncSpec, type SyncSpec, type SyncModel, type StateHz } from '../sync/types.js';
 
@@ -80,10 +80,23 @@ export interface MsgBye {
   t: 'bye';
 }
 
-/** Developer switches; honoured only when the server runs under `npm run demo` (NOBU_DEV=1). */
+/**
+ * Developer switches; honoured only when the server runs under `npm run demo`
+ * (NOBU_DEV=1). Every field is optional, at least one is present. `invincible`
+ * and `give` act on the sender's player; `endless`, `restart` and `map` act on
+ * the sender's room (Presenter mode) and may also come from a spectator.
+ */
 export interface MsgDev {
   t: 'dev';
-  invincible: boolean;
+  invincible?: boolean;
+  /** Give this power-up now, exactly as if it had been picked up. */
+  give?: PowerupKind;
+  /** Stop the match clock (a timed match never ends) — or start it again. */
+  endless?: boolean;
+  /** Restart: timed rooms begin a new match (countdown, scores 0); the lab puts everyone back on its spawn. */
+  restart?: true;
+  /** Switch to this map and restart. */
+  map?: MapId;
 }
 
 /** Select the active scripted movers (rooms with movers enabled only). */
@@ -172,6 +185,8 @@ export interface MatchSnap {
   /** Map being played (GAMERULES.md §3). */
   map: MapId;
   timeLeftMs: number;
+  /** Presenter mode: the match clock is stopped (`timeLeftMs` frozen); absent otherwise. */
+  endless?: true;
   results: MatchResults | null;
 }
 
@@ -368,9 +383,16 @@ export function validateClientMsg(raw: unknown): ClientMsg | null {
       return { t: 'lab', movers: [...new Set(movers)] };
     }
 
-    case 'dev':
-      if (typeof raw['invincible'] !== 'boolean') return null;
-      return { t: 'dev', invincible: raw['invincible'] };
+    case 'dev': {
+      const out: MsgDev = { t: 'dev' };
+      const { invincible, give, endless, restart, map } = raw;
+      if (invincible !== undefined) { if (typeof invincible !== 'boolean') return null; out.invincible = invincible; }
+      if (give !== undefined) { if (!isPowerupKind(give)) return null; out.give = give; }
+      if (endless !== undefined) { if (typeof endless !== 'boolean') return null; out.endless = endless; }
+      if (restart !== undefined) { if (restart !== true) return null; out.restart = true; }
+      if (map !== undefined) { if (!isMapId(map)) return null; out.map = map; }
+      return Object.keys(out).length > 1 ? out : null;
+    }
 
     default:
       return null;

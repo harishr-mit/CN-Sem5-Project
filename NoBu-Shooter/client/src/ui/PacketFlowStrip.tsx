@@ -275,17 +275,21 @@ export const PacketFlowStrip: React.FC<PacketFlowStripProps> = ({
             x = outX + (endX - outX) * ((t - d.at - d.delay) / TRAVEL_MS);
           }
 
+          // Halo as a second, faint circle: canvas shadowBlur on ~200 dots per
+          // frame (a full Nightmare queue) cost enough to trip the bloom auto-off
           ctx.save();
-          ctx.globalAlpha = Math.max(0, alpha);
+          const a = Math.max(0, alpha);
           ctx.fillStyle = d.color;
-          ctx.shadowColor = d.color;
-          ctx.shadowBlur = 6;
+          ctx.globalAlpha = a * 0.25;
+          ctx.beginPath();
+          ctx.arc(x, y, r + 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = a;
           ctx.beginPath();
           ctx.arc(x, y, r, 0, Math.PI * 2);
           ctx.fill();
           if (d.reordered) {
             // Held back by the reorder stage: white ring, overtaken by later packets
-            ctx.shadowBlur = 0;
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 1.5;
             ctx.beginPath();

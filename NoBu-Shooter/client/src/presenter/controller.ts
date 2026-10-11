@@ -7,6 +7,7 @@
  * during a step last until the next `next` / `prev`.
  */
 
+import type { MapId } from '@nobu/shared/protocol';
 import type { PresenterScript, PresenterStage, PresenterStep } from './types.js';
 
 export class PresenterController {
@@ -28,18 +29,38 @@ export class PresenterController {
   /** When the current step was entered (for the step timer). */
   get enteredAt(): number { return this.enteredAtMs; }
 
-  /** Begin at step 1 (Invincible on for scripts that want it). */
+  /** Begin at step 1 (Invincible on and the match clock stopped for scripts that want it). */
   start(): void {
     this.started = true;
     if (this.script.invincible) this.stage.setInvincible(true);
+    if (this.script.endless) this.stage.setEndless(true);
     this.enter(0);
   }
 
-  /** Leave Presenter mode; Invincible goes back off. */
+  /** Leave Presenter mode; Invincible goes back off and the match clock runs again. */
   stop(): void {
     if (!this.started) return;
     this.started = false;
     if (this.script.invincible) this.stage.setInvincible(false);
+    if (this.script.endless) this.stage.setEndless(false);
+  }
+
+  /** RESTART: the game back to its starting case and the talk back to step 1. */
+  restart(): void {
+    this.stage.restartGame();
+    this.enter(0);
+  }
+
+  /**
+   * Switch the map. The game restarts on it (fresh scores and positions); the
+   * talk stays on the current step, whose state is applied again and whose
+   * timer restarts — effects have to build up again. One-off actions don't run.
+   */
+  switchMap(map: MapId): void {
+    this.stage.restartGame(map);
+    this.applyState(this.step);
+    this.enteredAtMs = this.now();
+    this.onChange?.(this.i, this.step);
   }
 
   next(): boolean {

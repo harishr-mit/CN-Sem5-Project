@@ -5,6 +5,7 @@
 
 import type { PredictionToggle } from '../net/NetClient.js';
 import type { SyncSpec } from '@nobu/shared/sync';
+import type { MapId } from '@nobu/shared/protocol';
 import type { CompareNetwork } from '../compare/types.js';
 
 /** Complete Quick Match state of one step (D2: nothing leaks from the previous step). */
@@ -38,6 +39,8 @@ export interface PresenterScript {
   view: 'game' | 'compare';
   /** Switch the developer Invincible toggle on while presenting (D3). */
   invincible: boolean;
+  /** Stop the match clock while presenting (owner, 2026-10-11): a 3-minute match would end mid-talk. */
+  endless: boolean;
   steps: PresenterStep[];
 }
 
@@ -49,4 +52,8 @@ export interface PresenterStage {
   setInvincible(on: boolean): void;
   nudge(dx: number, dy: number): void;
   setComparePreset(id: string): void;
+  /** Stop / restart the room's match clock. */
+  setEndless(on: boolean): void;
+  /** Reset the game to its starting case, optionally on another map. */
+  restartGame(map?: MapId): void;
 }

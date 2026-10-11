@@ -30,8 +30,12 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, options
       // FIT renders a full 1280×720 frame and lets CSS shrink it. Compare panes
       // instead render at their displayed size (RESIZE) and zoom the camera
       // to fit: about 4× fewer pixels per pane, which kept 4–5 panes at 60 fps.
+      // `min`: a pane whose container was just removed (preset change) lives
+      // one more frame until Phaser's deferred destroy; its parent then
+      // measures 0 × 0, and resizing the renderer to that intermittently gave
+      // "Framebuffer status: Incomplete Attachment" (owner revision checks).
       scale: options?.renderAtDisplaySize
-        ? { mode: Phaser.Scale.RESIZE }
+        ? { mode: Phaser.Scale.RESIZE, min: { width: 64, height: 36 } }
         : {
             mode: Phaser.Scale.FIT,
             autoCenter: Phaser.Scale.CENTER_BOTH,

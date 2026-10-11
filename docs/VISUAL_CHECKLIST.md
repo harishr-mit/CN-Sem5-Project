@@ -35,19 +35,19 @@ Each `index.json` row has `fps` (requestAnimationFrame over 2 s), `errors` (cons
 |---|---|---|
 | 01 | landing | Five buttons: Quick Match, Compare, Presenter — Quick Match, Presenter — Compare, Emulator dashboard (disabled, "Phase 5"); controls hint fits in two lines. |
 | 02 | credits | Modal centred, CC-BY avatar credit present, CLOSE visible. |
-| 03 | quick-match | Lab open with default sections and **no Lab scroll** (`labScrolls: false`); aim chevrons in front of the bots' rings; soft glow on walls (bloom, quality high); packet strip legend visible next to INSPECT PACKETS. |
+| 03 | quick-match | Lab open with default sections and **no Lab scroll** (`labScrolls: false`); SYNC MODEL in two groups (SNAPSHOTS: FULL/DELTA, STATE SYNC: 10/30 Hz), one chip lit; aim chevrons in front of the bots' rings; soft glow on walls (bloom, quality high); packet strip legend visible next to INSPECT PACKETS. |
 | 04 | quick-nightmare | Strip: EMULATOR chips list the Nightmare impairments; **queue bar** amber/red with `QUEUE ↓… ms`; dots crowd inside the box; red lost dots fall. |
 | 05 | quick-inspector | Drawer readable; doesn't cover the Lab. |
 | 06 | quick-settings | UI Scale row (100 / 115 / 130 %), Graphics Quality, Leave Match at the end; no blur artefacts. |
 | 07 | quick-controls | `Y`, presenter keys and power-ups listed. |
-| 08 | quick-lab-all-open | Every section open: the Lab scrolls (expected), section titles have carets, nothing overlaps. |
+| 08 | quick-lab-all-open | Every section open: the Lab scrolls (expected), section titles have carets, nothing overlaps; Developer shows Invincible and six GIVE POWER-UP chips with icons. |
 | 09 | quick-ui-130 | UI 30 % larger, Lab wider; at 1920 × 1080 still no Lab scroll; strip side column doesn't collide with SERVER. |
 | 10–15 | compare-<preset> | Pane headers (title, sync chip, P/C/I/Rd/G chips) fit; dock table + bandwidth chart visible; caption above the table; Sync/Bandwidth after ≈ 15 s show the gap between Full and Delta. |
 | 16 | compare-custom-4-ref | Four panes + REF fit the grid without letterboxing; dock still visible (or in the empty cell). |
 | 17 | compare-lab-drawer | Drawer overlays (panes not resized); all impairment sliders visible (sections never collapse here). |
-| 18 | presenter-quick-1 | Presenter bar between arena and strip: `1 / 12`, title, caption, EXPECT line, timer, ◄ B / N ► / END; Lab shows `[DEV]` Invincible on (under `npm run demo`). |
+| 18 | presenter-quick-1 | Presenter bar between arena and strip: `1 / 12`, title, caption, EXPECT line, timer, MAP buttons (current map lit), ◄ B / N ► / ⟲ RESTART / END; HUD timer ∞; Lab shows `[DEV]` Invincible on (under `npm run demo`). |
 | 19 | presenter-quick-10-nightmare | Step `10 / 12`, timer ≈ 0:15; queue bar filled; Lab sync = FULL, preset = Nightmare. |
-| 20 | presenter-compare-1 | Bar under the Compare grid; dock without its own caption (it is in the bar); Prediction preset selected. |
+| 20 | presenter-compare-1 | Bar under the Compare grid with MAP buttons (NEON lit) and RESTART; dock without its own caption (it is in the bar); Prediction preset selected. |
 
 ## Recording the review
 

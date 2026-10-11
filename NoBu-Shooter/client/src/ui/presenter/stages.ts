@@ -6,6 +6,7 @@
 import { sameSync } from '@nobu/shared/sync';
 import type { NetClient } from '../../net/NetClient.js';
 import type { EmulatorClient } from '../../net/EmulatorClient.js';
+import type { MapId } from '@nobu/shared/protocol';
 import type { PresenterStage } from '../../presenter/types.js';
 
 /** Quick Match: the match's NetClient and the emulator (every session, like presets 1–5). */
@@ -22,11 +23,18 @@ export function quickStage(net: NetClient, emu: EmulatorClient, devTools: boolea
     setInvincible: (on) => { if (devTools) net.setDevInvincible(on); },
     nudge: (dx, dy) => net.perturb(dx, dy),
     setComparePreset: () => {},
+    // Room commands, honoured only under `npm run demo` like Invincible
+    setEndless: (on) => { if (devTools) net.setDevEndless(on); },
+    restartGame: (map) => { if (devTools) net.devRestart(map); },
   };
 }
 
-/** Compare: the controller only selects presets (each one carries its network, panes and movers). */
-export function compareStage(selectPreset: (id: string) => void): PresenterStage {
+/**
+ * Compare: the controller selects presets (each one carries its network, panes
+ * and movers); a restart / map switch goes to the CompareView, which resets its
+ * panes and asks the lab room (through the reference pane) to start over.
+ */
+export function compareStage(selectPreset: (id: string) => void, restart: (map?: MapId) => void): PresenterStage {
   const none = () => {};
   return {
     applyNetwork: none,
@@ -35,5 +43,7 @@ export function compareStage(selectPreset: (id: string) => void): PresenterStage
     setInvincible: none,
     nudge: none,
     setComparePreset: selectPreset,
+    setEndless: none, // the lab room has no match clock
+    restartGame: restart,
   };
 }

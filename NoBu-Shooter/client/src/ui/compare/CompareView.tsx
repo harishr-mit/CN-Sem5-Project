@@ -10,7 +10,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import NET from '@nobu/shared/config/net';
 import { MOVER_PATTERNS } from '@nobu/shared/sim';
-import type { MoverPattern } from '@nobu/shared/protocol';
+import type { MoverPattern, MapId } from '@nobu/shared/protocol';
 import { nextSync } from '@nobu/shared/sync';
 import { NetClient, type LocalMetrics, type PredictionToggle } from '../../net/NetClient.js';
 import { EmulatorClient } from '../../net/EmulatorClient.js';
@@ -46,6 +46,14 @@ interface CompareViewProps {
   presetRequest?: { id: string; seq: number };
   /** Rendered under the grid in the layout flow (the Presenter caption). */
   footer?: React.ReactNode;
+  /**
+   * Presenter RESTART / map switch: clear the charts and latency averages and
+   * ask the lab room (through the reference spectator) to put every player
+   * back on the spawn, on `map` if given (npm run demo only).
+   */
+  restartRequest?: { map?: MapId; seq: number };
+  /** Told whenever the lab room's map changes (Presenter bar). */
+  onMapChange?: (map: MapId) => void;
 }
 
 type MetricsMap = Record<string, LocalMetrics>;
@@ -62,7 +70,7 @@ const barBtn = (active: boolean, color = 'var(--c-cyan)', narrow = false): React
   border: `1px solid ${active ? color : 'var(--c-border)'}`,
 });
 
-export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, presetRequest, footer }) => {
+export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, presetRequest, footer, restartRequest, onMapChange }) => {
   // ── Long-lived objects (created once) ───────────────────────────
   const [driver] = useState(() => new InputDriver());
   const [emulator] = useState(() => new EmulatorClient(EMULATOR_CONTROL_URL));
@@ -195,9 +203,18 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, pr
     return () => ro.disconnect();
   }, []);
 
+  // Lab map → owner (Presenter bar highlights it)
+  const onMapChangeRef = useRef(onMapChange);
+  onMapChangeRef.current = onMapChange;
+
   // Metrics at 5 Hz (NetClient computes them at 5 Hz)
   useEffect(() => {
+    let lastMap: MapId | null = null;
     const timer = setInterval(() => {
+      if (reference.mapId !== lastMap && reference.latestSnapshot) {
+        lastMap = reference.mapId;
+        onMapChangeRef.current?.(lastMap);
+      }
       const next: MetricsMap = {};
       for (const id of PANE_IDS) next[id] = { ...clients[id].metrics };
       next['REF'] = { ...reference.metrics };
@@ -229,6 +246,15 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, pr
     setNetworkRequest({ network: p.network });
     if (!p.panes.some((x) => x.id === selected)) setSelected(p.panes[0].id);
   }, [selected]);
+
+  // Presenter RESTART / map switch: start the measurements over
+  useEffect(() => {
+    if (!restartRequest) return;
+    reference.devRestart(restartRequest.map);
+    for (const id of PANE_IDS) clients[id].resetLatencySamples();
+    setLagHistory({});
+    setBwHistory({});
+  }, [restartRequest, reference, clients]);
 
   // Presenter: every request re-applies its preset completely (D2)
   useEffect(() => {
@@ -334,7 +360,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, pr
           <button key={m} style={btn(movers.includes(m), '#c6b5ff')} onClick={() => toggleMover(m)}>{MOVER_LABEL[m]}</button>
         ))}
         <button title="Dots at the last drawn positions" style={btn(showTrails, '#c6b5ff')} onClick={() => setShowTrails((v) => !v)}>TRAILS</button>
-        <button title="Ring at the exact true position [T]" style={btn(showTruth, '#c6b5ff')} onClick={() => setShowTruth((v) => !v)}>TRUTH</button>
+        <button title="Dashed ring = where each drone really is right now (server time). The drawn drone trails behind it by the mover lag (network + interpolation delay); with State sync it can overshoot ahead of it at turns [T]" style={btn(showTruth, '#c6b5ff')} onClick={() => setShowTruth((v) => !v)}>TRUTH</button>
         <span style={{ flex: 1 }} />
         <button id="cmp-lab-toggle" style={btn(drawerOpen, 'var(--c-violet)')} onClick={() => setDrawerOpen((o) => !o)}>LAB [TAB]</button>
       </div>

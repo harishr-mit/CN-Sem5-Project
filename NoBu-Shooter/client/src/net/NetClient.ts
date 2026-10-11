@@ -22,7 +22,7 @@ import type {
 import {
   DeltaDecoder, stateToSnap, normalizeSync, sameSync, DEFAULT_SYNC, type SyncSpec, type Velocity,
 } from '@nobu/shared/sync';
-import GAME, { mapDef } from '@nobu/shared/config/game';
+import GAME, { mapDef, type PowerupKind } from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
 import { RemoteErrorTracker, type DrawnEntity } from './remoteError.js';
 import { Extrapolator } from './extrapolate.js';
@@ -272,6 +272,8 @@ export class NetClient {
   private prevFireDown = false;
   /** Developer switch (npm run demo); re-sent after every (re)connect. */
   private devInvincible = false;
+  /** Presenter: stopped match clock (npm run demo); re-sent after every (re)connect. */
+  private devEndless = false;
   /** A PICKUP for us arrived with this snapshot: its state change is not a misprediction. */
   private pickupArrived = false;
 
@@ -534,6 +536,7 @@ export class NetClient {
 
     this.setStatus('connected');
     if (this.devInvincible && this.playerId !== null) this.send({ t: 'dev', invincible: true });
+    if (this.devEndless) this.send({ t: 'dev', endless: true });
     this.emit('welcome', msg.playerId);
   }
 
@@ -782,6 +785,25 @@ export class NetClient {
 
   get devInvincibleOn(): boolean {
     return this.devInvincible;
+  }
+
+  /** Developer: give this power-up now, as if picked up (npm run demo only). */
+  devGive(kind: PowerupKind): void {
+    if (this.connected && this.playerId !== null) this.send({ t: 'dev', give: kind });
+  }
+
+  /** Presenter: stop (or restart) the room's match clock (npm run demo only). */
+  setDevEndless(on: boolean): void {
+    this.devEndless = on;
+    if (this.connected) this.send({ t: 'dev', endless: on });
+  }
+
+  /**
+   * Presenter: restart the room's game, optionally on another map (npm run
+   * demo only). Works from a spectator too (Compare's reference pane).
+   */
+  devRestart(map?: MapId): void {
+    if (this.connected) this.send({ t: 'dev', restart: true, ...(map ? { map } : {}) });
   }
 
   /**

@@ -1113,6 +1113,52 @@ input[type="range"]:hover::-webkit-slider-thumb {
   .metrics-grid .metric-value { font-size: 0.95rem !important; }
   .metrics-grid .metric-value span { font-size: 0.6rem !important; }
   .metrics-grid .metric-label { font-size: 0.55rem; letter-spacing: 0.04em; }
+  .metrics-grid .metric-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sync-hint { display: none; } /* the chips' tooltips say the same */
   .lab-panel-inner { padding: var(--sp-s) var(--sp-m); }
   .presets-row .preset-chip { padding: 2px 6px; }
 }
+
+/* SYNC MODEL groups (owner, 2026-10-11): snapshots vs state sync, one chip lit */
+.sync-groups { display: flex; flex-wrap: wrap; gap: var(--sp-xs) var(--sp-m); }
+.sync-group { display: flex; flex-direction: column; gap: 3px; }
+.sync-group + .sync-group { padding-left: var(--sp-m); border-left: 1px solid var(--c-border); }
+.sync-group-title { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.1em; color: var(--c-text-muted); }
+.sync-group-title span { color: var(--c-text-dim); letter-spacing: 0.02em; }
+
+/* Developer: give power-up chips (GAMERULES.md §19) */
+.dev-give { display: flex; flex-direction: column; gap: 4px; }
+.dev-give-title { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.1em; color: var(--c-text-muted); }
+.dev-give-chip { display: inline-flex; align-items: center; gap: 4px; }
+.dev-give-chip img { width: 14px; height: 14px; image-rendering: pixelated; }
+.dev-give-chip:hover { background: rgba(255, 255, 255, 0.06); }
+
+/* Presenter bar: map switching + RESTART (owner, 2026-10-11) */
+.presenter-game {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 var(--sp-s);
+  border-left: 1px solid rgba(255, 179, 0, 0.3);
+}
+.presenter-game-title { font-family: var(--font-mono); font-size: 0.55rem; letter-spacing: 0.08em; color: var(--c-text-muted); white-space: nowrap; }
+.presenter-map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.presenter-map {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 179, 0, 0.35);
+  background: transparent;
+  color: var(--c-text-muted);
+}
+.presenter-map:hover { color: var(--c-amber); border-color: var(--c-amber); }
+.presenter-map.active { background: var(--c-amber); border-color: var(--c-amber); color: #07070f; }
+.presenter-restart { border-color: var(--c-cyan) !important; color: var(--c-cyan) !important; }
+.presenter-restart:hover { background: var(--c-cyan); color: #07070f !important; }
+.hud-timer-endless { display: inline-block; font-family: var(--font-mono); font-size: 1.6em; line-height: 0.9; }

@@ -12,6 +12,7 @@ import { COMPARE_PRESETS, DEFAULT_TOGGLES } from '../client/src/compare/presets.
 import { NetClient, type PredictionToggle } from '../client/src/net/NetClient.js';
 import type { CompareNetwork } from '../client/src/compare/types.js';
 import type { SyncSpec } from '../shared/src/sync/index.js';
+import type { MapId } from '../shared/src/protocol/index.js';
 import { PRESETS } from '../emulator/src/control.js';
 
 /** Records the latest state of everything a step can set, plus a call log. */
@@ -22,14 +23,18 @@ class FakeStage implements PresenterStage {
   invincible = false;
   preset: string | null = null;
   nudges: { dx: number; dy: number }[] = [];
+  endless = false;
+  restarts: (MapId | undefined)[] = [];
   applyNetwork(n: CompareNetwork) { this.network = structuredClone(n); }
   setToggles(t: PredictionToggle) { this.toggles = { ...t }; }
   setSync(s: SyncSpec) { this.sync = { ...s }; }
   setInvincible(on: boolean) { this.invincible = on; }
   nudge(dx: number, dy: number) { this.nudges.push({ dx, dy }); }
   setComparePreset(id: string) { this.preset = id; }
+  setEndless(on: boolean) { this.endless = on; }
+  restartGame(map?: MapId) { this.restarts.push(map); }
   snapshot() {
-    return JSON.stringify({ n: this.network, t: this.toggles, s: this.sync, p: this.preset, i: this.invincible });
+    return JSON.stringify({ n: this.network, t: this.toggles, s: this.sync, p: this.preset, i: this.invincible, e: this.endless });
   }
 }
 
@@ -216,5 +221,60 @@ describe('NetClient change events (plan test 3)', () => {
     expect(syncs).toEqual([{ model: 'delta' }, { model: 'state', hz: 30 }]);
     expect(devs).toEqual([true]);
     expect(c.devInvincibleOn).toBe(true);
+  });
+});
+
+describe('Presenter: endless match, RESTART, map switching (owner, 2026-10-11)', () => {
+  it('the Quick script stops the match clock while presenting; Compare never touches it', () => {
+    const q = new FakeStage();
+    const qc = new PresenterController(QUICK_SCRIPT, q);
+    qc.start();
+    expect(q.endless).toBe(true);
+    qc.stop();
+    expect(q.endless).toBe(false);
+
+    const cs = new FakeStage();
+    const cc = new PresenterController(COMPARE_SCRIPT, cs);
+    cc.start();
+    expect(cs.endless).toBe(false);
+  });
+
+  for (const script of [QUICK_SCRIPT, COMPARE_SCRIPT]) {
+    it(`${script.id}: RESTART resets the game and returns to step 1 in the starting state`, () => {
+      let t = 1000;
+      const fresh = new FakeStage();
+      new PresenterController(script, fresh).start();
+
+      const stage = new FakeStage();
+      const c = new PresenterController(script, stage, () => t);
+      c.start();
+      c.goTo(script.steps.length - 1);
+      t = 9000;
+      c.restart();
+      expect(stage.restarts).toEqual([undefined]);
+      expect(c.index).toBe(0);
+      expect(c.enteredAt).toBe(9000);
+      expect(stage.snapshot()).toBe(fresh.snapshot());
+    });
+  }
+
+  it('map switching restarts the game on that map but keeps the step (no one-off actions)', () => {
+    let t = 1000;
+    const stage = new FakeStage();
+    const changes: string[] = [];
+    const c = new PresenterController(QUICK_SCRIPT, stage, () => t);
+    c.onChange = (_i, s) => changes.push(s.id);
+    c.start();
+    while (c.step.id !== 'Q9') c.next();
+    const before = stage.snapshot();
+    const nudges = stage.nudges.length;
+    t = 5000;
+    c.switchMap('plaza');
+    expect(stage.restarts).toEqual(['plaza']);
+    expect(c.step.id).toBe('Q9');
+    expect(stage.snapshot()).toBe(before);
+    expect(stage.nudges).toHaveLength(nudges);
+    expect(c.enteredAt).toBe(5000);
+    expect(changes[changes.length - 1]).toBe('Q9');
   });
 });
