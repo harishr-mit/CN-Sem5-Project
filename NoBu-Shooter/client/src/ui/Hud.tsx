@@ -102,8 +102,10 @@ export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenContr
   const totalSeconds = Math.max(0, Math.ceil(timeLeftMs / 1000));
   const mins = Math.floor(totalSeconds / 60);
   const secs = totalSeconds % 60;
-  const timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  const isTimeCritical = matchState === 'RUNNING' && totalSeconds <= 10 && totalSeconds > 0;
+  // Presenter mode stops the match clock (match.endless): show ∞ instead of a frozen time
+  const endless = !!snap?.match.endless && matchState === 'RUNNING';
+  const timeStr = endless ? '∞' : `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  const isTimeCritical = !endless && matchState === 'RUNNING' && totalSeconds <= 10 && totalSeconds > 0;
 
   // Sorted scoreboard (top 5)
   const sortedPlayers = snap
@@ -114,8 +116,12 @@ export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenContr
     <div className="hud">
       {/* Timer */}
       {matchState !== 'WAITING' && (
-        <div className={`hud-timer ${isTimeCritical ? 'timer-danger' : ''}`} id="hud-timer">
-          {timeStr}
+        <div
+          className={`hud-timer ${isTimeCritical ? 'timer-danger' : ''}`} id="hud-timer"
+          title={endless ? 'Match clock stopped (Presenter mode)' : undefined}
+        >
+          {/* The display font has no ∞, the fallback glyph is small: scale it up */}
+          {endless ? <span className="hud-timer-endless">∞</span> : timeStr}
           {mapName && <div className="hud-map" id="hud-map">{mapName.toUpperCase()}</div>}
         </div>
       )}

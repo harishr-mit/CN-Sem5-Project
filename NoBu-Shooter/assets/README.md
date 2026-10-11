@@ -76,6 +76,18 @@ The `neon` map keeps its procedural grid and glowing glass obstacles.
 
 Respawn, power-up end and UI clicks are **silent** (owner decision).
 
+## Drawn in code (no file)
+
+Phase 4 added arena details that are baked into textures at start-up rather than
+loaded: the death marker (`death-x`), the remote aim chevron (`aim-chevron`),
+and the respawn pulse rings (the Phase 4 camera glow was removed again on
+2026-10-11). No asset files were added or changed in Phase 4.
+
+Compare panes preload no floors or props (the lab was Neon only); since the
+Presenter can switch the lab's map (2026-10-11), a pane loads that map's floor
+and props on demand the first time it shows it (`loadMapArt` in `assets.ts`).
+The Developer **Give power-up** buttons reuse `sprites/pickups/*.png` as icons.
+
 ## Still wanted
 
 Nothing. Optional extras: a dedicated shotgun blast sound (`sfx/shoot_shotgun.wav`;

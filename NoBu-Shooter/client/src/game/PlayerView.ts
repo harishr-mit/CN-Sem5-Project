@@ -39,6 +39,8 @@ export interface PlayerLook {
   color: number;
   /** Draw the colour ring (off in Compare, and for the local player while the ghost is shown). */
   ring: boolean;
+  /** Aim chevron in front of the ring (remote players in Quick Match, PHASES.md P2). */
+  chevron: boolean;
   alpha: number;
   isLocal: boolean;
   name: string;
@@ -46,7 +48,10 @@ export interface PlayerLook {
   shotAt: number;
 }
 
-/** Textures shared by every PlayerView: the ring and the shoulder pips. */
+/** Distance of the aim chevron's centre from the player (just outside the ring). */
+const CHEVRON_DIST = P_RADIUS + 15;
+
+/** Textures shared by every PlayerView: the ring, the shoulder pips and the aim chevron. */
 export function bakePlayerTextures(scene: Phaser.Scene): void {
   if (!scene.textures.exists('player-ring')) {
     const g = scene.make.graphics({}, false);
@@ -72,6 +77,16 @@ export function bakePlayerTextures(scene: Phaser.Scene): void {
     g.generateTexture('local-marker', 12, 38);
     g.destroy();
   }
+  if (!scene.textures.exists('aim-chevron')) {
+    // White arrowhead pointing right (tinted per player), dark outline for contrast
+    const g = scene.make.graphics({}, false);
+    g.fillStyle(0xffffff, 1);
+    g.fillTriangle(13, 7, 2, 1, 2, 13);
+    g.lineStyle(1.5, 0x000000, 0.7);
+    g.strokeTriangle(13, 7, 2, 1, 2, 13);
+    g.generateTexture('aim-chevron', 15, 14);
+    g.destroy();
+  }
 }
 
 export class PlayerView {
@@ -80,6 +95,7 @@ export class PlayerView {
   private readonly body: Phaser.GameObjects.Sprite;
   private readonly bubble: Phaser.GameObjects.Image | null;
   private readonly marker: Phaser.GameObjects.Image;
+  private readonly chevron: Phaser.GameObjects.Image;
   private readonly tag: Phaser.GameObjects.Text;
 
   private lastX = 0;
@@ -95,6 +111,7 @@ export class PlayerView {
     this.body = scene.add.sprite(0, 0, PLAYER_ATLAS).setScale(PLAYER_SPRITE_SCALE).setDepth(DEPTH.body);
     this.bubble = has(scene, TEX.shield) ? scene.add.image(0, 0, TEX.shield).setDepth(DEPTH.shield).setDisplaySize(62, 62) : null;
     this.marker = scene.add.image(0, 0, 'local-marker').setDepth(DEPTH.marker);
+    this.chevron = scene.add.image(0, 0, 'aim-chevron').setDepth(DEPTH.ring);
     this.tag = scene.add.text(0, 0, '', {
       fontFamily: 'Rajdhani, sans-serif', fontSize: '13px', fontStyle: 'bold',
       stroke: '#000000', strokeThickness: 3,
@@ -106,6 +123,7 @@ export class PlayerView {
     for (const o of [this.feet, this.body, this.tag]) o.setVisible(visible);
     this.ring.setVisible(visible && p.ring);
     this.marker.setVisible(visible && p.isLocal);
+    this.chevron.setVisible(visible && p.chevron);
     if (!visible) { this.bubble?.setVisible(false); this.lastLife = -1; return; }
 
     // Velocity from drawn positions (works for predicted, interpolated and
@@ -142,6 +160,10 @@ export class PlayerView {
 
     for (const s of [this.feet, this.body]) s.setPosition(p.x, p.y).setRotation(p.aim).setAlpha(p.alpha);
     this.marker.setPosition(p.x, p.y).setRotation(p.aim).setAlpha(p.alpha);
+    if (p.chevron) {
+      this.chevron.setPosition(p.x + Math.cos(p.aim) * CHEVRON_DIST, p.y + Math.sin(p.aim) * CHEVRON_DIST)
+        .setRotation(p.aim).setTint(p.color).setAlpha(p.alpha * 0.9);
+    }
 
     // Ring in the player's colour; brighter and pulsing while Speed is on
     const pulse = 0.5 + 0.5 * Math.sin(nowMs / 90);
@@ -165,7 +187,7 @@ export class PlayerView {
   }
 
   destroy(): void {
-    for (const o of [this.ring, this.feet, this.body, this.bubble, this.marker, this.tag]) o?.destroy();
+    for (const o of [this.ring, this.feet, this.body, this.bubble, this.marker, this.chevron, this.tag]) o?.destroy();
   }
 
   private playIfExists(sprite: Phaser.GameObjects.Sprite, key: string, restart = false): void {

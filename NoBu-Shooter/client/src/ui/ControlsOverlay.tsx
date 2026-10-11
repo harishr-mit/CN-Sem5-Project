@@ -21,7 +21,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
       ],
     },
     {
-      category: 'POWER-UPS (walk over one; up to 1 per 2 players)',
+      category: 'POWER-UPS (walk over one; up to one per player, a new one every 7 s)',
       items: [
         { keys: ['RAPID'], desc: 'Rifle for 10 s or 2 magazines (rarest)' },
         { keys: ['SPREAD'], desc: 'Shotgun for 10 s or 2 magazines — 3 pellets per shot' },
@@ -59,6 +59,15 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
         { keys: ['F1', '?'], desc: 'Toggle this Controls Guide' },
       ],
     },
+    {
+      category: 'PRESENTER MODE (landing page buttons)',
+      items: [
+        { keys: ['N'], desc: 'Next step (applies its network, toggles and sync model)' },
+        { keys: ['B'], desc: 'Previous step (exactly the same state again)' },
+        { keys: ['H'], desc: 'Hide / show the caption bar' },
+        { keys: ['END'], desc: 'Button on the bar: leave Presenter mode' },
+      ],
+    },
   ];
 
   return (
@@ -71,9 +80,9 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
         position: 'fixed',
         padding: 'var(--sp-l)',
         zIndex: 1000,
-        backgroundColor: 'rgba(5, 5, 15, 0.82)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
+        // Solid, no backdrop blur: blurring the live WebGL arena every frame
+        // halved the frame rate at 1920×1080 (Phase 4 shots)
+        backgroundColor: 'rgba(5, 5, 15, 0.9)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',

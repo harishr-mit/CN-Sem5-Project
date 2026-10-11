@@ -4,7 +4,7 @@ A real-time multiplayer arena shooter demonstrating client-side prediction, serv
 
 > The game is the demo application; the networking is the point.
 
-**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases (plus the owner's Phase 2.5), each ending with a demoable checkpoint. Phases 1 (correct core netcode), 2 (Compare view), 2.5 (gameplay + textures) and 3 (sync models: full vs delta snapshots vs state sync with extrapolation) are complete; Phase 4 (presenter mode) is next.
+**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases (plus the owner's Phase 2.5), each ending with a demoable checkpoint. Phases 1 (correct core netcode), 2 (Compare view), 2.5 (gameplay + textures), 3 (sync models: full vs delta snapshots vs state sync with extrapolation) and 4 (Presenter mode + polish) are complete; Phase 5 (UDP transport, standalone emulator dashboard) is next.
 
 ---
 
@@ -17,6 +17,7 @@ Follow these steps to get NoBu Shooter up and running on a freshly cloned machin
 - **Node.js**: `v20.0.0` or later ([Download Node.js](https://nodejs.org/))
 - **npm**: `v9.0.0` or later (packaged with Node.js)
 - A modern browser: Google Chrome, Microsoft Edge, Brave, or Mozilla Firefox.
+- For `npm run shots` only: **Google Chrome** installed normally (the script drives it through the project-local `playwright-core`; no browser is downloaded). Another Chromium browser works via `NOBU_CHROME=<path to its .exe>`.
 
 Verify your environment before starting:
 ```bash
@@ -67,9 +68,11 @@ This single command checks that the ports are free and starts:
 Once started, open your browser to:
 👉 **[http://localhost:5173](http://localhost:5173)**
 
-Click **Quick Match (vs bots)** to play, or **Network Lab — Compare** to compare netcode settings side by side: 2–4 panes driven by one keyboard, an optional reference pane connected straight to the server, scripted moving targets, and one-click comparisons (prediction, interpolation, redundancy).
+Click **Quick Match (vs bots)** to play, or **Network Lab — Compare** to compare netcode settings side by side: 2–4 panes driven by one keyboard, an optional reference pane connected straight to the server, scripted moving targets, and one-click comparisons (prediction, interpolation, redundancy, sync models, bandwidth, state rate).
 
-Quick Match rotates through four maps (`neon → warehouse → plaza → overgrown`, one per match), with ammo and reloads, six power-ups at random spots, survivor avatars and sound (`GAMERULES.md`). `npm run demo` also enables a developer **Invincible** switch in the Network Lab (not available any other way). To start on a particular map: `NOBU_MAPS=plaza npm run demo` (PowerShell: `$env:NOBU_MAPS='plaza'; npm run demo`).
+**Presenter mode** (for giving the talk): **Presenter — Quick Match** runs 12 scripted steps in a match (baseline → server delay → prediction → loss → redundancy → reconciliation off → jitter → interpolation → nudge → Nightmare with full / delta / state sync); **Presenter — Compare** steps through the six Compare presets. Each step sets the network, every netcode toggle and the sync model at once and shows a caption bar with what to watch, the expected numbers and a step timer. `N` next, `B` back (exactly the same state again), `H` hides the caption, **END** leaves. Every normal key still works in between. The bar also has **⟲ RESTART** (the game back to its starting case and the talk back to step 1) and **map** buttons (restart the game on that map; the talk stays on its step). In Quick Match the presenter stops the match clock (HUD ∞) and turns on the developer **Invincible** switch so bots can't interrupt; these, RESTART and the map buttons need `npm run demo`. The steps are listed in `docs/DEMO_SCRIPT.md` §12. **Emulator dashboard** (landing page) arrives in Phase 5.
+
+Quick Match rotates through four maps (`neon → warehouse → plaza → overgrown`, one per 2-minute match), with ammo and reloads, six power-ups at random spots, survivor avatars and sound (`GAMERULES.md`). `npm run demo` also enables a developer **Invincible** switch in the Network Lab (not available any other way). To start on a particular map: `NOBU_MAPS=plaza npm run demo` (PowerShell: `$env:NOBU_MAPS='plaza'; npm run demo`).
 
 Stop everything with `Ctrl+C` — all four ports are released. (If the launcher is killed some other way, its child processes notice within ~1 s and exit by themselves.)
 
@@ -80,11 +83,13 @@ Stop everything with `Ctrl+C` — all four ports are released. (If the launcher 
 Ensure your environment passes all test suites and the headless end-to-end simulation:
 
 ```bash
-# Run unit and integration tests (130 tests: sim, protocol, emulator pipeline, game rules,
-# weapons/ammo/reload, power-ups, map layouts, sync models (delta/state encoders, extrapolation),
-# movement keys, movers/spectators, Compare layout/input/presets, and an end-to-end netcode
-# harness: real server + client + emulator pipeline on fake timers, incl. the twin-pane check
-# and full vs delta vs state under Nightmare)
+# Run unit and integration tests (163 tests: sim, protocol, emulator pipeline incl. queue
+# depth and reorder marks, game rules, weapons/ammo/reload, power-ups, map layouts, sync models
+# (delta/state encoders, extrapolation), movement keys, movers/spectators, Compare
+# layout/input/presets, Presenter scripts + controller, developer/Presenter room commands,
+# and an end-to-end netcode harness:
+# real server + client + emulator pipeline on fake timers, incl. the twin-pane check and
+# full vs delta vs state under Nightmare)
 npm test
 
 # Type-check server, emulator, shared code, tests and client
@@ -94,6 +99,12 @@ npm run typecheck
 # (also checks ammo, reload, bot shots, power-ups, the map id, the lab movers, and a
 # delta-sync client that must decode the server's world exactly with far fewer bytes)
 npm run smoke
+
+# Screenshot every screen at 1280×720 and 1920×1080 with local Chrome (starts and stops the
+# demo itself; ≈ 5 min, `-- --fast` ≈ 3 min). Output: NoBu-Shooter/artifacts/shots/ (git-ignored),
+# with fps and console errors per shot in index.json; fails on any console error.
+# Review against docs/VISUAL_CHECKLIST.md
+npm run shots
 
 # Re-pack the player animation atlas after changing frames in assets/sprites/player
 npm run pack-assets
@@ -109,13 +120,16 @@ npm run pack-assets
 | **Aim** | Mouse cursor |
 | **Shoot** | Hold Left Click |
 | **Reload** | `R` (also automatic when the magazine is empty) |
-| **Power-ups** | Walk over one (random spots, ≤ 1 per 2 players): Rapid Fire (rifle), Spread Shot (shotgun), Shield, Speed, Piercing, Dash (`Space`) |
-| **Developer toggle** | `npm run demo` only: Network Lab → **Developer → Invincible** |
+| **Power-ups** | Walk over one (random spots, up to one per player, a new one every 7 s): Rapid Fire (rifle), Spread Shot (shotgun), Shield, Speed, Piercing, Dash (`Space`) |
+| **Developer toggle** | `npm run demo` only: Network Lab → **Developer → Invincible**, and **Give power-up** (Rapid, Spread, Shield, Speed, Pierce, Dash — applied as if picked up) |
 | **Mute sounds** | `M` (volume in Settings, `Esc`) |
 | **Toggle Network Lab** | `Tab` |
 | **Netcode toggles** | `P` prediction, `C` reconciliation (was `R` until 2026-10-10; `R` is now reload), `I` interpolation, `G` ghost (while shown it replaces your cyan ring) |
-| **Sync model** | `Y` cycles Full → Delta → State 10 Hz → State 30 Hz, live (Network Lab → **SYNC MODEL**; remembered; default Full). Full = whole world every snapshot, Delta = only changes since the last acknowledged snapshot, State = records + velocity, extrapolated |
+| **Sync model** | `Y` cycles Full → Delta → State 10 Hz → State 30 Hz, live (Network Lab → **SYNC MODEL**; remembered; default Full). Exactly one is active, shown in two groups: **Snapshots** (interpolated) — Full = whole world every snapshot, Delta = only changes since the last acknowledged snapshot — and **State sync** (extrapolated) — records + velocity at 10 or 30 Hz |
 | **Controls / Settings** | `F1` / `Esc` |
+| **Projector** | Settings → **UI Scale** 100 / 115 / 130 % (all panels and text, not the arena; remembered) |
+| **Network Lab sections** | Click a section title to fold it; the Lab remembers. Defaults fit 1920 × 1080 and 1280 × 720 without scrolling |
+| **Presenter mode** | Landing page **Presenter — Quick Match** / **Presenter — Compare**: `N` next step, `B` previous step, `H` hide the caption; bar buttons **⟲ RESTART**, **map** (Neon / Warehouse / Plaza / Overgrown — restarts the game there) and **END** |
 | **Leave match** | **◄ LEAVE MATCH** (bottom-left of the arena), or `Esc` → **◄ LEAVE MATCH — BACK TO MAIN MENU** (end of the settings menu). Compare: **◄ EXIT** (top bar) |
 | **Network Presets** | Keys `1` through `5` |
 | **Preset 1** | Baseline (no impairment) |
@@ -145,14 +159,17 @@ CN-Sem5-Project/
 │   ├── ASSUMPTIONS.md      # Design decisions and their reasons
 │   ├── PHASE2_PLAN.md      # Phase 2 implementation plan (Compare view, movers)
 │   ├── PHASE3_PLAN.md      # Phase 3 implementation plan (sync models)
+│   ├── PHASE4_PLAN.md      # Phase 4 implementation plan (Presenter mode, polish, shots)
+│   ├── VISUAL_CHECKLIST.md # What to check on the `npm run shots` screenshots
 │   └── archive/SPEC-v1.md  # Original v1 build spec (archived)
 └── NoBu-Shooter/           # Primary application workspace
     ├── assets/             # Textures, sprites, FX and sound effects (inventory: assets/README.md, licences: assets/CREDITS.md)
-    ├── client/             # Phaser 3 + React HUD & Network Lab UI (Vite)
+    ├── artifacts/          # Generated by `npm run shots` (git-ignored)
+    ├── client/             # Phaser 3 + React HUD & Network Lab UI (Vite); presenter/ = Presenter scripts + controller
     ├── emulator/           # Standalone bidirectional network impairment proxy
     ├── server/             # Authoritative 60 Hz headless WebSocket game server
     ├── shared/             # Deterministic simulation, protocol codec, sync models (full / delta / state)
-    ├── scripts/            # Demo launcher, smoke test, headless bot
+    ├── scripts/            # Demo launcher, smoke test, headless bot, screenshots (shots.mjs)
     └── tests/              # Vitest suites incl. the end-to-end netcode harness
 ```
 
@@ -185,7 +202,9 @@ CN-Sem5-Project/
 - **Dependencies not found after pulling**:
   Run `npm install` at root, or run `cd NoBu-Shooter && npm install`.
 - **`D` (or `P`, `R`, `C`, `1`–`5`) does nothing, while the arrow keys work**:
-  A browser extension is consuming the key before the page sees it. **Vimium** does exactly this: it maps `d` (scroll half page down), `r` (reload!), `p` (open clipboard URL), `y` (copy URL — the sync-model key) and digits (count prefix). Exclude the demo in Vimium: click the Vimium toolbar icon on the demo tab and choose *Exclude*, or add `http://localhost:5173/*` and `http://127.0.0.1:5173/*` with an empty key list under Vimium Options → *Excluded URLs and keys*. A browser profile without such extensions works too.
+  A browser extension is consuming the key before the page sees it. **Vimium** does exactly this: it maps `d` (scroll half page down), `r` (reload!), `p` (open clipboard URL), `y` (copy URL — the sync-model key), `n` / `b` / `H` (find next, bookmarks, history back — the Presenter keys) and digits (count prefix). Exclude the demo in Vimium: click the Vimium toolbar icon on the demo tab and choose *Exclude*, or add `http://localhost:5173/*` and `http://127.0.0.1:5173/*` with an empty key list under Vimium Options → *Excluded URLs and keys*. A browser profile without such extensions works too.
+- **`npm run shots` says it can't start Google Chrome**:
+  Install Chrome, or point the script at another Chromium browser: `NOBU_CHROME="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" npm run shots` (PowerShell: `$env:NOBU_CHROME='…'; npm run shots`). Ports 5173/8080/9000/9001 must be free (stop `npm run demo` first).
 - **Canvas render error or blank page**:
   Hard refresh the browser (`Ctrl + F5`) to clear Vite cache. Ensure your browser supports WebGL / HTML5 Canvas.
 

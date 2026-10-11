@@ -92,6 +92,15 @@ describe('Wire Protocol Serialization & Validation (SPEC.md §8)', () => {
     expect(decodeClient(JSON.stringify({ t: 'input', inputs: [{ s: 1, k: 8, a: 0, f: 0, d: 1 }] }))).not.toBeNull();
     expect(decodeClient(JSON.stringify({ t: 'dev', invincible: true }))).toEqual({ t: 'dev', invincible: true });
     expect(decodeClient(JSON.stringify({ t: 'dev', invincible: 'yes' }))).toBeNull();
+    // Owner revision 2026-10-11: give / endless / restart / map (all optional, at least one)
+    expect(decodeClient(JSON.stringify({ t: 'dev', give: 'speed' }))).toEqual({ t: 'dev', give: 'speed' });
+    expect(decodeClient(JSON.stringify({ t: 'dev', give: 'ammo' }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'dev', endless: false }))).toEqual({ t: 'dev', endless: false });
+    expect(decodeClient(JSON.stringify({ t: 'dev', restart: true, map: 'plaza' }))).toEqual({ t: 'dev', restart: true, map: 'plaza' });
+    expect(decodeClient(JSON.stringify({ t: 'dev', restart: false }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'dev', map: 'moon' }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'dev' }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'dev', other: 1 }))).toBeNull();
   });
 
   it('validates hello.spectate and the lab message (PHASES.md C2, C3)', () => {

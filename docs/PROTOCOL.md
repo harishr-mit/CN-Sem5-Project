@@ -89,11 +89,23 @@ Forces server-side misprediction to demonstrate reconciliation.
 }
 ```
 
-### 2.6 `dev` (Developer Switches)
-Honoured only when the server runs with `NOBU_DEV=1` (`npm run demo`); ignored otherwise (`GAMERULES.md` §19). The client re-sends it after every reconnect.
+### 2.6 `dev` (Developer Switches and Presenter Commands)
+Honoured only when the server runs with `NOBU_DEV=1` (`npm run demo`); ignored otherwise (`GAMERULES.md` §19). Every field is optional; at least one must be present (an empty or unknown-only `dev` is rejected as a bad message).
 ```json
 { "t": "dev", "invincible": true }
+{ "t": "dev", "give": "speed" }
+{ "t": "dev", "endless": true }
+{ "t": "dev", "restart": true, "map": "plaza" }
 ```
+| Field | Acts on | Meaning |
+|---|---|---|
+| `invincible` (bool) | the sender's player | Hits never kill (re-sent by the client after every reconnect) |
+| `give` (power-up kind) | the sender's player | Apply that power-up now, exactly like a pickup, with a `PICKUP` event at the player's position (alive player, running match, rooms with power-ups) |
+| `endless` (bool) | the room | Presenter: stop / restart the match clock; while stopped, snapshots carry `match.endless: true` and a frozen `timeLeftMs`. Cleared when the last human leaves; re-sent by the client after a reconnect |
+| `restart` (`true`) | the room | Presenter: timed rooms begin a new match on the same map through the countdown (scores 0); the lab puts every player back on its spawn (new `life`) |
+| `map` (map id) | the room | Presenter: like `restart`, on that map (the rotation index does not move) |
+
+Room commands may also come from a spectator (the Compare reference pane); player switches need a player.
 
 ### 2.7 `lab` (Scripted Movers)
 Selects the active scripted movers (PHASES.md C3). Accepted only in rooms with `movers: true` in `game.json` (only `lab`); ignored elsewhere. Any connection in the room may send it, spectators included.
@@ -211,13 +223,16 @@ Broadcast at 30 Hz.
   ]
 }
 ```
+
+While a Presenter has stopped the match clock (`dev.endless`, §2.6), `match` also carries `"endless": true` and `timeLeftMs` stays frozen.
+
 - `tick`: Monotonic simulation tick. Snapshots with `tick <= lastAppliedTick` are dropped.
 - `ack`: Highest input sequence processed for the recipient client (`0` in spectator snapshots).
 - `players[].mover` (optional): set only on scripted lab movers (`"circle"`, `"zigzag"`, `"reversal"`, `"stopgo"`). Movers look like remote players (`bot: true`, `alive: true`, `life: 1`, `score: 0`) so interpolation treats them like any other remote entity. Their position is exactly `moverPath(pattern, tick / 60)` from `shared/src/sim/movers.ts`, so clients can compute the true position at any server time.
 - `match.map`: the map being played (`neon`, `warehouse`, `plaza`, `overgrown`; `GAMERULES.md` §3). It changes only at `COUNTDOWN`; the client switches its art and its prediction geometry when it does.
 - `players[]`: `aim` (radians, sprite rotation), `weapon` (`handgun` | `rifle` | `shotgun`), `reloading`, `shield` (Shield power-up), `fast` (Speed power-up), `invincible: true` (developer toggle; omitted when off). Movers send `aim: 0`, `weapon: "handgun"` and `false` flags.
 - `projectiles[].pierce: true` (omitted when false): fired under the Piercing power-up, passes through obstacles.
-- `pickups`: power-ups on the map, at random spots; `id` is unique per room (a new id for every power-up). At most ⌊participants / 2⌋; empty outside `RUNNING` and always empty in `lab`. Pickups are never predicted.
+- `pickups`: power-ups on the map, at random spots; `id` is unique per room (a new id for every power-up). At most one per participant (`powerups.perPlayers` = 1); empty outside `RUNNING` and always empty in `lab`. Pickups are never predicted.
 - `me` (absent for spectators): the recipient's own weapon state (`CombatState`, `shared/src/sim/combat.ts`), exact to the acknowledged input (`*Ticks` count inputs, 60 per second; `reserve: -1` = unlimited). The client replays its unacknowledged inputs on top of it, like its position.
 - `events`: Array of redundant event entries covering the last 500 ms; deduplicated via `eid`.
 - Size: these Phase 2.5 fields make a 4-player main-room snapshot ≈ 2.1 kB (≈ 1.6 kB before), ≈ 510 kbps at 30 Hz — the full-snapshot baseline for Phase 3 (`docs/ASSUMPTIONS.md` #40).
@@ -326,8 +341,8 @@ Emulator → UI:
 | Event | Contents |
 |---|---|
 | `{ "evt": "state", "sessions", "defaults", "preset", "presets" }` | On connect and on every change. `preset` is the name of the preset last applied to `all`, or `"Custom"` after a manual change |
-| `{ "evt": "stats", "t", "sessions": [{ "id", "label", "up", "down" }] }` | Every 500 ms. Per direction: cumulative `pktsIn`, `pktsDelivered`, `pktsDroppedLoss`, `pktsDroppedQueue`, `pktsDuplicated`, `pktsReordered`, `lossPct`; last-second `throughputKbps`, `lossPctWindow`, `pktsInWindow`, `deliveredWindow` |
-| `{ "evt": "packets", "items": [{ "sid", "dir", "size", "preview", "fate", "delayMs", "t" }] }` | Every 100 ms while subscribed; the newest ≤ 60 events. `fate`: `delivered`, `dropped-loss`, `dropped-queue`, `duplicated` |
+| `{ "evt": "stats", "t", "sessions": [{ "id", "label", "up", "down" }] }` | Every 500 ms. Per direction: cumulative `pktsIn`, `pktsDelivered`, `pktsDroppedLoss`, `pktsDroppedQueue`, `pktsDuplicated`, `pktsReordered`, `lossPct`; last-second `throughputKbps`, `lossPctWindow`, `pktsInWindow`, `deliveredWindow`; current **`queueMs`** (Phase 4): how long a packet arriving now would wait for the bandwidth cap before it starts transmitting (0 without a cap; packets that would wait longer than `queueLimitMs` are tail-dropped as `dropped-queue`) |
+| `{ "evt": "packets", "items": [{ "sid", "dir", "size", "preview", "fate", "delayMs", "t", "reordered"? }] }` | Every 100 ms while subscribed; the newest ≤ 60 events. `fate`: `delivered`, `dropped-loss`, `dropped-queue`, `duplicated`. `t` = when the packet reached the emulator (ms since epoch); `delayMs` = how long it was held (queue + latency + jitter + reorder hold; for `dropped-queue`, the queue wait it was refused). A `delivered` event is sent when the packet is delivered, a drop or `duplicated` event at once. **`reordered: true`** (Phase 4) marks a delivery the reorder stage held back by `reorderDelayMs`, so packets sent after it overtook it; the field is absent otherwise |
 
 Link config fields (defaults): `latencyMs` 0, `jitterMs` 0, `jitterDist` `"normal"`, `lossPct` 0, `lossModel` `"random"` (or `"burst"`, Gilbert-Elliott), `burstLen` 4, `duplicatePct` 0, `reorderPct` 0, `reorderDelayMs` **80**, `bandwidthKbps` 0 (unlimited), `queueLimitMs` 400, `allowJitterReorder` false. The reorder delay must exceed the input send interval + one tick (~50 ms) for reordered inputs to act like loss (see `docs/ASSUMPTIONS.md` #10).
 

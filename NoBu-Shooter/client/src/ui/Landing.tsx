@@ -3,9 +3,10 @@ import React, { useState } from 'react';
 interface LandingProps {
   onStartQuickMatch: (name: string) => void;
   onStartCompare: (name: string) => void;
+  onStartPresenter: (script: 'quick' | 'compare', name: string) => void;
 }
 
-export const Landing: React.FC<LandingProps> = ({ onStartQuickMatch, onStartCompare }) => {
+export const Landing: React.FC<LandingProps> = ({ onStartQuickMatch, onStartCompare, onStartPresenter }) => {
   const [name, setName] = useState(() => {
     return 'PILOT_' + Math.floor(100 + Math.random() * 900);
   });
@@ -62,8 +63,33 @@ export const Landing: React.FC<LandingProps> = ({ onStartQuickMatch, onStartComp
             NETWORK LAB — COMPARE
           </button>
 
+          {/* Presenter mode (PHASES.md P1): scripted steps, N / B / H */}
+          <div className="landing-row">
+            <button
+              id="presenter-quick-btn"
+              className="btn-ghost landing-presenter"
+              onClick={() => onStartPresenter('quick', name.trim() || 'PILOT_01')}
+              title="12 scripted steps in a Quick Match: N next, B back, H hide the caption"
+            >
+              PRESENTER — QUICK MATCH
+            </button>
+            <button
+              id="presenter-compare-btn"
+              className="btn-ghost landing-presenter"
+              onClick={() => onStartPresenter('compare', name.trim() || 'PILOT_01')}
+              title="The six Compare presets as steps: N next, B back, H hide the caption"
+            >
+              PRESENTER — COMPARE
+            </button>
+          </div>
+
+          <button id="dashboard-btn" className="btn-ghost landing-disabled" disabled title="Arrives in Phase 5">
+            EMULATOR DASHBOARD <span>· PHASE 5</span>
+          </button>
+
           <p className="landing-controls-hint">
             WASD / ARROWS: Move • MOUSE: Aim • CLICK: Fire • R: Reload • SPACE: Dash • M: Mute • TAB: Network Lab • 1–5: Presets
+            • P / C / I / G: Netcode toggles • Y: Sync model • PRESENTER: N next • B back • H hide
           </p>
 
           <button id="credits-btn" className="landing-credits-link" onClick={() => setShowCredits(true)}>

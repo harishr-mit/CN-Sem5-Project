@@ -10,7 +10,7 @@ const P = GAME.powerups;
 const W = GAME.arena.width;
 const H = GAME.arena.height;
 
-/** At most one power-up per `perPlayers` participants (4 players → 2). */
+/** At most one power-up per `perPlayers` participants (owner 2026-10-11: perPlayers 1 → one per participant, 4 players → 4). */
 export function powerupCap(participants: number): number {
   return Math.floor(participants / P.perPlayers);
 }
@@ -57,7 +57,8 @@ export function randomPowerupSpot(
     const p = { x: Math.round(P.edgeMarginPx + rng() * (W - 2 * P.edgeMarginPx)), y: Math.round(P.edgeMarginPx + rng() * (H - 2 * P.edgeMarginPx)) };
     if (!isValidPowerupSpot(map, p)) continue;
     if (far(p, pickups, P.minSeparationPx) && far(p, players, P.playerClearancePx)) return p;
-    fallback ??= p;
+    // Fallback: valid and at least not overlapping another power-up (up to 8 now, one per player)
+    if (far(p, pickups, 4 * P.radius)) fallback ??= p;
   }
   return fallback;
 }

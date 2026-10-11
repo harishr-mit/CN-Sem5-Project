@@ -54,7 +54,10 @@ export class Sfx {
     const sound = this.scene.sound.add(key, { volume: gain * soundPrefs.volume, rate: opts.rate ?? 1 });
     this.voices++;
     let finished = false;
-    const done = () => { if (finished) return; finished = true; this.voices--; sound.destroy(); };
+    // Destroy later, not inside the event: Phaser's own destroy (game teardown)
+    // emits STOP before marking the sound removed, and a nested destroy there
+    // nulled its audio nodes mid-way ("reading 'disconnect'" on leaving a match).
+    const done = () => { if (finished) return; finished = true; this.voices--; queueMicrotask(() => sound.destroy()); };
     sound.once(Phaser.Sound.Events.COMPLETE, done);
     sound.once(Phaser.Sound.Events.STOP, done);
     if (!sound.play()) done();

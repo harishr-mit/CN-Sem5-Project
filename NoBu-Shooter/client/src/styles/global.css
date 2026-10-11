@@ -51,8 +51,11 @@
   --sp-xl: 24px;
   --sp-2xl: 32px;
 
+  /* Projector UI scale (Settings → UI Scale, PHASES.md P4): rem sizes and the Lab width follow it */
+  --ui-scale: 1;
+
   /* Panel */
-  --panel-w: clamp(280px, 26vw, 420px);
+  --panel-w: calc(clamp(280px, 26vw, 420px) * var(--ui-scale));
   --panel-radius: 10px;
   --panel-blur:   16px;
 }
@@ -66,7 +69,7 @@ html, body {
   background: var(--c-bg);
   color: var(--c-text);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-scale));
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
 }
@@ -331,10 +334,40 @@ input[type="range"]:hover::-webkit-slider-thumb {
 .packet-strip {
   position: relative;
   height: 72px;
+  flex: 0 0 72px;
+  display: flex;
+  align-items: stretch;
   background: rgba(0,0,0,0.6);
   border-top: 1px solid var(--c-border);
   overflow: hidden;
 }
+.packet-strip-canvas { flex: 1; min-width: 0; height: 100%; display: block; }
+.packet-strip-side {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 5px;
+  padding: 0 10px 0 6px;
+  border-left: 1px solid rgba(124, 77, 255, 0.2);
+}
+/* Legend (PHASES.md P5): what the dots and the queue bar mean */
+.packet-legend {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 1px 8px;
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.04em;
+  color: var(--c-text-muted);
+  white-space: nowrap;
+}
+.packet-legend span { display: inline-flex; align-items: center; gap: 3px; }
+.packet-legend i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; }
+.packet-legend i.ring { width: 7px; height: 7px; border: 1.5px solid #fff; background: transparent; }
+.packet-legend i.twin { width: 10px; height: 6px; border-radius: 3px; background: radial-gradient(circle at 25% 50%, #c6b5ff 2px, transparent 2.5px), radial-gradient(circle at 75% 50%, #c6b5ff 2px, transparent 2.5px); }
+.packet-legend i.bar { width: 12px; height: 4px; border-radius: 1px; background: var(--c-amber); }
 
 /* ── Timer colors ────────────────────────────────────────────── */
 .timer-danger { color: var(--c-red); animation: pulse 1s infinite; }
@@ -919,3 +952,213 @@ input[type="range"]:hover::-webkit-slider-thumb {
 .credits-modal code { font-family: var(--font-mono); font-size: 0.8rem; color: var(--c-lime); }
 .credits-modal .btn-ghost { align-self: flex-end; }
 
+/* ── Landing: Presenter + dashboard buttons (PHASES.md P6) ──── */
+.landing-form { width: 360px; }
+.landing-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-s);
+  width: 100%;
+}
+.landing-presenter {
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
+  padding: var(--sp-s);
+  border-color: var(--c-amber);
+  color: var(--c-amber);
+}
+.landing-presenter:hover { border-color: var(--c-amber); color: #07070f; background: var(--c-amber); }
+.landing-disabled,
+.landing-disabled:hover {
+  width: 100%;
+  font-size: 0.8rem;
+  border-style: dashed;
+  border-color: var(--c-border);
+  color: var(--c-text-dim);
+  cursor: not-allowed;
+}
+.landing-disabled span { font-family: var(--font-mono); font-weight: 400; font-size: 0.7rem; }
+
+/* ── Presenter caption bar (PHASES.md P1, docs/PHASE4_PLAN.md D5) ── */
+.presenter-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: var(--sp-m);
+  padding: var(--sp-s) var(--sp-m);
+  background: rgba(20, 14, 4, 0.92);
+  border-top: 2px solid var(--c-amber);
+  box-shadow: 0 -4px 18px rgba(255, 179, 0, 0.12);
+  min-height: 0;
+}
+.presenter-count {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  padding-right: var(--sp-m);
+  border-right: 1px solid rgba(255, 179, 0, 0.3);
+}
+.presenter-kicker { font-family: var(--font-display); font-size: 0.55rem; letter-spacing: 0.2em; color: var(--c-amber); }
+.presenter-num { font-family: var(--font-display); font-size: 1.35rem; font-weight: 700; color: var(--c-text); line-height: 1.1; }
+.presenter-num span { font-size: 0.8rem; color: var(--c-text-muted); font-weight: 400; }
+.presenter-timer { font-family: var(--font-mono); font-size: 0.75rem; color: var(--c-amber); }
+.presenter-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.presenter-title {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  color: var(--c-amber);
+  text-transform: uppercase;
+}
+.presenter-caption { font-size: 1rem; line-height: 1.3; color: var(--c-text); }
+.presenter-expect { font-family: var(--font-mono); font-size: 0.78rem; color: var(--c-lime); }
+.presenter-expect span {
+  font-size: 0.62rem;
+  letter-spacing: 0.15em;
+  color: #07070f;
+  background: var(--c-lime);
+  border-radius: 2px;
+  padding: 0 4px;
+  margin-right: 4px;
+}
+.presenter-notice { font-size: 0.75rem; color: var(--c-red); }
+.presenter-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+}
+.presenter-nav { display: flex; gap: 4px; }
+.presenter-nav .btn-ghost,
+.presenter-end {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 3px 10px;
+  border-color: rgba(255, 179, 0, 0.5);
+  color: var(--c-amber);
+}
+.presenter-nav .btn-ghost:disabled { opacity: 0.3; cursor: default; }
+.presenter-end { border-color: var(--c-red); color: var(--c-red); }
+.presenter-end:hover { background: var(--c-red); color: #07070f; border-color: var(--c-red); }
+.presenter-hint { font-family: var(--font-mono); font-size: 0.62rem; color: var(--c-text-muted); }
+
+/* ── Lab sections: click the title to open / close (PHASES.md P4) ── */
+.lab-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--c-border);
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+.lab-section-toggle:hover { color: var(--c-cyan); }
+.lab-section-toggle > span:nth-child(2) { white-space: nowrap; }  /* the summary truncates instead */
+/* CSS triangle: the display font has no ▸ glyph */
+.lab-section-caret {
+  flex: 0 0 auto;
+  width: 0; height: 0;
+  border-left: 5px solid var(--c-cyan);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+.lab-section.closed .lab-section-caret { transform: none; }
+.lab-section-summary {
+  margin-left: auto;
+  max-width: 55%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--c-text-dim);
+}
+.lab-section.closed { gap: 0; }
+.lab-section .lab-footer { border-top: none; padding-top: 0; }
+
+/* Short screens (≤ 920 px, e.g. 1600 × 900): tighter rows so the default Lab fits */
+@media (max-height: 920px) {
+  .lab-panel-inner { gap: var(--sp-s); }
+  .lab-section { gap: var(--sp-xs); }
+  .toggle-row { padding: 0; }
+  .toggle-row label { font-size: 0.8rem; }
+  .metrics-grid .metric-tile { padding: 5px var(--sp-s); }
+}
+
+/* Shorter screens (≤ 800 px, e.g. 1280 × 720): compact 3-column metric tiles */
+@media (max-height: 800px) {
+  .metrics-grid { grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-xs); }
+  .metrics-grid .metric-tile { padding: 4px 6px; }
+  .metrics-grid .metric-value { font-size: 0.95rem !important; }
+  .metrics-grid .metric-value span { font-size: 0.6rem !important; }
+  .metrics-grid .metric-label { font-size: 0.55rem; letter-spacing: 0.04em; }
+  .metrics-grid .metric-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sync-hint { display: none; } /* the chips' tooltips say the same */
+  .lab-panel-inner { padding: var(--sp-s) var(--sp-m); }
+  .presets-row .preset-chip { padding: 2px 6px; }
+}
+
+/* SYNC MODEL groups (owner, 2026-10-11): snapshots vs state sync, one chip lit */
+.sync-groups { display: flex; flex-wrap: wrap; gap: var(--sp-xs) var(--sp-m); }
+.sync-group { display: flex; flex-direction: column; gap: 3px; }
+.sync-group + .sync-group { padding-left: var(--sp-m); border-left: 1px solid var(--c-border); }
+.sync-group-title { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.1em; color: var(--c-text-muted); }
+.sync-group-title span { color: var(--c-text-dim); letter-spacing: 0.02em; }
+
+/* Developer: give power-up chips (GAMERULES.md §19) */
+.dev-give { display: flex; flex-direction: column; gap: 4px; }
+.dev-give-title { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.1em; color: var(--c-text-muted); }
+.dev-give-chip { display: inline-flex; align-items: center; gap: 4px; }
+.dev-give-chip img { width: 14px; height: 14px; image-rendering: pixelated; }
+.dev-give-chip:hover { background: rgba(255, 255, 255, 0.06); }
+
+/* Presenter bar: map switching + RESTART (owner, 2026-10-11) */
+.presenter-game {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 var(--sp-s);
+  border-left: 1px solid rgba(255, 179, 0, 0.3);
+}
+.presenter-game-title { font-family: var(--font-mono); font-size: 0.55rem; letter-spacing: 0.08em; color: var(--c-text-muted); white-space: nowrap; }
+.presenter-map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.presenter-map {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 179, 0, 0.35);
+  background: transparent;
+  color: var(--c-text-muted);
+}
+.presenter-map:hover { color: var(--c-amber); border-color: var(--c-amber); }
+.presenter-map.active { background: var(--c-amber); border-color: var(--c-amber); color: #07070f; }
+.presenter-restart { border-color: var(--c-cyan) !important; color: var(--c-cyan) !important; }
+.presenter-restart:hover { background: var(--c-cyan); color: #07070f !important; }
+.hud-timer-endless { display: inline-block; font-family: var(--font-mono); font-size: 1.6em; line-height: 0.9; }

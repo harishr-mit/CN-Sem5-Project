@@ -12,10 +12,10 @@ import {
 import type { Rect, Vec2, MoverPattern, MoverCfg, MoveCfg } from '@nobu/shared/sim';
 import type {
   InputEntry, MsgSnap, PlayerSnap, ProjectileSnap, PickupSnap,
-  MatchState, GameEvent, MatchResults, ScoreEntry, WeaponId,
+  MatchState, GameEvent, MatchResults, ScoreEntry, WeaponId, MsgDev,
 } from '@nobu/shared/protocol';
 import type { Velocity, VelocityTable } from '@nobu/shared/sync';
-import GAME, { mapDef, isMapId, type MapDef, type MapId } from '@nobu/shared/config/game.js';
+import GAME, { mapDef, isMapId, type MapDef, type MapId, type PowerupKind } from '@nobu/shared/config/game.js';
 import NET from '@nobu/shared/config/net.js';
 import { BotController } from '../bots.js';
 import { pickSpawnPoint } from './spawn.js';
@@ -49,8 +49,8 @@ const PICKUP_REACH = P_RADIUS + GAME.powerups.radius;
 const PICKUP_RESPAWN_TICKS = Math.round(GAME.powerups.respawnMs * SIM_HZ / 1000);
 /** A move longer than this in one tick is a teleport (respawn, perturb), not velocity. */
 const MAX_STEP_PX = 30;
-/** Developer switches (dev message) are honoured only under `npm run demo`. */
-const DEV_MODE = typeof process !== 'undefined' && process.env.NOBU_DEV === '1';
+/** Developer switches (dev message) are honoured only under `npm run demo` (read per call, so tests can set it). */
+const devMode = (): boolean => typeof process !== 'undefined' && process.env.NOBU_DEV === '1';
 
 function moveCfgFor(map: MapDef): MoveCfg {
   return {
@@ -123,6 +123,8 @@ export class Room {
   private moveCfg: MoveCfg;
   private readonly rotation: MapId[];
   private matchesStarted = 0;
+  /** Presenter mode (dev): the match clock is stopped. Cleared when the last human leaves. */
+  private endless = false;
 
   /** Scripted movers, keyed by pattern. Kept out of `players` (no player cap, no inputs). */
   private movers = new Map<MoverPattern, MoverState>();
@@ -263,6 +265,8 @@ export class Room {
       }
       this.state.matchState = 'WAITING';
     }
+    // A presenter who closed the tab must not leave the room without a clock
+    if (!hasHumans) this.endless = false;
     this.clearMoversIfEmpty();
   }
 
@@ -310,6 +314,7 @@ export class Room {
         ? (this.state.endedTicksLeft * 1000 / SIM_HZ)
         : 0,
       results: matchState === 'ENDED' ? this._matchResults : null,
+      ...(this.endless && this.roomCfg.timed ? { endless: true as const } : {}),
     };
     const projSnaps: ProjectileSnap[] = [...projectiles.values()].map(proj => ({
       id: proj.id,
@@ -525,7 +530,7 @@ export class Room {
 
   /**
    * Power-ups (GAMERULES.md §6b): collect (lowest player id wins a same-tick
-   * tie), keep at most ⌊participants / 2⌋ on the map, and add one at a random
+   * tie), keep at most ⌊participants / perPlayers⌋ (one per participant) on the map, and add one at a random
    * spot `respawnMs` after the count drops below the cap.
    */
   private stepPickups(): void {
@@ -569,9 +574,57 @@ export class Room {
   /** Developer invincibility (only under `npm run demo`). Returns whether it was applied. */
   setDev(playerId: number, invincible: boolean): boolean {
     const p = this.state.players.get(playerId);
-    if (!DEV_MODE || !p) return false;
+    if (!devMode() || !p) return false;
     p.invincible = invincible;
     return true;
+  }
+
+  /**
+   * Developer / Presenter commands (`dev` message, only under `npm run demo`).
+   * `playerId` is null for a spectator, which may use the room commands only.
+   * Returns whether anything was applied.
+   */
+  devCommand(playerId: number | null, cmd: Omit<MsgDev, 't'>): boolean {
+    if (!devMode()) return false;
+    const p = playerId === null ? undefined : this.state.players.get(playerId);
+    let applied = false;
+    if (cmd.invincible !== undefined && p) { p.invincible = cmd.invincible; applied = true; }
+    if (cmd.give && p) applied = this.givePowerup(p, cmd.give) || applied;
+    if (cmd.endless !== undefined) { this.endless = cmd.endless; applied = true; }
+    if (cmd.map || cmd.restart) { this.restart(cmd.map); applied = true; }
+    return applied;
+  }
+
+  get isEndless(): boolean { return this.endless; }
+
+  /**
+   * Give a power-up as if picked up (same effect, same PICKUP event, so the
+   * client adopts the change instead of treating it as a misprediction).
+   * Only for an alive player in a running match of a room with power-ups.
+   */
+  private givePowerup(p: PlayerState, kind: PowerupKind): boolean {
+    if (!this.roomCfg.powerups || this.state.matchState !== 'RUNNING' || !p.alive) return false;
+    if (applyPowerup(p.combat, kind).shield) p.shield = true;
+    this.emitEvent({ type: 'PICKUP', playerId: p.id, kind, x: p.x, y: p.y });
+    return true;
+  }
+
+  /**
+   * Presenter restart, optionally on another map. Timed rooms begin a new
+   * match through the usual countdown (scores 0, spawn points, power-ups
+   * refilled); the rotation index is not advanced by an explicit map. Untimed
+   * rooms (lab) switch the map at once and put every player back on the spawn.
+   */
+  private restart(map?: MapId): void {
+    this._matchResults = null;
+    if (this.roomCfg.timed) {
+      // Same map unless one is given; the rotation index never moves for a restart
+      this.startCountdown(map ?? this.map.id);
+      return;
+    }
+    if (map) this.setMap(map);
+    this.state.projectiles.clear();
+    for (const p of this.state.players.values()) this.respawnPlayer(p);
   }
 
   /** Switch the geometry (COUNTDOWN only, so nobody is moving). */
@@ -707,22 +760,30 @@ export class Room {
     }
   }
 
-  private startCountdown(): void {
+  /** `map` (Presenter) replaces the next rotation map without advancing the rotation. */
+  private startCountdown(map?: MapId): void {
     this.state.matchState = 'COUNTDOWN';
     this.state.countdownTicksLeft = COUNTDOWN_TICKS;
 
     // Next map in the rotation (GAMERULES.md §3); the first match plays rotation[0]
-    this.setMap(this.rotation[this.matchesStarted++ % this.rotation.length]);
+    this.setMap(map ?? this.rotation[this.matchesStarted++ % this.rotation.length]);
     this.state.projectiles.clear();
     this.resetPickups(false);
 
-    // Place all players at spawn points
+    // Place all players at spawn points (GAMERULES.md §2). They stay alive and
+    // visible there — movement and firing are ignored outside RUNNING — and get
+    // a new life number, so every client treats the move as a respawn, not a
+    // misprediction. (Before 2026-10-11 they were marked dead here, and the
+    // respawn step revived them at once with life 1 at another spawn point: a
+    // player who hadn't died in the previous match saw a huge correction.)
     for (const p of this.state.players.values()) {
       const pos = this.spawnFor(p.id);
       p.x = pos.x; p.y = pos.y;
-      p.alive = false; // can't move during countdown
+      p.alive = true;
+      p.life++;
+      p.respawnTicksLeft = 0;
+      p.protectionTicksLeft = 0;
       p.score = 0;
-      p.life = 0;
       p.combat = initialCombat();
       p.shield = false;
     }
@@ -747,11 +808,9 @@ export class Room {
   private startMatch(): void {
     this.state.matchState = 'RUNNING';
     this.state.runningTicksLeft = RUNNING_TICKS;
+    // Everyone starts where the countdown placed them (no second teleport at GO)
     for (const p of this.state.players.values()) {
-      const pos = this.spawnFor(p.id);
-      p.x = pos.x; p.y = pos.y;
       p.alive = true;
-      p.life = 1;
       p.protectionTicksLeft = PROTECT_TICKS;
       p.combat = initialCombat();
       p.shield = false;
@@ -801,7 +860,7 @@ export class Room {
         break;
 
       case 'RUNNING':
-        if (this.roomCfg.timed) {
+        if (this.roomCfg.timed && !this.endless) {
           this.state.runningTicksLeft--;
           if (this.state.runningTicksLeft <= 0) this.endMatch();
         }

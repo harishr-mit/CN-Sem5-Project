@@ -165,8 +165,8 @@ describe('Combat step (shared/src/sim/combat.ts)', () => {
     expect(next + 1 + DASH_BURST_TICKS).toBe(DASH_COOLDOWN_TICKS);
   });
 
-  it('power-up cap: one per two players; draws follow the weights (rifle rarest, speed most common)', () => {
-    expect([1, 2, 3, 4, 5, 8].map(powerupCap)).toEqual([0, 1, 1, 2, 2, 4]);
+  it('power-up cap: one per participant (owner, 2026-10-11); draws follow the weights (rifle rarest, speed most common)', () => {
+    expect([1, 2, 3, 4, 5, 8].map(powerupCap)).toEqual([1, 2, 3, 4, 5, 8]);
     const rng = mulberry32(5);
     const counts: Record<string, number> = {};
     for (let i = 0; i < 20000; i++) { const k = pickPowerupKind(rng); counts[k] = (counts[k] ?? 0) + 1; }

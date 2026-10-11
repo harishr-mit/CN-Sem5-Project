@@ -79,7 +79,7 @@ export const ComparePane: React.FC<ComparePaneProps> = ({
         <span style={{ display: 'flex', gap: 3 }}>
           {sync && (
             <button
-              title="Sync model [Y]: Full → Delta → State 10 Hz → State 30 Hz"
+              title="Sync model [Y] — one of: snapshots (interpolated) Full or Delta, or state sync (extrapolated) at 10 or 30 Hz. Click or Y cycles Full → Delta → State 10 → State 30"
               className="cmp-sync-chip"
               onClick={(e) => { e.stopPropagation(); onCycleSync?.(); }}
               style={{

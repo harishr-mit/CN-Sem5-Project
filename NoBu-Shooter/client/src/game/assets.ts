@@ -9,7 +9,7 @@
  */
 
 import Phaser from 'phaser';
-import GAME, { POWERUP_KINDS, WEAPON_IDS } from '@nobu/shared/config/game';
+import GAME, { POWERUP_KINDS, WEAPON_IDS, type MapId } from '@nobu/shared/config/game';
 
 /** Survivor body + feet frames, packed by scripts/pack-assets.mjs. */
 export const PLAYER_ATLAS = 'player';
@@ -99,6 +99,39 @@ export function has(scene: Phaser.Scene, key: string): boolean {
   return scene.textures.exists(key);
 }
 
+/**
+ * Load one map's floor and props at runtime. Compare panes (lab room)
+ * preload no map art — the lab was always neon — but the Presenter can now
+ * switch the lab's map (owner, 2026-10-11). Calls `done` when the loader has
+ * finished (missing files fall back as usual). Returns false if there was
+ * nothing to load.
+ */
+export function loadMapArt(scene: Phaser.Scene, id: MapId, done: () => void): boolean {
+  const m = GAME.maps[id] as { floor: string | null; obstacles: readonly { prop?: string }[] };
+  const files = new Map<string, string>();
+  if (m.floor && !has(scene, TEX.floor(m.floor))) files.set(TEX.floor(m.floor), `textures/floors/${m.floor}.png`);
+  for (const o of m.obstacles) {
+    if (!o.prop) continue;
+    if (o.prop !== 'crate_metal') PIXEL_ART.add(TEX.prop(o.prop));
+    if (!has(scene, TEX.prop(o.prop))) files.set(TEX.prop(o.prop), `textures/props/${o.prop}.png`);
+  }
+  if (files.size === 0) return false;
+  for (const [key, url] of files) scene.load.image(key, url);
+  scene.load.once(Phaser.Loader.Events.COMPLETE, () => {
+    applyPixelFilters(scene);
+    done();
+  });
+  scene.load.start();
+  return true;
+}
+
+/** Nearest-neighbour filtering for the pixel-art textures that are loaded. */
+function applyPixelFilters(scene: Phaser.Scene): void {
+  for (const key of PIXEL_ART) {
+    if (has(scene, key)) scene.textures.get(key).setFilter(Phaser.Textures.FilterMode.NEAREST);
+  }
+}
+
 /** Frame rate per animation; reloads span the weapon's reload time. */
 function frameRate(anim: string, frames: number, weapon?: string): number {
   if (anim === 'reload' && weapon) {
@@ -116,9 +149,7 @@ function frameRate(anim: string, frames: number, weapon?: string): number {
  * Compare pane creates its own.
  */
 export function setupAssets(scene: Phaser.Scene): void {
-  for (const key of PIXEL_ART) {
-    if (has(scene, key)) scene.textures.get(key).setFilter(Phaser.Textures.FilterMode.NEAREST);
-  }
+  applyPixelFilters(scene);
 
   if (has(scene, PLAYER_ATLAS)) {
     const names = scene.textures.get(PLAYER_ATLAS).getFrameNames();

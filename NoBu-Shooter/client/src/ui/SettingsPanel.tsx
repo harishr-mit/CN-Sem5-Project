@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { loadSettings, saveSettings, DEFAULT_SETTINGS, type UserSettings } from './settings.js';
+import { loadSettings, saveSettings, DEFAULT_SETTINGS, UI_SCALES, type UserSettings } from './settings.js';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -48,9 +48,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         position: 'fixed',
         padding: 'var(--sp-l)',
         zIndex: 1000,
-        backgroundColor: 'rgba(5, 5, 15, 0.82)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
+        // Solid, no backdrop blur: blurring the live WebGL arena every frame
+        // halved the frame rate at 1920×1080 (Phase 4 shots)
+        backgroundColor: 'rgba(5, 5, 15, 0.9)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -114,29 +114,28 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           />
         </div>
 
-        {/* Graphics Quality */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-xs)' }}>
-          <div style={{ fontSize: '0.9rem', color: 'var(--c-text)' }}>Graphics Quality</div>
+        {/* UI scale for projectors (PHASES.md P4): all panels and text, not the arena */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-xs)' }} id="settings-ui-scale">
+          <div style={{ fontSize: '0.9rem', color: 'var(--c-text)' }}>UI Scale (projector)</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--sp-s)' }}>
-            {(['low', 'medium', 'high'] as const).map((q) => (
+            {UI_SCALES.map((scale) => (
               <button
-                key={q}
-                onClick={() => updateSetting('graphicsQuality', q)}
+                key={scale}
+                onClick={() => updateSetting('uiScale', scale)}
                 style={{
                   padding: '6px',
                   borderRadius: '4px',
-                  textTransform: 'uppercase',
                   fontSize: '0.75rem',
                   fontFamily: 'var(--font-display)',
                   letterSpacing: '0.08em',
-                  background: settings.graphicsQuality === q ? 'var(--c-violet)' : 'rgba(255, 255, 255, 0.05)',
-                  color: settings.graphicsQuality === q ? '#fff' : 'var(--c-text-muted)',
-                  border: settings.graphicsQuality === q ? '1px solid var(--c-cyan)' : '1px solid var(--c-border)',
+                  background: settings.uiScale === scale ? 'var(--c-violet)' : 'rgba(255, 255, 255, 0.05)',
+                  color: settings.uiScale === scale ? '#fff' : 'var(--c-text-muted)',
+                  border: settings.uiScale === scale ? '1px solid var(--c-cyan)' : '1px solid var(--c-border)',
                   cursor: 'pointer',
                   transition: 'all 0.2s ease',
                 }}
               >
-                {q}
+                {scale} %
               </button>
             ))}
           </div>

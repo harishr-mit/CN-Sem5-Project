@@ -116,3 +116,23 @@ describe('Maps (GAMERULES.md §3)', () => {
     });
   }
 });
+
+describe('Power-up spots with one power-up per player (owner, 2026-10-11)', () => {
+  it('every map fits 8 valid, non-overlapping power-ups (8 players)', () => {
+    for (const id of MAP_IDS) {
+      const map = mapDef(id);
+      for (let seed = 1; seed <= 25; seed++) {
+        const rng = mulberry32(seed);
+        const players = map.spawnPoints.slice(0, 8);
+        const placed: { x: number; y: number }[] = [];
+        for (let i = 0; i < 8; i++) {
+          const p = randomPowerupSpot(rng, map, placed, players);
+          expect(p, `${id} seed ${seed} #${i}`).not.toBeNull();
+          expect(isValidPowerupSpot(map, p!)).toBe(true);
+          for (const q of placed) expect(Math.hypot(p!.x - q.x, p!.y - q.y)).toBeGreaterThanOrEqual(4 * GAME.powerups.radius);
+          placed.push(p!);
+        }
+      }
+    }
+  });
+});

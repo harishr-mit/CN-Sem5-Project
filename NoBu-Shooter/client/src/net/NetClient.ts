@@ -22,7 +22,7 @@ import type {
 import {
   DeltaDecoder, stateToSnap, normalizeSync, sameSync, DEFAULT_SYNC, type SyncSpec, type Velocity,
 } from '@nobu/shared/sync';
-import GAME, { mapDef } from '@nobu/shared/config/game';
+import GAME, { mapDef, type PowerupKind } from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
 import { RemoteErrorTracker, type DrawnEntity } from './remoteError.js';
 import { Extrapolator } from './extrapolate.js';
@@ -177,6 +177,12 @@ interface Listeners {
   reload: (weapon: WeaponId) => void;
   /** Fire pressed with an empty magazine or during a reload (cosmetic click). */
   dryFire: () => void;
+  /** The netcode toggles changed (`setToggles`), e.g. by the Presenter. */
+  toggles: (t: PredictionToggle) => void;
+  /** The sync model changed (`setSync`). */
+  sync: (spec: SyncSpec) => void;
+  /** The developer Invincible switch changed (`setDevInvincible`). */
+  dev: (invincible: boolean) => void;
 }
 
 function moveCfgFor(map: MapId): MoveCfg {
@@ -233,6 +239,7 @@ export class NetClient {
     status: new Set(), welcome: new Set(), snap: new Set(),
     event: new Set(), correction: new Set(), fire: new Set(),
     reload: new Set(), dryFire: new Set(),
+    toggles: new Set(), sync: new Set(), dev: new Set(),
   };
 
   // Connection state
@@ -265,6 +272,8 @@ export class NetClient {
   private prevFireDown = false;
   /** Developer switch (npm run demo); re-sent after every (re)connect. */
   private devInvincible = false;
+  /** Presenter: stopped match clock (npm run demo); re-sent after every (re)connect. */
+  private devEndless = false;
   /** A PICKUP for us arrived with this snapshot: its state change is not a misprediction. */
   private pickupArrived = false;
 
@@ -527,6 +536,7 @@ export class NetClient {
 
     this.setStatus('connected');
     if (this.devInvincible && this.playerId !== null) this.send({ t: 'dev', invincible: true });
+    if (this.devEndless) this.send({ t: 'dev', endless: true });
     this.emit('welcome', msg.playerId);
   }
 
@@ -767,8 +777,48 @@ export class NetClient {
 
   /** Developer invincibility; the server honours it only under `npm run demo`. */
   setDevInvincible(on: boolean): void {
+    const changed = on !== this.devInvincible;
     this.devInvincible = on;
     if (this.connected && this.playerId !== null) this.send({ t: 'dev', invincible: on });
+    if (changed) this.emit('dev', on);
+  }
+
+  get devInvincibleOn(): boolean {
+    return this.devInvincible;
+  }
+
+  /** Developer: give this power-up now, as if picked up (npm run demo only). */
+  devGive(kind: PowerupKind): void {
+    if (this.connected && this.playerId !== null) this.send({ t: 'dev', give: kind });
+  }
+
+  /** Presenter: stop (or restart) the room's match clock (npm run demo only). */
+  setDevEndless(on: boolean): void {
+    this.devEndless = on;
+    if (this.connected) this.send({ t: 'dev', endless: on });
+  }
+
+  /**
+   * Presenter: restart the room's game, optionally on another map (npm run
+   * demo only). Works from a spectator too (Compare's reference pane).
+   */
+  devRestart(map?: MapId): void {
+    if (this.connected) this.send({ t: 'dev', restart: true, ...(map ? { map } : {}) });
+  }
+
+  /**
+   * Change netcode toggles and tell listeners (the Network Lab follows, so
+   * Presenter changes show up in its switches). Latency averages restart
+   * when prediction or interpolation changes — the old ones would mislead.
+   */
+  setToggles(patch: Partial<PredictionToggle>): void {
+    const next = { ...this.toggles, ...patch };
+    const keys = Object.keys(next) as (keyof PredictionToggle)[];
+    if (keys.every((k) => next[k] === this.toggles[k])) return;
+    const resetLatency = next.prediction !== this.toggles.prediction || next.interpolation !== this.toggles.interpolation;
+    this.toggles = next;
+    if (resetLatency) this.resetLatencySamples();
+    this.emit('toggles', { ...next });
   }
 
   /**
@@ -808,6 +858,7 @@ export class NetClient {
     this.extrapolator.reset();
     this.remoteError.reset();
     if (this.connected && !this.spectating) this.send({ t: 'sync', ...next });
+    this.emit('sync', { ...next });
   }
 
   get sync(): SyncSpec {
