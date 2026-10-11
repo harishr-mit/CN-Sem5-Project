@@ -12,6 +12,11 @@ import type { CompareNetwork } from '../compare/types.js';
 export interface QuickStepState {
   /** Emulator conditions: a named preset, or an ad-hoc one completed from the defaults. */
   network: CompareNetwork;
+  /**
+   * The network players' route (`udp:9100`, `npm run swarm`; docs/PHASE5_PLAN.md
+   * D11). Every step sets it — Baseline except Q13 — so going back restores it.
+   */
+  swarmNetwork: CompareNetwork;
   toggles: PredictionToggle;
   sync: SyncSpec;
   /** Run once each time the step is entered (not when it is re-applied). */
@@ -47,6 +52,8 @@ export interface PresenterScript {
 /** What the controller drives. The views implement it (QuickMatch: NetClient + EmulatorClient; Compare: its preset). */
 export interface PresenterStage {
   applyNetwork(network: CompareNetwork): void;
+  /** Conditions of the network players' route only (the browser's route is applyNetwork). */
+  applySwarmNetwork(network: CompareNetwork): void;
   setToggles(toggles: PredictionToggle): void;
   setSync(sync: SyncSpec): void;
   setInvincible(on: boolean): void;

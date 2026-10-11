@@ -4,7 +4,11 @@
   "private": true,
   "scripts": {
     "postinstall": "npm --prefix NoBu-Shooter install",
-    "demo": "npm --prefix NoBu-Shooter run demo",
+    "demo": "npm --prefix NoBu-Shooter run demo --",
+    "emulator": "npm --prefix NoBu-Shooter run emulator --",
+    "swarm": "npm --prefix NoBu-Shooter run swarm --",
+    "udp-echo": "npm --prefix NoBu-Shooter run udp-echo --",
+    "udp-send": "npm --prefix NoBu-Shooter run udp-send --",
     "test": "npm --prefix NoBu-Shooter test",
     "smoke": "npm --prefix NoBu-Shooter run smoke",
     "shots": "npm --prefix NoBu-Shooter run shots --",

@@ -102,6 +102,7 @@ export class PresenterController {
   private applyState(step: PresenterStep): void {
     if (step.quick) {
       this.stage.applyNetwork(step.quick.network);
+      this.stage.applySwarmNetwork(step.quick.swarmNetwork);
       this.stage.setToggles({ ...step.quick.toggles });
       this.stage.setSync({ ...step.quick.sync });
     }

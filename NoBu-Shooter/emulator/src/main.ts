@@ -1,96 +1,76 @@
 /**
- * main.ts — Network emulator entry point.
- * SPEC.md §11.
+ * main.ts — network emulator entry point (SPEC.md §11, docs/PHASE5_PLAN.md D4, D5).
  *
- * CLI: node emulator --listen 9000 --target ws://127.0.0.1:8080 --control 9001 --seed 1
+ *   node --import tsx emulator/src/main.ts [options]
  *
- * Data port (9000): client connections go through the impairment pipeline to the target.
- * Control port (9001): the UI talks here to configure impairments live.
+ *   --route <proto>:[host:]<port>=<target>   a route, repeatable:
+ *        ws:9000=ws://127.0.0.1:8080          WebSocket, all interfaces
+ *        udp:9100=127.0.0.1:8081              UDP, all interfaces
+ *        udp:127.0.0.1:9100=127.0.0.1:8081    UDP, this machine only
+ *   --listen <port> --target <ws-url>        old form: one WS route
+ *   --control <port>      dashboard + control API (default 9001)
+ *   --control-host <ip>   default 127.0.0.1 (anything else is reachable from other machines)
+ *   --allow-origin <url>  extra browser origin for the control API, repeatable
+ *   --udp-idle-ms <ms>    close UDP sessions idle this long (default 30000)
+ *   --max-sessions <n>    sessions per route (default 64)
+ *   --seed <n>            impairment RNG seed (default 1)
+ *
+ * With no route the emulator starts with only the dashboard; routes can be
+ * added there (or with the control API's route.add) while it runs.
  */
 
-import { WebSocketServer, WebSocket } from 'ws';
-import { createServer } from 'http';
-import { Session } from './session.js';
-import { ControlServer } from './control.js';
+import { createEmulator, parseRouteArg } from './emulator.js';
+import type { RouteSpec } from './routes/index.js';
 import { exitWithParent } from './parentWatch.js';
 
-// ─── CLI args ─────────────────────────────────────────────────
 const args = process.argv.slice(2);
 function getArg(name: string, def: string): string {
   const idx = args.indexOf(`--${name}`);
   return idx !== -1 && args[idx + 1] ? args[idx + 1] : def;
 }
+function getAll(name: string): string[] {
+  const out: string[] = [];
+  args.forEach((a, i) => { if (a === `--${name}` && args[i + 1]) out.push(args[i + 1]); });
+  return out;
+}
 
-const listenPort = parseInt(getArg('listen', '9000'), 10);
-const target = getArg('target', 'ws://127.0.0.1:8080');
 const controlPort = parseInt(getArg('control', '9001'), 10);
-const seed = parseInt(getArg('seed', '1'), 10);
+const controlHost = getArg('control-host', '127.0.0.1');
 
-// ─── Session registry ─────────────────────────────────────────
-const sessions = new Map<string, Session>();
+let routes: RouteSpec[];
+try {
+  routes = getAll('route').map(parseRouteArg);
+  if (args.includes('--listen')) {
+    routes.unshift({ proto: 'ws', port: parseInt(getArg('listen', '9000'), 10), target: getArg('target', 'ws://127.0.0.1:8080') });
+  }
+} catch (err) {
+  console.error(`[emulator] ${(err as Error).message}`);
+  process.exit(2);
+}
 
-// ─── Control server ───────────────────────────────────────────
-const control = new ControlServer(controlPort, sessions);
+if (controlHost !== '127.0.0.1' && controlHost !== 'localhost' && controlHost !== '::1') {
+  console.warn(`[emulator] WARNING: the control API on ${controlHost} can be reached from other machines; anyone who reaches it can open routes.`);
+}
 
-// ─── Data server ─────────────────────────────────────────────
-const httpServer = createServer();
-const wss = new WebSocketServer({ server: httpServer });
-
-wss.on('connection', (clientWs: WebSocket, req) => {
-  const url = new URL(req.url ?? '/', `http://localhost`);
-  const label = url.searchParams.get('label') ?? 'client';
-
-  console.log(`[emulator] New session "${label}" → ${target}`);
-
-  // Connect upstream to the game server
-  const upstreamWs = new WebSocket(target + req.url);
-  const pendingEarlyMsgs: (Buffer | string)[] = [];
-
-  const earlyHandler = (raw: Buffer | string) => {
-    pendingEarlyMsgs.push(raw);
-  };
-  clientWs.on('message', earlyHandler);
-  // Client gave up before the upstream connection opened
-  clientWs.on('close', () => {
-    if (upstreamWs.readyState === WebSocket.CONNECTING) upstreamWs.terminate();
+try {
+  const emu = await createEmulator({
+    controlPort,
+    controlHost,
+    allowOrigins: getAll('allow-origin'),
+    seed: parseInt(getArg('seed', '1'), 10),
+    udpIdleMs: parseInt(getArg('udp-idle-ms', '30000'), 10),
+    maxSessionsPerRoute: parseInt(getArg('max-sessions', '64'), 10),
+    routes,
   });
-
-  upstreamWs.on('open', () => {
-    clientWs.off('message', earlyHandler);
-    const session = new Session(
-      clientWs, upstreamWs, label, seed,
-      control.getDefaults()
-    );
-
-    // Route packet events to control server
-    session.onPacketEvent = (ev) => control.onPacketEvent(ev);
-
-    sessions.set(session.id, session);
-    control.onNewSession();
-
-    // Replay any buffered early messages
-    for (const msg of pendingEarlyMsgs) {
-      session.handleClientMessage(msg);
-    }
-
-    clientWs.on('close', () => {
-      sessions.delete(session.id);
-      control.onNewSession();
-    });
-  });
-
-  upstreamWs.on('error', (err) => {
-    console.error(`[emulator] Upstream error: ${err.message}`);
-    clientWs.close();
-  });
-});
-
-exitWithParent(() => {
-  wss.close();
-  httpServer.close();
-});
-
-httpServer.listen(listenPort, () => {
-  console.log(`[emulator] Data   port: ws://127.0.0.1:${listenPort} → ${target}`);
-  console.log(`[emulator] Control port: ws://127.0.0.1:${controlPort}`);
-});
+  const shownHost = controlHost === '127.0.0.1' ? '127.0.0.1' : controlHost;
+  console.log(`[emulator] Dashboard: http://${shownHost}:${emu.control.port}/`);
+  console.log(`[emulator] Control  : ws://${shownHost}:${emu.control.port}`);
+  if (routes.length === 0) console.log('[emulator] No routes yet: add one on the dashboard.');
+  exitWithParent(() => { void emu.close(); });
+  const stop = () => { void emu.close().finally(() => process.exit(0)); };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+} catch (err) {
+  console.error(`[emulator] Failed to start: ${(err as Error).message}`);
+  process.exit(1);
+}

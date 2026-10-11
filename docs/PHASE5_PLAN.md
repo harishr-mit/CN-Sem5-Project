@@ -1,7 +1,7 @@
 # Phase 5 Implementation Plan — Realistic transport + standalone emulator
 
 **Audience:** the project owner and the agent who implements Phase 5.
-**Status:** **drafted 2026-10-12** (`log.md` T87), waiting for owner approval. Owner answers already folded in: **app-level fragmentation** for messages over 1200 B (D2); the in-game Lab and Presenter impair **only the game's own WS route** (D6); a **self-contained dashboard page**, plus an emulator entry point **with no routes** whose listen → target routes are added at runtime from the dashboard, between any two ports (D4, D5); network players get a **demo flag and a Presenter step** and play like the server bots (D8, D10). **Owner revision 2026-10-12 (T95):** the owner plans to turn the game into a real multiplayer game later, so only the emulator's **control port** is locked to this machine. The server's UDP port and the emulator's data routes accept connections from other machines, as the WS ports do today, and every bind address is configurable (D7, D9, D15). The multiplayer work itself is a candidate phase in `PHASES.md`, not Phase 5.
+**Status:** **implemented 2026-10-12** (`log.md` T88–T94; drafted as T87, revised as T95, approved by the owner the same day). Deviations in §8. Owner answers already folded in: **app-level fragmentation** for messages over 1200 B (D2); the in-game Lab and Presenter impair **only the game's own WS route** (D6); a **self-contained dashboard page**, plus an emulator entry point **with no routes** whose listen → target routes are added at runtime from the dashboard, between any two ports (D4, D5); network players get a **demo flag and a Presenter step** and play like the server bots (D8, D10). **Owner revision 2026-10-12 (T95):** the owner plans to turn the game into a real multiplayer game later, so only the emulator's **control port** is locked to this machine. The server's UDP port and the emulator's data routes accept connections from other machines, as the WS ports do today, and every bind address is configurable (D7, D9, D15). The multiplayer work itself is a candidate phase in `PHASES.md`, not Phase 5.
 **Scope:** `PHASES.md` → Phase 5, items U1–U7, plus U8 (runtime routes, owner 2026-10-12). This file says *how* to build them. `PHASES.md` stays the source for *what* and the exit criteria.
 
 ---
@@ -137,13 +137,13 @@ As in D12. It talks only to the control API, so everything it does can also be s
 
 ## 5. Exit checklist
 
-- [ ] `npm test`, `npm run typecheck`, `npm run smoke` (incl. the UDP network player under Nightmare), `npm run shots` pass.
-- [ ] **Demo checkpoint, part 1 (no game):** `npm run emulator` → dashboard → add route `udp:9100 → 127.0.0.1:7000`; `npm run udp-echo -- --port 7000` and `npm run udp-send -- --to 9100`; set 20 % loss on the dashboard → numbered messages visibly go missing, and the packet log shows the drops.
-- [ ] **Demo checkpoint, part 2:** `npm run demo -- --swarm 3` → in Quick Match the three `UDP-n` players move and fight; at Q13 (or a dashboard preset on `udp:9100`) they stutter and correct while the browser player stays smooth, and the dashboard lists their sessions beside the browser's.
-- [ ] A Lab preset in Quick Match changes only `ws:9000` sessions.
-- [ ] Bind addresses as in D15: control `:9001` on 127.0.0.1 only; `:8080`, `:8081`, `:9000`, `:9100` on all interfaces under `npm run demo` (checked with `netstat -ano`).
-- [ ] Docs: `docs/PROTOCOL.md` (§1 transports, §5 routes / control API / fragments, server UDP), `emulator/README.md` (new, U6), `README.md` (architecture diagram, `npm run emulator` / `swarm` / `udp-*`, dashboard, ports), `docs/DEMO_SCRIPT.md` (new section + Q13), `docs/ASSUMPTIONS.md` (#5 rewritten, new entries), `GAMERULES.md` (Presenter 13 steps; network players are ordinary participants), `docs/VISUAL_CHECKLIST.md`, `PHASES.md`, `log.md`.
-- [ ] No processes left; TCP 5173/8080/9000/9001 and UDP 8081/9100 free; no new dependency. Suggested tag: `phase-5`.
+- [x] `npm test`, `npm run typecheck`, `npm run smoke` (incl. the UDP network player under Nightmare), `npm run shots` pass.
+- [x] **Demo checkpoint, part 1 (no game):** `npm run emulator` → dashboard → add route `udp:9100 → 127.0.0.1:7000`; `npm run udp-echo -- --port 7000` and `npm run udp-send -- --to 9100`; set 20 % loss on the dashboard → numbered messages visibly go missing, and the packet log shows the drops.
+- [x] **Demo checkpoint, part 2:** `npm run demo -- --swarm 3` → in Quick Match the three `UDP-n` players move and fight; at Q13 (or a dashboard preset on `udp:9100`) they stutter and correct while the browser player stays smooth, and the dashboard lists their sessions beside the browser's.
+- [x] A Lab preset in Quick Match changes only `ws:9000` sessions.
+- [x] Bind addresses as in D15: control `:9001` on 127.0.0.1 only; `:8080`, `:8081`, `:9000`, `:9100` on all interfaces under `npm run demo` (checked with `netstat -ano`).
+- [x] Docs: `docs/PROTOCOL.md` (§1 transports, §5 routes / control API / fragments, server UDP), `emulator/README.md` (new, U6), `README.md` (architecture diagram, `npm run emulator` / `swarm` / `udp-*`, dashboard, ports), `docs/DEMO_SCRIPT.md` (new section + Q13), `docs/ASSUMPTIONS.md` (#5 rewritten, new entries), `GAMERULES.md` (Presenter 13 steps; network players are ordinary participants), `docs/VISUAL_CHECKLIST.md`, `PHASES.md`, `log.md`.
+- [x] No processes left; TCP 5173/8080/9000/9001 and UDP 8081/9100 free; no new dependency. Suggested tag: `phase-5`.
 
 ## 6. Risks
 
@@ -168,4 +168,13 @@ As in D12. It talks only to the control API, so everything it does can also be s
 
 ## 8. Deviations from this plan
 
-*(Filled in during implementation.)*
+| # | Plan | Built | Why |
+|---|---|---|---|
+| X1 | D3: `Packet.data: Buffer` | `Buffer \| string` (+ `binary` flag) | The route adapters pass bytes; the in-process netcode harness and the Phase 1–4 tests pass text. The pipeline treats both as opaque, and the preview handles both (ASSUMPTIONS #85). |
+| X2 | D4: each route owns "its defaults" | Defaults **per direction** (`defaults` + `defaultsDown` in `state`), also for `all` | The browser check showed "up only, 20 %" reaching later sessions in both directions (ASSUMPTIONS #87). |
+| X3 | §2.1: `state.sessions[].up/down` = config + stats (as before) | `up` / `down` = config only, `stats` = counters | The two objects share the key `lossPct` (configured vs measured), so the merged form showed the measured loss as the setting (pre-existing; found in the final check). |
+| X4 | D8: names via control | as planned, plus `--verbose` (logs each correction with its context) | Used to explain the clean-link corrections (at death, not a transport fault). |
+| X5 | §4: shots add Landing, dashboard, dashboard without routes, Q13 | Q13, dashboard, dashboard under Nightmare (shots run the demo with `--swarm 2`); the no-route dashboard was checked by a scratch browser script | The shots always run the demo; a second emulator-only run wasn't worth the extra minutes. A screen can now undo its change after the shot (`after` hook). |
+| X6 | — (not in the plan) | Fixes found by the checks: a WS route on a busy port crashed the emulator (EADDRINUSE re-emitted by `ws`); queue-drop `delayMs` unrounded since Phase 1; dashboard overflow at 420 px and a sideways-scrolling routes table at 1280 px; favicon 404 | `log.md` T88, T92, T94; ASSUMPTIONS #94. |
+| X7 | Snapshot size "1.3–2.1 kB" (G1) | Measured ≈ 3 kB on average in a 4-way fight (2.7 fragments), up to ≈ 4.5 kB (4 fragments) | More projectiles and projectile-hit events than in the Phase 2.5 measurement; docs say "2–4 fragments". |
+| X8 | — | Owner additions: purple piercing rounds (T96), README quickstart + command reference (T97) | Asked for during the run. |

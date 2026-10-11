@@ -107,7 +107,7 @@ describe('Network Emulator Pipeline (SPEC.md §11, §14.3)', () => {
         { data: `pkt_${idx}`, size: 30 },
         link,
         (pkt) => {
-          receivedOrder.push(parseInt(pkt.data.replace('pkt_', ''), 10));
+          receivedOrder.push(parseInt(String(pkt.data).replace('pkt_', ''), 10));
         },
         () => {},
         'session-1',
@@ -158,6 +158,21 @@ describe('Emulator control: ad-hoc presets (preset + config)', () => {
     const cfg = completeConfig({ latencyMs: 50, jitterMs: 30, lossModel: 7, bogus: 1 });
     expect(cfg).toEqual({ ...DEFAULT_LINK_CONFIG, latencyMs: 50, jitterMs: 30 });
     expect(completeConfig(null)).toEqual(DEFAULT_LINK_CONFIG);
+  });
+});
+
+describe('Emulator: queue drops report whole milliseconds (found in Phase 5 shots)', () => {
+  it('a dropped-queue event carries an integer delayMs', () => {
+    const clock = new VirtualClock();
+    const pipeline = new Pipeline(1, clock);
+    // 333 kbps: transmit times are fractions of a millisecond, so the queue wait is fractional too
+    const link = new LinkState({ ...DEFAULT_LINK_CONFIG, bandwidthKbps: 333, queueLimitMs: 20 });
+    const drops: number[] = [];
+    for (let i = 0; i < 200; i++) {
+      pipeline.process({ data: `p${i}`, size: 517 }, link, () => {}, (ev) => { if (ev.fate === 'dropped-queue') drops.push(ev.delayMs); }, 's', 'down');
+    }
+    expect(drops.length).toBeGreaterThan(0);
+    for (const d of drops) expect(Number.isInteger(d)).toBe(true);
   });
 });
 

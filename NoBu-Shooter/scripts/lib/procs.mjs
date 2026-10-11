@@ -10,6 +10,7 @@
 
 import { spawn, spawnSync } from 'child_process';
 import net from 'net';
+import dgram from 'dgram';
 
 /** Spawn `node --import tsx <script> ...args` (TypeScript entry points). */
 export function spawnTs(name, script, args, { cwd, color = '', onLine } = {}) {
@@ -82,6 +83,44 @@ export async function assertPortsFree(ports) {
     console.error(`  lsof -ti tcp:${busy.join(',tcp:')} | xargs kill`);
   }
   process.exit(1);
+}
+
+/**
+ * Resolve true if a UDP `port` is taken: a bind probe on the wildcard and on
+ * 127.0.0.1 (UDP has no connect probe; docs/PHASE5_PLAN.md D14).
+ */
+export function udpPortInUse(port) {
+  const probe = (host) => new Promise((resolve) => {
+    const sock = dgram.createSocket({ type: 'udp4', reuseAddr: false });
+    sock.once('error', () => { try { sock.close(); } catch { /* not bound */ } resolve(true); });
+    sock.bind({ port, address: host, exclusive: true }, () => sock.close(() => resolve(false)));
+  });
+  return Promise.all([probe('0.0.0.0'), probe('127.0.0.1')]).then((r) => r.some(Boolean));
+}
+
+/** Exit with a helpful message if any of the UDP ports is taken. */
+export async function assertUdpPortsFree(ports) {
+  const busy = [];
+  for (const p of ports) if (await udpPortInUse(p)) busy.push(p);
+  if (busy.length === 0) return;
+  console.error(`[31m✘ UDP port(s) already in use: ${busy.join(', ')}[0m`);
+  console.error('  Another demo is probably still running. Stop it, or free the ports:');
+  if (process.platform === 'win32') {
+    console.error(`  PowerShell: Get-NetUDPEndpoint -LocalPort ${busy.join(',')} | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`);
+  } else {
+    console.error(`  lsof -ti udp:${busy.join(',udp:')} | xargs kill`);
+  }
+  process.exit(1);
+}
+
+/** Wait until a UDP `port` is bound (or time out). */
+export async function waitForUdpPort(port, timeoutMs = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await udpPortInUse(port)) return true;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return false;
 }
 
 /** Wait until `port` accepts connections (or time out). */

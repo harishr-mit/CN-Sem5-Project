@@ -10,8 +10,10 @@
  *
  * Every screen gets a fresh page (clean localStorage); resizing a live
  * headless page produced shifted screenshots in Phase 3. Exits non-zero on
- * any console error or failed screen. The demo process tree is always
- * stopped, so ports 5173/8080/9000/9001 are free afterwards.
+ * any console error or failed screen. The demo runs with two network players
+ * (`--swarm 2`, Phase 5) for the dashboard and Presenter Q13 screens. Its
+ * process tree is always stopped, so ports 5173/8080/9000/9001 and UDP
+ * 8081/9100 are free afterwards.
  *
  *   npm run shots              full run (Nightmare screens wait 15 s)
  *   npm run shots -- --fast    shorter waits (5 s)
@@ -23,7 +25,7 @@ import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { createRequire } from 'module';
-import { spawnNode, assertPortsFree, waitForPort, cleanupOnExit } from './lib/procs.mjs';
+import { spawnNode, assertPortsFree, assertUdpPortsFree, waitForPort, waitForUdpPort, cleanupOnExit } from './lib/procs.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -32,6 +34,7 @@ const FAST = args.includes('--fast');
 const ONLY = (args.find((a) => a.startsWith('--only=')) ?? '').slice(7).split(',').filter(Boolean);
 const VIEWPORTS = [[1280, 720], [1920, 1080]];
 const URL = 'http://localhost:5173';
+const DASHBOARD = 'http://127.0.0.1:9001/';
 const OUT = join(rootDir, 'artifacts', 'shots');
 /** Effects that need the queue to build (Nightmare) get this long. */
 const SETTLE_MS = FAST ? 5000 : 15000;
@@ -40,7 +43,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── Screens ─────────────────────────────────────────────────────
 // Each gets a fresh page at the landing screen and leaves the page showing
-// what should be captured. `settings` pre-seeds localStorage.
+// what should be captured. `settings` pre-seeds localStorage; `after` runs
+// once the shot is taken (to undo a change that would leak into later screens).
 
 async function startQuick(page) {
   await page.click('#quick-match-btn');
@@ -107,10 +111,60 @@ const SCREENS = [
     },
   },
   {
+    name: 'presenter-quick-13-swarm',
+    run: async (p) => {
+      await p.click('#presenter-quick-btn');
+      await p.waitForSelector('#presenter-bar');
+      await sleep(2000);
+      for (let i = 0; i < 12; i++) { await p.keyboard.press('n'); await sleep(200); }
+      await p.waitForSelector('#presenter-bar[data-step="Q13"]');
+      await p.waitForSelector('#presenter-swarm .presenter-swarm-ok', { timeout: 10000 });
+      await sleep(6000);
+    },
+  },
+  {
     name: 'presenter-compare-1',
     run: async (p) => { await p.click('#presenter-compare-btn'); await p.waitForSelector('#presenter-bar'); await sleep(4000); },
   },
+  {
+    // The emulator's own page with the demo's two routes and the network players
+    name: 'dashboard',
+    run: async (p) => {
+      await p.goto(DASHBOARD);
+      await p.waitForSelector('#conn.pill-on');
+      await p.waitForSelector('#sessions-table tbody tr');
+      await p.selectOption('#target', 'udp:9100');
+      await sleep(5000);
+    },
+  },
+  {
+    name: 'dashboard-swarm-nightmare',
+    run: async (p) => {
+      await p.goto(DASHBOARD);
+      await p.waitForSelector('#conn.pill-on');
+      await p.selectOption('#target', 'udp:9100');
+      await p.click('#presets button:text-is("Nightmare")');
+      await sleep(SETTLE_MS / 2);
+    },
+    // Back to Baseline, so the next viewport's screens start clean
+    after: async (p) => { await p.click('#presets button.reset'); await sleep(300); },
+  },
 ];
+
+/**
+ * Every screen starts from a clean emulator: the emulator outlives the pages,
+ * so a preset from one screen (Nightmare, a Compare network) used to carry
+ * over into the next ones. Node sends no Origin, so the control API accepts it.
+ */
+function resetEmulator() {
+  const { WebSocket } = require('ws');
+  return new Promise((res) => {
+    const ws = new WebSocket('ws://127.0.0.1:9001');
+    const done = () => { try { ws.close(); } catch { /* closed */ } res(); };
+    ws.on('open', () => { ws.send(JSON.stringify({ cmd: 'reset', target: 'all' })); setTimeout(done, 150); });
+    ws.on('error', done);
+  });
+}
 
 /** Frames per second over `ms` (requestAnimationFrame count). */
 function measureFps(page, ms) {
@@ -149,17 +203,21 @@ try {
 }
 
 await assertPortsFree([5173, 8080, 9000, 9001]);
-console.log(`[shots] starting the demo${FAST ? ' (--fast)' : ''}...`);
+await assertUdpPortsFree([8081, 9100]);
+console.log(`[shots] starting the demo with 2 network players${FAST ? ' (--fast)' : ''}...`);
 const demoLog = [];
 /** Set once the run is over, so the demo stopping then is expected. */
 let finished = false;
-const demo = spawnNode('DEMO', ['scripts/demo.mjs'], { cwd: rootDir, onLine: (l) => { demoLog.push(l); if (demoLog.length > 200) demoLog.shift(); } });
+const demo = spawnNode('DEMO', ['scripts/demo.mjs', '--swarm', '2'], { cwd: rootDir, onLine: (l) => { demoLog.push(l); if (demoLog.length > 200) demoLog.shift(); } });
 const cleanup = cleanupOnExit([demo]);
 demo.on('exit', (code) => {
   if (!finished) { console.error(`[shots] the demo exited early (code ${code})\n${demoLog.slice(-20).join('\n')}`); process.exit(1); }
 });
 
-const up = (await Promise.all([5173, 8080, 9000, 9001].map((p) => waitForPort(p, 30000)))).every(Boolean);
+const up = (await Promise.all([
+  ...[5173, 8080, 9000, 9001].map((p) => waitForPort(p, 30000)),
+  ...[8081, 9100].map((p) => waitForUdpPort(p, 30000)),
+])).every(Boolean);
 if (!up) {
   console.error('[shots] the demo did not start in time');
   cleanup();
@@ -205,6 +263,7 @@ try {
       });
       const row = { name: screen.name, file, fps: null, errors, notes, warnings: 0, ok: true };
       try {
+        await resetEmulator();
         await page.goto(URL);
         await page.waitForSelector('#landing-screen');
         if (screen.settings) {
@@ -216,6 +275,7 @@ try {
         row.fps = await measureFps(page, FAST ? 1000 : 2000);
         Object.assign(row, await layoutFacts(page));
         await page.screenshot({ path: join(dir, file) });
+        if (screen.after) await screen.after(page);
       } catch (e) {
         row.ok = false;
         errors.push(`screen failed: ${String(e?.message ?? e).split('\n')[0]}`);

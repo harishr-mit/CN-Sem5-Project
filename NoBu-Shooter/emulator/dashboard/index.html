@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Emulator Dashboard</title>
+  <meta name="description" content="NoBu network emulator: routes, sessions, impairments, live charts and a packet log.">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo">◈</span>
+      <div>
+        <h1>NETWORK EMULATOR</h1>
+        <p class="sub">WS + UDP impairment proxy · works with any app</p>
+      </div>
+    </div>
+    <div class="top-right">
+      <span id="conn" class="pill pill-off">CONNECTING…</span>
+      <span id="global-preset" class="muted mono"></span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- Routes -->
+    <section class="panel" id="routes-panel">
+      <h2>ROUTES <span class="hint">listen port → target · one session per client</span></h2>
+      <div class="scroll">
+        <table class="tbl" id="routes-table">
+          <thead><tr><th>Route</th><th>Listens on</th><th>Target</th><th>Preset</th><th class="num">Sessions</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="routes-empty" class="empty">No routes yet. Add one below: the emulator then listens on that port and forwards every client to the target through its own impaired session.</p>
+      <form id="route-form" class="route-form" autocomplete="off">
+        <label>Protocol
+          <select id="rf-proto"><option value="udp">UDP</option><option value="ws">WebSocket</option></select>
+        </label>
+        <label>Listen port
+          <input id="rf-port" type="number" min="1" max="65535" placeholder="9100" required>
+        </label>
+        <label class="grow">Target
+          <input id="rf-target" type="text" placeholder="127.0.0.1:7000" required>
+        </label>
+        <label class="check" title="Bind 127.0.0.1 instead of all interfaces">
+          <input id="rf-local" type="checkbox"> this machine only
+        </label>
+        <button type="submit" class="btn">ADD ROUTE</button>
+      </form>
+      <p id="route-error" class="error" role="alert"></p>
+    </section>
+
+    <!-- Sessions -->
+    <section class="panel" id="sessions-panel">
+      <h2>SESSIONS <span class="hint">click one to control it</span></h2>
+      <div class="scroll">
+        <table class="tbl" id="sessions-table">
+          <thead><tr><th>Session</th><th>Route</th><th>Peer</th><th class="num">Age</th><th class="num">↑ kbps</th><th class="num">↓ kbps</th><th class="num">Loss ↑/↓</th><th class="num">Queue ↑/↓</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="sessions-empty" class="empty">No sessions. Point a client at a route's listen port.</p>
+    </section>
+
+    <!-- Controls -->
+    <section class="panel" id="controls-panel">
+      <h2>IMPAIRMENTS</h2>
+      <div class="row">
+        <label class="grow">Target
+          <select id="target"></select>
+        </label>
+        <div class="seg" id="direction" role="radiogroup" aria-label="Direction">
+          <button type="button" data-dir="both" class="on">BOTH</button>
+          <button type="button" data-dir="up">UP ↑</button>
+          <button type="button" data-dir="down">DOWN ↓</button>
+        </div>
+      </div>
+      <div class="presets" id="presets"></div>
+      <div class="sliders" id="sliders"></div>
+      <p class="hint">Up = client → target, down = target → client. A route's settings also apply to the sessions that join it later.</p>
+    </section>
+
+    <!-- Charts -->
+    <section class="panel" id="charts-panel">
+      <h2>LIVE <span class="hint" id="chart-target">all routes</span> <span class="hint">· last 60 s</span></h2>
+      <div class="chart"><div class="chart-head"><span>Throughput (kbps)</span><span class="legend"><i class="up"></i>up <i class="down"></i>down</span></div><canvas id="ch-kbps"></canvas></div>
+      <div class="chart"><div class="chart-head"><span>Loss (% of packets, last second)</span></div><canvas id="ch-loss"></canvas></div>
+      <div class="chart"><div class="chart-head"><span>Queue (ms waiting for the bandwidth cap)</span></div><canvas id="ch-queue"></canvas></div>
+    </section>
+
+    <!-- Packet log -->
+    <section class="panel wide" id="log-panel">
+      <h2>PACKET LOG <span class="hint">newest first · 500 rows</span></h2>
+      <div class="row log-tools">
+        <label>Session <select id="lf-session"><option value="">all</option></select></label>
+        <label>Direction <select id="lf-dir"><option value="">both</option><option value="up">up ↑</option><option value="down">down ↓</option></select></label>
+        <label>Fate <select id="lf-fate"><option value="">all</option><option value="delivered">delivered</option><option value="dropped-loss">lost</option><option value="dropped-queue">queue drop</option><option value="duplicated">duplicated</option><option value="reordered">reordered</option></select></label>
+        <button type="button" class="btn ghost" id="log-pause">PAUSE</button>
+        <button type="button" class="btn ghost" id="log-clear">CLEAR</button>
+        <span class="muted mono" id="log-count"></span>
+      </div>
+      <div class="scroll log-scroll">
+        <table class="tbl mono" id="log-table">
+          <thead><tr><th>Time</th><th>Session</th><th>Dir</th><th class="num">Bytes</th><th>Fate</th><th class="num">Delay</th><th>Payload</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot muted">Control API: <span class="mono" id="ctl-url"></span> · see emulator/README.md</footer>
+  <script src="app.js"></script>
+</body>
+</html>

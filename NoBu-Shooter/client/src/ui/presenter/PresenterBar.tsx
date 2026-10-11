@@ -11,6 +11,8 @@
 import React, { useEffect, useState } from 'react';
 import GAME, { mapDef, type MapId } from '@nobu/shared/config/game';
 import type { PresenterController } from '../../presenter/controller.js';
+import { DASHBOARD_URL, SWARM_ROUTE } from '../../net/EmulatorClient.js';
+import { useGameStore } from '../store.js';
 
 interface PresenterBarProps {
   controller: PresenterController;
@@ -44,6 +46,10 @@ export const PresenterBar: React.FC<PresenterBarProps> = ({ controller, version,
   const index = controller.index;
   const last = index === controller.count - 1;
   const map = currentMap();
+  // Steps about the network players (Q13): dashboard button + whether any are connected
+  const swarmStep = !!step.quick && step.quick.swarmNetwork.name !== 'Baseline';
+  const emuState = useGameStore((s) => s.emulatorState) as { sessions?: { route?: string }[] } | null;
+  const swarmSessions = (emuState?.sessions ?? []).filter((s) => s.route === SWARM_ROUTE).length;
 
   return (
     <div className="presenter-bar" id="presenter-bar" data-step={step.id} data-version={version}>
@@ -57,6 +63,22 @@ export const PresenterBar: React.FC<PresenterBarProps> = ({ controller, version,
         <div className="presenter-caption">{step.caption}</div>
         <div className="presenter-expect"><span>EXPECT</span> {step.expect}</div>
         {notice && <div className="presenter-notice">{notice}</div>}
+        {swarmStep && (
+          <div className="presenter-swarm" id="presenter-swarm">
+            <button
+              id="presenter-dashboard" className="btn-ghost" onMouseDown={noFocus}
+              onClick={() => window.open(DASHBOARD_URL, '_blank', 'noopener')}
+              title="The emulator dashboard in a new tab"
+            >
+              OPEN DASHBOARD ↗
+            </button>
+            <span className={swarmSessions ? 'presenter-swarm-ok' : 'presenter-swarm-missing'}>
+              {swarmSessions
+                ? `${swarmSessions} network player session(s) on ${SWARM_ROUTE}`
+                : 'No network players connected — start them with: npm run demo -- --swarm 3 (or npm run swarm)'}
+            </span>
+          </div>
+        )}
       </div>
       <div className="presenter-game" id="presenter-maps">
         <div className="presenter-game-title" title="Switching the map restarts the game; the talk stays on this step">MAP · restarts the game</div>
