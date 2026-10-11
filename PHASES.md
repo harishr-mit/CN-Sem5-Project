@@ -1,7 +1,7 @@
 # NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
-**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). Phase 4 (Presenter mode + polish) done 2026-10-11 (plan, decisions D1–D11 and deviations in `docs/PHASE4_PLAN.md`). Phase 5 (realistic transport + standalone emulator) done 2026-10-12 (plan, decisions D1–D15 and deviations in `docs/PHASE5_PLAN.md`). **Next: Phase 6** (lockstep + final verification).
+**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). Phase 4 (Presenter mode + polish) done 2026-10-11 (plan, decisions D1–D11 and deviations in `docs/PHASE4_PLAN.md`). Phase 5 (realistic transport + standalone emulator) done 2026-10-12 (plan, decisions D1–D15 and deviations in `docs/PHASE5_PLAN.md`). **Next: Phase 6** (lockstep + final verification) — plan drafted 2026-10-12 in `docs/PHASE6_PLAN.md`, waiting for approval.
 **Replaces:** `ROADMAP.md` (draft of 2026-10-09). The v1 build spec is archived at `docs/archive/SPEC-v1.md`. `GAMERULES.md` remains the source of truth for gameplay.
 
 The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10-10 (and a candidate Phase 7, multiplayer readiness, added on 2026-10-12 and not scheduled). Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
@@ -279,13 +279,19 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 
 **Goal:** complete the set of sync models and make the whole demo rehearsal-proof.
 
+**Implementation plan:** `docs/PHASE6_PLAN.md` (decisions D1–D12, drafted 2026-10-12, waiting for approval). Owner answers of 2026-10-12:
+- the pane's **Rd chip** chooses how a lost tick is recovered: off = resend on request (a freeze of about one round trip), on = a redundant window;
+- the preset has **three panes**: Full / Lockstep / Lockstep + Rd;
+- your own player is **not predicted** in a lockstep pane;
+- the **presentation laptop is another machine**, so the agent rehearses here and writes a checklist (`docs/REHEARSAL.md`) for the owner to repeat there.
+
 | ID | Task |
 |---|---|
-| L1 | **S4 Deterministic lockstep** (lab room only, movement only): the server relays every player's input per tick; clients simulate the world and *wait* when the next tick's input is missing. A stall counter goes in the pane metrics. |
+| L1 | **S4 Deterministic lockstep** (lab room only, movement only): the server relays every player's input per tick (the inputs it consumed); clients simulate the world and *wait* when the next tick's input is missing. Your own player is not predicted. Lost ticks are recovered by a resend on request (Rd off) or a redundant window (Rd on). A periodic state hash proves the clients never diverge. A stall counter goes in the pane metrics. |
 | L2 | Tests: lockstep clients stay bit-identical under loss (they stall but never diverge). |
-| L3 | Compare preset "Snapshot vs Lockstep": at 2–5 % loss, the lockstep pane freezes in bursts while the snapshot pane carries on. |
+| L3 | Compare preset "Snapshot vs Lockstep" (50 ms, 5 % loss, three panes: Full / Lockstep / Lockstep + Rd): the lockstep pane freezes in bursts while the snapshot pane carries on, and redundancy makes lockstep smooth again at the cost of input delay. Presenter — Compare gains it as step C7. |
 | L4 | Final docs: `README.md` (architecture with UDP and WS, all commands), `docs/PROTOCOL.md`, `docs/DEMO_SCRIPT.md` (final talk track = Presenter steps), `docs/ASSUMPTIONS.md`. |
-| L5 | Full rehearsal on the presentation laptop: cold start from a fresh clone, `npm run demo`, the Presenter run-through, timing noted. Fix anything that stutters. |
+| L5 | Full rehearsal: the presentation laptop is another machine (owner). The agent does a dress rehearsal on the dev laptop: a cold start from a fresh copy (`npm install`, test, typecheck, smoke, shots), a timed headless run-through of both Presenter scripts, and a fix for anything that stutters. It writes `docs/REHEARSAL.md` (timing sheet + checklist) for the owner to repeat on the presentation laptop. |
 
 **Demo checkpoint (final):** the complete Presenter run. It covers prediction and reconciliation, the four sync models side by side, the impairments shown live in the packet strip and dashboard, and the emulator used on its own.
 
