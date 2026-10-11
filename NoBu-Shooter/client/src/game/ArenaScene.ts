@@ -22,6 +22,7 @@ import { MapView, DEPTH } from './MapView.js';
 import { PlayerView, bakePlayerTextures, type PlayerLook } from './PlayerView.js';
 import { Sfx } from './audio.js';
 import { PLAYER_COLORS } from './playerColors.js';
+import { loadSettings, onSettingsChange, type UserSettings } from '../ui/settings.js';
 
 /**
  * Compare-view rendering options (PHASES.md C1-C4). Without them the scene
@@ -94,6 +95,15 @@ interface CorrectionLine {
   life: number; errorPx: number;
 }
 
+/** Death marker (PHASES.md P2): an X in the victim's colour, fading over the respawn delay. */
+interface DeathMark { img: Phaser.GameObjects.Image; bornMs: number }
+
+/** Respawn pulse (PHASES.md P2): expanding rings where a player reappears. */
+interface RespawnPulse { x: number; y: number; color: number; bornMs: number }
+
+const DEATH_MARK_MS = GAME.player.respawnDelayMs;
+const RESPAWN_PULSE_MS = 700;
+
 export class ArenaScene extends Phaser.Scene {
   private netClient!: NetClient;
   private mapView!: MapView;
@@ -107,9 +117,18 @@ export class ArenaScene extends Phaser.Scene {
   private particles: ParticleEffect[] = [];
   private correctionLines: CorrectionLine[] = [];
 
-  // FPS tracking for auto-degrade
+  // Camera bloom (Quick Match, Graphics Quality high) + fps auto-degrade (D6)
+  /** Frame times (ms) of the last fpsDegrade.forSeconds while bloom is on. */
   private fpsSamples: number[] = [];
-  private bloomEnabled = true;
+  private bloom: Phaser.FX.Bloom | null = null;
+  /** Switched off for low fps; stays off until the quality setting changes. */
+  private bloomDegraded = false;
+
+  // Arena polish (PHASES.md P2)
+  private deathMarks: DeathMark[] = [];
+  private pulses: RespawnPulse[] = [];
+  /** Last seen life counter / alive flag per player, to spot respawns. */
+  private lifeSeen = new Map<number, { life: number; alive: boolean }>();
 
   // Fixed sim accumulator
   private accumMs = 0;
@@ -158,6 +177,11 @@ export class ArenaScene extends Phaser.Scene {
     return !this.options.input && !this.options.renderAtDisplaySize;
   }
 
+  /** A Compare pane (shared input or rendered at display size), not Quick Match. */
+  private get isCompare(): boolean {
+    return !!(this.options.input || this.options.renderAtDisplaySize);
+  }
+
   preload(): void {
     preloadAssets(this, { room: this.netClient.room, audio: this.audible });
   }
@@ -179,6 +203,7 @@ export class ArenaScene extends Phaser.Scene {
     setupAssets(this);
     bakePlayerTextures(this);
     this.bakeMoverTextures();
+    this.bakeDeathMark();
     this.useSprites = has(this, PLAYER_ATLAS);
     this.sfx = new Sfx(this, this.audible);
 
@@ -232,6 +257,14 @@ export class ArenaScene extends Phaser.Scene {
     this.events.once('shutdown', cleanup);
     this.events.once('destroy', cleanup);
 
+    // Bloom follows Graphics Quality, live (Quick Match only, D6)
+    this.applyQuality(loadSettings());
+    this.unsubscribers.push(onSettingsChange((s) => {
+      this.bloomDegraded = false;
+      this.fpsSamples = [];
+      this.applyQuality(s);
+    }));
+
     const net = this.netClient;
     this.unsubscribers.push(
       net.on('correction', (ev: CorrectionEvent) => {
@@ -279,6 +312,7 @@ export class ArenaScene extends Phaser.Scene {
       case 'PLAYER_DEATH':
         if (at) {
           const isMe = ev.victim === me;
+          this.addDeathMark(at.x, at.y, isMe ? C_LOCAL_PLAYER : this.colorFor(ev.victim ?? 0));
           this.spawnDeathParticles(at.x, at.y, isMe ? C_LOCAL_PLAYER : this.colorFor(ev.victim ?? 0));
           this.spark(at.x, at.y, 1.6);
           if (isMe) this.cameras?.main?.shake(150, 0.006);
@@ -306,6 +340,25 @@ export class ArenaScene extends Phaser.Scene {
   private playShot(weapon: WeaponId, at?: { x: number; y: number }, listener?: { x: number; y: number }): void {
     const key = weapon === 'handgun' ? SFX.shootHandgun : SFX.shootRifle;
     this.sfx.play(key, { at, listener, rate: weapon === 'shotgun' ? 0.7 : 1, gain: at ? 0.7 : 0.85 });
+  }
+
+  /**
+   * Camera bloom: one full-screen WebGL pass (cheaper than per-object glow).
+   * Only in Quick Match at quality high, and not after an fps degrade.
+   */
+  private applyQuality(s: UserSettings): void {
+    const cam = this.cameras?.main;
+    if (!cam) return;
+    const want = !this.isCompare && s.graphicsQuality === 'high' && !this.bloomDegraded
+      && this.game.renderer.type === Phaser.WEBGL;
+    if (want && !this.bloom) {
+      // One blur step: 4 steps cost ≈ 30 fps on the dev laptop's Intel UHD (1920×1080),
+      // 1 step ≈ 2 fps (docs/ASSUMPTIONS.md); the 2 px offset widens the glow for free.
+      this.bloom = cam.postFX.addBloom(0xffffff, 2, 2, 1, 0.7, 1);
+    } else if (!want && this.bloom) {
+      cam.postFX.remove(this.bloom);
+      this.bloom = null;
+    }
   }
 
   private colorFor(id: number): number {
@@ -337,14 +390,17 @@ export class ArenaScene extends Phaser.Scene {
       }
     }
 
-    // ── FPS auto-degrade ─────────────────────────────────────
-    this.fpsSamples.push(1000 / dt);
-    if (this.fpsSamples.length > 180) this.fpsSamples.shift();
-    if (this.fpsSamples.length >= 180) {
-      const avgFps = this.fpsSamples.reduce((a, b) => a + b, 0) / this.fpsSamples.length;
-      if (avgFps < 45 && this.bloomEnabled) {
-        this.bloomEnabled = false;
-        // TODO: disable bloom post-processing when Phaser pipeline is added
+    // ── FPS auto-degrade: bloom off after forSeconds below minFps ─
+    if (this.bloom) {
+      this.fpsSamples.push(dt);
+      const windowMs = NET.fpsDegrade.forSeconds * 1000;
+      let total = this.fpsSamples.reduce((a, b) => a + b, 0);
+      while (this.fpsSamples.length > 1 && total - this.fpsSamples[0] >= windowMs) total -= this.fpsSamples.shift()!;
+      if (total >= windowMs && (this.fpsSamples.length * 1000) / total < NET.fpsDegrade.minFps) {
+        this.bloomDegraded = true;
+        this.fpsSamples = [];
+        this.applyQuality(loadSettings());
+        console.info(`[arena] bloom switched off: below ${NET.fpsDegrade.minFps} fps for ${NET.fpsDegrade.forSeconds} s`);
       }
     }
 
@@ -397,7 +453,7 @@ export class ArenaScene extends Phaser.Scene {
     // Remote players (other panes' players are dimmed when asked). Compare
     // has no colour rings: its ghost / truth rings already mark positions.
     const dim = (this.options.view?.dimOthers ?? false) && myId !== null;
-    const compare = !!(this.options.input || this.options.renderAtDisplaySize);
+    const compare = this.isCompare;
     const ghostShown = net.toggles.ghost && net.toggles.prediction;
     const now = this.time.now;
     const seen = new Set<number>();
@@ -406,11 +462,12 @@ export class ArenaScene extends Phaser.Scene {
       seen.add(p.id);
       const color = this.colorFor(p.id);
       this.drawnAt.set(p.id, { x: p.x, y: p.y, aim: p.aim, weapon: p.weapon });
+      this.watchRespawn(p.id, p.life, p.alive, p.x, p.y, color, now);
       if (this.useSprites) {
         this.viewFor(p.id).update({
           x: p.x, y: p.y, aim: p.aim, alive: p.alive, life: p.life, weapon: p.weapon,
           reloading: p.reloading, protect: p.protectMs > 0, shield: p.shield, fast: p.fast,
-          color, ring: !compare, alpha: dim ? 0.3 : 1, isLocal: false,
+          color, ring: !compare, chevron: !compare, alpha: dim ? 0.3 : 1, isLocal: false,
           name: p.invincible ? `${p.name} [DEV]` : p.name, shotAt: this.shotAt.get(p.id) ?? 0,
         }, now, dt);
       } else {
@@ -428,10 +485,11 @@ export class ArenaScene extends Phaser.Scene {
         weapon: cv.weapon, reloading: cv.reload !== null,
         protect: me.protectMs > 0, shield: me.shield, fast: cv.speedMsLeft > 0 || me.fast,
         // The ghost (G) replaces our colour ring while it is shown
-        color: C_LOCAL_PLAYER, ring: !compare && !ghostShown, alpha: 1, isLocal: true,
+        color: C_LOCAL_PLAYER, ring: !compare && !ghostShown, chevron: false, alpha: 1, isLocal: true,
         name: me.invincible ? `${me.name} [DEV]` : me.name, shotAt: this.shotAt.get(myId) ?? 0,
       };
       this.drawnAt.set(myId, { x: local.x, y: local.y, aim: net.aimAngle, weapon: cv.weapon });
+      this.watchRespawn(myId, me.life, me.alive, local.x, local.y, C_LOCAL_PLAYER, now);
       if (this.useSprites) this.viewFor(myId).update(look, now, dt);
       else this.drawLocalPlayer(pg, me);
       if (!me.alive) {
@@ -446,6 +504,9 @@ export class ArenaScene extends Phaser.Scene {
     for (const [id, view] of [...this.playerViews]) {
       if (!seen.has(id)) { view.destroy(); this.playerViews.delete(id); this.drawnAt.delete(id); }
     }
+    for (const id of [...this.lifeSeen.keys()]) if (!seen.has(id)) this.lifeSeen.delete(id);
+    this.drawDeathMarks(now);
+    this.drawRespawnPulses(fxG, now);
 
     // Ghost (SPEC.md §13.4) — hidden with prediction off, where it would coincide
     if (net.toggles.ghost && net.toggles.prediction && myId !== null && me?.alive) {
@@ -471,6 +532,58 @@ export class ArenaScene extends Phaser.Scene {
       const alpha = p.life / p.maxLife;
       fxG.fillStyle(p.color, alpha);
       fxG.fillCircle(p.x, p.y, p.size * alpha);
+    }
+  }
+
+  /** Respawn = alive again after being dead, or a new life counter while alive. */
+  private watchRespawn(id: number, life: number, alive: boolean, x: number, y: number, color: number, now: number): void {
+    const prev = this.lifeSeen.get(id);
+    this.lifeSeen.set(id, { life, alive });
+    if (prev && alive && (!prev.alive || prev.life !== life)) this.pulses.push({ x, y, color, bornMs: now });
+  }
+
+  /* TEXTURE: death_marker — a baked X (no asset). */
+  private bakeDeathMark(): void {
+    if (this.textures.exists('death-x')) return;
+    const g = this.make.graphics({}, false);
+    for (const [w, c, a] of [[9, 0x000000, 0.55], [5, 0xffffff, 1]] as const) {
+      g.lineStyle(w, c, a);
+      g.lineBetween(6, 6, 30, 30);
+      g.lineBetween(30, 6, 6, 30);
+    }
+    g.generateTexture('death-x', 36, 36);
+    g.destroy();
+  }
+
+  private addDeathMark(x: number, y: number, color: number): void {
+    const now = this.time.now;
+    // Reuse a faded marker before creating a new one
+    let mark = this.deathMarks.find((m) => now - m.bornMs >= DEATH_MARK_MS);
+    if (!mark) {
+      mark = { img: this.add.image(0, 0, 'death-x').setDepth(DEPTH.trail), bornMs: now };
+      this.deathMarks.push(mark);
+    }
+    mark.bornMs = now;
+    mark.img.setPosition(x, y).setTint(color).setVisible(true);
+  }
+
+  private drawDeathMarks(now: number): void {
+    for (const m of this.deathMarks) {
+      const k = (now - m.bornMs) / DEATH_MARK_MS;
+      if (k >= 1) { m.img.setVisible(false); continue; }
+      m.img.setAlpha(0.9 * (1 - k)).setScale(1 + 0.15 * Math.max(0, 1 - k * 6));
+    }
+  }
+
+  private drawRespawnPulses(g: Phaser.GameObjects.Graphics, now: number): void {
+    this.pulses = this.pulses.filter((p) => now - p.bornMs < RESPAWN_PULSE_MS);
+    for (const p of this.pulses) {
+      const k = (now - p.bornMs) / RESPAWN_PULSE_MS;
+      const ease = 1 - (1 - k) * (1 - k);
+      g.lineStyle(3, p.color, 1 - k);
+      g.strokeCircle(p.x, p.y, P_RADIUS + 4 + 36 * ease);
+      g.lineStyle(2, 0xffffff, 0.6 * (1 - k));
+      g.strokeCircle(p.x, p.y, P_RADIUS + 2 + 20 * ease);
     }
   }
 

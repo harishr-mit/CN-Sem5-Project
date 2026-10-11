@@ -76,6 +76,13 @@ The `neon` map keeps its procedural grid and glowing glass obstacles.
 
 Respawn, power-up end and UI clicks are **silent** (owner decision).
 
+## Drawn in code (no file)
+
+Phase 4 added arena details that are baked into textures at start-up rather than
+loaded: the death marker (`death-x`), the remote aim chevron (`aim-chevron`),
+the respawn pulse rings and the camera glow (Phaser bloom). No asset files were
+added or changed in Phase 4.
+
 ## Still wanted
 
 Nothing. Optional extras: a dedicated shotgun blast sound (`sfx/shoot_shotgun.wav`;

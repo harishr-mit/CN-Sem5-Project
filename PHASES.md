@@ -1,7 +1,7 @@
 # NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
-**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). **Next: Phase 4** — implementation plan `docs/PHASE4_PLAN.md` (draft 2026-10-10, awaiting owner approval).
+**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). Phase 4 (Presenter mode + polish) done 2026-10-11 (plan, decisions D1–D11 and deviations in `docs/PHASE4_PLAN.md`). **Next: Phase 5** (realistic transport + standalone emulator).
 **Replaces:** `ROADMAP.md` (draft of 2026-10-09). The v1 build spec is archived at `docs/archive/SPEC-v1.md`. `GAMERULES.md` remains the source of truth for gameplay.
 
 The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10-10. Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
@@ -26,8 +26,8 @@ The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10
 | 2 | **Compare view + scripted movers** | 2–4 synchronised panes plus a ground-truth reference pane, with moving targets that make interpolation visible | G1 foundation, G2 | **done 2026-10-09** |
 | 2.5 | **Gameplay + textures** | Textured survivor avatars with colour rings and a local-player marker, four rotating maps, ammo + reload, five power-ups, sound effects | G4 (and netcode material for G1/G2) | **done 2026-10-10** |
 | 3 | **Sync models: snapshot vs state** | Full snapshots vs delta snapshots vs state sync with extrapolation, side by side, with a live bandwidth chart | G1 | **done 2026-10-10** |
-| 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena and UI | G4 | **next** |
-| 5 | **Realistic transport + standalone emulator** | Real UDP between Node "network players", emulator and server. The emulator dashboard works with no game running | G3 | planned |
+| 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena and UI | G4 | **done 2026-10-11** |
+| 5 | **Realistic transport + standalone emulator** | Real UDP between Node "network players", emulator and server. The emulator dashboard works with no game running | G3 | **next** |
 | 6 | **Lockstep + final verification** | Deterministic lockstep freezing under 2–5 % loss beside snapshot sync. Full rehearsal and docs | G1, all | planned |
 
 Each phase builds on the previous one. Phases 4 and 5 are independent of each other and can be swapped if the presentation date requires it.
@@ -112,7 +112,7 @@ R10 covered:
 |---|---|
 | Nightmare caps bandwidth at 400 kbps, but full snapshots need about 380–450 kbps, causing bufferbloat (ack delay ≈ 700 ms) | Phase 3 (delta snapshots are the fix *and* the lesson) |
 | A/B panes are letterboxed with large empty areas | Phase 2 |
-| Lab panel needs scrolling at 1600×900; no name tags in the arena | Phase 4 |
+| Lab panel needs scrolling at 1600×900; no name tags in the arena | Phase 4 (name tags in 2.5; Lab fixed in Phase 4) |
 | In dev mode, StrictMode prints 3 harmless "WebSocket closed before established" warnings | accepted (dev only) |
 
 ---
@@ -205,7 +205,7 @@ Suggested order: A0 + A1 → A2 → A3 → A4 → A5 (A6 alongside each).
 
 **Goal:** a talk you can give with one hand on the keyboard, on an arena that looks finished.
 
-**Implementation plan:** `docs/PHASE4_PLAN.md` (decisions D1–D11; owner answers of 2026-10-10 included: two separate presenter scripts, Invincible on during Quick Match presenter steps, glow in Quick Match only, `playwright-core` as a local devDependency with git-ignored screenshots). Name tags, consistent player colours and rotating aim already exist from Phase 2.5.
+**Implementation plan:** `docs/PHASE4_PLAN.md` (decisions D1–D11, approved 2026-10-11; owner answers of 2026-10-10 included: two separate presenter scripts, Invincible on during Quick Match presenter steps, glow in Quick Match only, `playwright-core` as a local devDependency with git-ignored screenshots). Name tags, consistent player colours and rotating aim already exist from Phase 2.5.
 
 | ID | Task |
 |---|---|
@@ -220,6 +220,8 @@ Suggested order: A0 + A1 → A2 → A3 → A4 → A5 (A6 alongside each).
 **Demo checkpoint:** start each Presenter script and press `N` through it, with no mouse fiddling and every effect appearing on cue.
 
 **Exit criteria:** the phase rules; `npm run shots` output reviewed against a short visual checklist (no unstyled elements, no overlap, readable at 1280×720).
+
+**Result (met, 2026-10-11):** 147 tests (new: `presenter` 13 — complete steps, existing presets/networks, no leakage between steps in any direction, nudge only on entering, Invincible on/off, NetClient change events; `emulator` +4 — queue depth grows over the cap and drains, reorder marks only on overtaken packets), typecheck clean, smoke passes (6 steps; delta 32 % of full, ack delay 364 vs 646 ms). `npm run shots`: 20 screens × 1280×720 / 1920×1080, 0 console errors, reviewed against `docs/VISUAL_CHECKLIST.md` (two findings fixed: a wrapping Lab title, the Q10 expected numbers). Demo checkpoint: both scripts pressed through with `N` only (local Chrome) — every step applies its network, toggles and sync model; `B` returns to identical states; `H` hides the bar; END returns to the landing page. Quick Match 57–60 fps **with bloom** at 1920×1080 on the laptop's Intel UHD (one blur step; four steps gave 28–32 fps); Compare 4 panes + REF 60 fps. Lab without scrolling at 1920×1080 (100/115/130 %), 1600×900 and 1280×720 with default sections. Strip under Nightmare: queue bar ≈ 100–400 ms, reordered packets overtaken. Fixed on the way: leaving a match after sounds played threw (Phaser sound teardown, since 2.5); switching views 6 times exhausted Chrome's 16 WebGL contexts (since Phase 2); full-screen modal blur halved the fps under bloom. Details: `log.md` T69–T75, `docs/ASSUMPTIONS.md` #60–#72.
 
 ---
 
@@ -270,7 +272,7 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 - [ ] G1: four sync models are selectable and comparable side by side with measured bandwidth, latency and error. *(Three done in Phase 3 — full, delta, state; lockstep is Phase 6.)*
 - [ ] G2: 0 corrections on a clean network; corrections under loss that converge; redundancy removes them (covered by tests and visible in the UI).
 - [ ] G3: the emulator runs standalone (WS + UDP) with its own dashboard and README, and the game is just one client of it.
-- [ ] G4: Presenter mode runs the whole talk; screenshots pass the visual checklist; textures and sounds drop in through the manifest (Phase 2.5).
+- [ ] G4: Presenter mode runs the whole talk; screenshots pass the visual checklist; textures and sounds drop in through the manifest (Phase 2.5). *(Done for the talk as of Phase 4; Phases 5–6 add their steps.)*
 - [ ] `npm run demo`, `npm test`, `npm run typecheck`, `npm run smoke` and `npm run shots` pass from a fresh clone.
 
 ---

@@ -30,3 +30,6 @@ yarn-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+
+# Generated screenshots and reports (npm run shots, Phase 4 P7)
+artifacts/

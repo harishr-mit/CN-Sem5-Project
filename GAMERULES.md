@@ -25,7 +25,7 @@ The game is deliberately simple. Its purpose is to make network effects (lag, lo
 | `Space` | Dash, while the Dash power-up is active (§6b). |
 | `M` | Mute / unmute sound effects (§18). Client-only. |
 
-`C`, `P`, `I`, `G`, `Y`, `Tab`, `1`–`5` are Network Lab keys (README), not game actions. `C` toggles reconciliation (it was `R` before 2026-10-10); `Y` cycles the sync model (Phase 3).
+`C`, `P`, `I`, `G`, `Y`, `Tab`, `1`–`5` are Network Lab keys (README), not game actions. `C` toggles reconciliation (it was `R` before 2026-10-10); `Y` cycles the sync model (Phase 3). In Presenter mode (Phase 4) `N` / `B` / `H` step through the talk and hide its caption; they are not game actions either and send nothing to the server (a step changes the emulator, the netcode toggles, the sync model and — Quick Match — the developer Invincible switch, §19).
 
 ---
 
@@ -491,6 +491,8 @@ Rendering never changes the simulation. All art lives in `NoBu-Shooter/assets/` 
 - **Identity:** a ring under the feet and the name tag in the player's colour (cyan for the local player, eight hues for the rest, the same colour on the scoreboard). The **local player** also carries cyan pips on the shoulders, drawn in code. **Exceptions:** while the ghost (authoritative position, `G`) is shown, it replaces the local player's colour ring; the Compare view draws no colour rings at all (its ghost and truth rings already mark positions).
 - **Shields:** spawn protection and the Shield power-up both use the shield bubble; spawn protection is the player's colour and pulses, the Shield power-up is green and steady.
 - **Power-ups:** the pickup icon at its spot, bobbing slightly. Piercing shots are tinted violet.
+- **Readability (Phase 4, Quick Match):** a small **aim chevron** in each remote player's colour just outside their ring; a **death marker** (✕ in the victim's colour) where a player died, fading over the respawn delay; a **respawn pulse** (two expanding rings) wherever any player reappears. All three are drawn in code (no asset files); the Compare view keeps only the death marker and pulse.
+- **Glow (Phase 4):** at Graphics Quality *high* the Quick Match camera gets a bloom pass (a soft neon halo). It switches itself off after 3 s below 45 fps and is never used in the Compare view.
 - **Maps:** floor texture tiled across the arena; obstacles drawn with the map's skin (§3).
 - **Credits:** the CC-BY assets (survivor avatar; RC Art props) are credited on a Credits screen reachable from the landing page and in `README.md`.
 
@@ -518,5 +520,5 @@ Sounds are cosmetic. The client triggers them from its own predicted actions (ow
 
 ## 19. Developer toggle (demo only)
 
-`npm run demo` starts the server with `NOBU_DEV=1` and the client with `VITE_NOBU_DEV=1`. Only then does the Network Lab show a **Developer** section with an **Invincible** switch (message `dev`, `docs/PROTOCOL.md`): hits on that player are still shown, but never kill or use up a shield. The player's name tag reads `[DEV]` for everyone and their HUD shows `DEV: INVINCIBLE`. Without `NOBU_DEV=1` (tests, smoke, any other way of running the server) the server ignores the message.
+`npm run demo` starts the server with `NOBU_DEV=1` and the client with `VITE_NOBU_DEV=1`. Only then does the Network Lab show a **Developer** section with an **Invincible** switch (message `dev`, `docs/PROTOCOL.md`): hits on that player are still shown, but never kill or use up a shield. The player's name tag reads `[DEV]` for everyone and their HUD shows `DEV: INVINCIBLE`. Without `NOBU_DEV=1` (tests, smoke, any other way of running the server) the server ignores the message. **Presenter — Quick Match** switches it on for the whole script (owner, Phase 4) and off again when the presenter leaves.
 

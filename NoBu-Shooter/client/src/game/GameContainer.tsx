@@ -70,8 +70,16 @@ export const GameContainer: React.FC<GameContainerProps> = ({ netClient, options
 
     return () => {
       resizeObserver?.disconnect();
+      // Phaser's destroy drops its WebGL context without releasing it, so the
+      // context lives until garbage collection. Switching views a few times
+      // (Compare = up to 5 games, doubled by StrictMode in dev) then hit
+      // Chrome's limit of 16 live contexts and it force-lost the oldest ones.
+      // Release it once Phaser has finished (it destroys on its next step).
+      const renderer = game.renderer as Phaser.Renderer.WebGL.WebGLRenderer | null;
+      const gl = renderer && 'gl' in renderer ? renderer.gl : null;
       game.destroy(true);
       gameRef.current = null;
+      if (gl) setTimeout(() => gl.getExtension('WEBGL_lose_context')?.loseContext(), 500);
     };
   }, [netClient]);
 

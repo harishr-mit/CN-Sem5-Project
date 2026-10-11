@@ -2,7 +2,7 @@
 
 Follow these steps for a complete, 60-second end-to-end demonstration of the netcode and network impairment simulator.
 
-Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into Presenter mode). Expected numbers below were measured on 2026-10-09 (Windows laptop, local Chrome); §7 and §11 on 2026-10-10 (Phase 3). Bandwidth figures count wire bytes (payload + 28 B per message, like the emulator).
+Reference: `PHASES.md` (this script grows with each phase). Since Phase 4 the same walkthrough runs as **Presenter mode** from the landing page — §12 lists its steps, which come from `client/src/presenter/scripts.ts` (the step ids there are pinned by `tests/presenter.test.ts`). Expected numbers below were measured on 2026-10-09 (Windows laptop, local Chrome); §7 and §11 on 2026-10-10 (Phase 3), §7's queue figures on 2026-10-11 (Phase 4). Bandwidth figures count wire bytes (payload + 28 B per message, like the emulator).
 
 ---
 
@@ -23,6 +23,8 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
 | Interpolation Toggle | `I` |
 | Ghost Overlay Toggle | `G` |
 | Sync model (Full → Delta → State 10 → State 30) | `Y` (Quick Match: Network Lab; Compare: the selected pane) |
+| Presenter mode | `N` next step, `B` previous step, `H` hide the caption, **END** button to leave (§12) |
+| Projector | Settings (`Esc`) → **UI Scale** 100 / 115 / 130 %; Graphics Quality *high* = arena glow |
 
 ---
 
@@ -74,12 +76,13 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
 ### 7. The Nightmare Preset
 1. Press `5` on your keyboard (or click **[5] NIGHTMARE**).
    - Impairments active: 120 ms latency, 50 ms jitter, 12% burst loss, 3% duplication, 5% reordering, 400 kbps bandwidth limit.
-2. Observe the **Packet Flow Strip** at the bottom:
-   - Cyan upstream and magenta downstream dots flowing through the emulator.
-   - Lost packets burst and drop in red.
-   - Bandwidth queue limit causes orange queue drops.
-   - Duplications split dots into twins.
-3. Note the **bufferbloat**: full snapshots of a 4-player match need ≈ 500–600 kbps, above the 400 kbps cap, so the emulator queue fills, ack delay climbs to ≈ 650–700 ms and the orange queue-drop count rises.
+2. Observe the **Packet Flow Strip** at the bottom (legend on its right):
+   - Cyan upstream and magenta downstream dots, each crossing the EMULATOR box for as long as the emulator actually held it (the strip replays real timings ≈ 1 s behind).
+   - Lost packets burst and drop in red; packets refused by a full queue drop in amber.
+   - Duplicates show a split flash at the box entry; both copies then travel on.
+   - **Reordered** packets carry a white ring and are visibly overtaken by later ones.
+   - The **queue bar** at the bottom of the box shows how long a packet arriving now would wait for the 400 kbps cap (`QUEUE ↓… ms`, red above 75 % of the 400 ms limit).
+3. Note the **bufferbloat**: full snapshots of a 4-player match need ≈ 350–600 kbps (it depends on the map and the fight), at or above the 400 kbps cap, so the queue bar fills (≈ 100–200 ms after 15 s, more in a big fight), the ack delay climbs to ≈ 550–700 ms and amber queue drops appear.
 4. Press `Y` (Network Lab → **SYNC MODEL** → DELTA). You stay in the match; the server now sends only what changed since the last snapshot you acknowledged. **Expect** after ≈ 15 s: ↓ ≈ 130 kbps instead of ≈ 400, ≈ 500 B per message instead of ≈ 1.9 kB, ack delay ≈ 325 ms instead of ≈ 660 ms (measured 2026-10-10). Press `Y` again for **STATE 10** (≈ 190 kbps, remote players extrapolated) and twice more to get back to FULL.
 5. Switch **Input Redundancy ON**: corrections from upstream loss mostly disappear, although the queueing delay remains (with Full).
 
@@ -98,9 +101,9 @@ Reference: `PHASES.md` (this script grows with each phase; Phase 4 turns it into
 6. **Custom**: choose 2–4 panes, click a pane to select it and toggle `P` / `C` / `I` / `G`, or cycle its sync model with `Y` (or the chips in its header). `Tab` opens the network drawer; `1`–`5` still apply the emulator presets to every emulated pane. The Phase 3 presets are in §11.
 
 ### 9. Real-Time Metrics & Inspector
-1. Click **▼ INSPECT PACKETS** on the packet strip to open the packet drawer.
+1. Click **▼ INSPECT PACKETS** on the packet strip (below its legend) to open the packet drawer.
 2. Observe real-time JSON frames, sizes, and fate codes (delivered, loss drop, queue drop).
-3. Review the live 12-second Sparkline graphs in the Lab for RTT, Loss %, Pending Inputs, and Correction Error.
+3. Review the live 12-second Sparkline graphs in the Lab for RTT, Loss %, Pending Inputs, and Correction Error (open the **Real-time sparkline traces** section — Lab sections fold by their titles and the Lab remembers which are open).
 
 ### 10. Weapons, Power-ups and Maps (Phase 2.5)
 Rehearsal tip: `NOBU_MAPS=warehouse npm run demo` starts on a chosen map (the rotation is `neon → warehouse → plaza → overgrown`, one map per match).
@@ -122,3 +125,26 @@ Open **NETWORK LAB — COMPARE**. Each pane's header shows its sync model (click
 3. **State Hz** (Transatlantic; zigzag + reversal drones; REF on): State 10 Hz vs 30 Hz. Both extrapolate, so mover lag ≈ the one-way latency (≈ 100 ms vs ≈ 190 ms with interpolation). **Expect** off-path ≈ 30 % vs ≈ 10 % and ↓ ≈ 105 vs ≈ 320 kbps: more updates mean less rubber-banding but 3× the bytes.
 4. Under heavy burst loss State 10 Hz can freeze briefly: it extrapolates at most 250 ms past the last state, then holds until the next one arrives.
 
+### 12. Presenter Mode (Phase 4)
+Start from the landing page. Each step sets everything at once (network, all netcode toggles, sync model — or, in Compare, a whole preset), so `N` and `B` always show the same thing; between steps every normal key still works and lasts until the next step. The caption bar (between the arena and the packet strip, or under the Compare grid) shows the step counter, what to watch, the expected numbers and a step timer — some effects need ≈ 15 s. `H` hides it; **END** goes back to the landing page.
+
+**Presenter — Quick Match** (12 steps; turns on the developer **Invincible** switch so bots can't interrupt — `[DEV]` tag, needs `npm run demo`; turned off again on END). Walk around while you talk.
+
+| Step | Title | Network | Changes from the defaults | Watch / expect |
+|---|---|---|---|---|
+| Q1 | Baseline | Baseline | — | 0 corrections/s, 0.0 px, Input → Screen ≈ 17 ms, RTT ≈ 15–20 ms |
+| Q2 | Server delay, no prediction | 100 ms one-way | prediction, reconciliation, ghost off | Input → Screen ≈ 300+ ms; RTT ≈ 216 ms |
+| Q3 | Client-side prediction | 100 ms one-way | — | Instant movement, still 0 corrections; the amber ghost trails |
+| Q4 | Packet loss | 50 ms + 10 % loss | — | ≈ 2–3 corrections/s of ≈ 7 px; Loss tile ≈ ↑10 % ↓10 % |
+| Q5 | Input redundancy | 50 ms + 10 % loss | redundancy on | Corrections drop to 0/s |
+| Q6 | Reconciliation off | 50 ms + 10 % loss | reconciliation off | The ghost drifts away for good |
+| Q7 | Jitter, no interpolation | 40 ± 50 ms | interpolation off | Bots and bullets stutter |
+| Q8 | Snapshot interpolation | 40 ± 50 ms | — | Bots glide, drawn 100 ms in the past |
+| Q9 | Misprediction (nudge) | 50 ms one-way | the server pushes you +40 px on entering | One smooth correction with an amber vector (`B` then `N` nudges again) |
+| Q10 | Nightmare: full snapshots | Nightmare | — | After ≈ 15 s: ack delay ≈ 550–700 ms, ↓ ≈ 350–420 kbps, queue bar ≈ 100–200 ms |
+| Q11 | Nightmare: delta snapshots | Nightmare | sync Delta | ↓ ≈ 130 kbps, ≈ 500 B/msg instead of ≈ 1.9 kB, ack delay ≈ 325 ms |
+| Q12 | Nightmare: state sync | Nightmare | sync State 10 Hz | ↓ ≈ 190 kbps; bots most current but overshoot at turns |
+
+**Presenter — Compare** (6 steps = the six Compare presets of §8 and §11, in order): C1 Prediction, C2 Interpolation, C3 Redundancy, C4 Sync, C5 Bandwidth, C6 State Hz. The bar shows the preset's caption and the expected numbers from §8 / §11 (the dock then shows only its table and chart). Give C4 and C5 ≈ 15 s.
+
+Rehearsal: `npm run shots` (README) captures both scripts' first steps and the Nightmare step; `docs/VISUAL_CHECKLIST.md` says what to look for.

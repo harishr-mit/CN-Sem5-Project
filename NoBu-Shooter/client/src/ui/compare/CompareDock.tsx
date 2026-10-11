@@ -96,7 +96,7 @@ export const CompareDock: React.FC<CompareDockProps> = ({ caption, rows, showMov
         gap: 8,
       }}
     >
-      <div style={{ fontSize: compact ? '0.74rem' : '0.86rem', color: 'var(--c-text)', lineHeight: 1.25 }}>{caption}</div>
+      {caption && <div style={{ fontSize: compact ? '0.74rem' : '0.86rem', color: 'var(--c-text)', lineHeight: 1.25 }}>{caption}</div>}
 
       <table style={{ borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: compact ? '0.66rem' : '0.76rem' }}>
         <thead>

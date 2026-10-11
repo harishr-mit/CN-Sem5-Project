@@ -42,6 +42,10 @@ const MOVER_LABEL: Record<MoverPattern, string> = {
 interface CompareViewProps {
   playerName: string;
   onExit: () => void;
+  /** Presenter mode: select this preset (a new object each time, even for the same id). */
+  presetRequest?: { id: string; seq: number };
+  /** Rendered under the grid in the layout flow (the Presenter caption). */
+  footer?: React.ReactNode;
 }
 
 type MetricsMap = Record<string, LocalMetrics>;
@@ -58,7 +62,7 @@ const barBtn = (active: boolean, color = 'var(--c-cyan)', narrow = false): React
   border: `1px solid ${active ? color : 'var(--c-border)'}`,
 });
 
-export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) => {
+export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, presetRequest, footer }) => {
   // ── Long-lived objects (created once) ───────────────────────────
   const [driver] = useState(() => new InputDriver());
   const [emulator] = useState(() => new EmulatorClient(EMULATOR_CONTROL_URL));
@@ -226,6 +230,12 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
     if (!p.panes.some((x) => x.id === selected)) setSelected(p.panes[0].id);
   }, [selected]);
 
+  // Presenter: every request re-applies its preset completely (D2)
+  useEffect(() => {
+    const p = presetRequest && COMPARE_PRESETS.find((x) => x.id === presetRequest.id);
+    if (p) applyPreset(p);
+  }, [presetRequest]);
+
   const toggleSetting = useCallback((id: PaneId, key: keyof PredictionToggle) => {
     const next = customPreset(preset.panes.length, preset);
     const pane = next.panes.find((p) => p.id === id);
@@ -287,7 +297,8 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
 
   const dock = (w: number, h: number) => (
     <CompareDock
-      caption={preset.caption} rows={dockRows} showMovers={showMovers}
+      // While presenting, the caption is in the Presenter bar (footer)
+      caption={footer ? '' : preset.caption} rows={dockRows} showMovers={showMovers}
       capKbps={capKbps} bwSpanSec={BW_SPAN_SEC} width={w} height={h}
     />
   );
@@ -383,6 +394,8 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit }) 
           </>
         )}
       </div>
+
+      {footer}
 
       {/* Network Lab drawer: overlays, so opening it never resizes the panes */}
       <div

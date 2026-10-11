@@ -56,6 +56,8 @@ export interface PacketEvent {
   fate: PacketFate;
   delayMs: number;
   t: number;
+  /** Delivered late on purpose by the reorder stage (later packets overtake it). */
+  reordered?: true;
 }
 
 export interface Clock {
@@ -132,6 +134,11 @@ export class LinkState {
         : 0,
       /** Loss % over the last second (SPEC.md §11.3 rolling window). */
       lossPctWindow: w.length > 0 ? Math.round(droppedW / w.length * 1000) / 10 : 0,
+      /**
+       * Queue depth: how long a packet arriving now would wait for the
+       * bandwidth cap before it starts transmitting (0 without a cap).
+       */
+      queueMs: Math.max(0, Math.round(this.freeAt - now)),
       pktsInWindow: w.length,
       deliveredWindow: deliveredW,
     };
@@ -195,8 +202,8 @@ export class Pipeline {
 
     const preview = packet.data.slice(0, 64);
 
-    const emitEvent = (fate: PacketFate, delayMs: number) => {
-      onEvent({ sid, dir, size: packet.size, preview, fate, delayMs, t: now });
+    const emitEvent = (fate: PacketFate, delayMs: number, reordered = false) => {
+      onEvent({ sid, dir, size: packet.size, preview, fate, delayMs, t: now, ...(reordered ? { reordered: true as const } : {}) });
     };
 
     // ── 1. LOSS ───────────────────────────────────────────────
@@ -242,7 +249,7 @@ export class Pipeline {
     packet: Packet,
     link: LinkState,
     deliver: (pkt: Packet) => void,
-    emitEvent: (fate: PacketFate, delayMs: number) => void,
+    emitEvent: (fate: PacketFate, delayMs: number, reordered?: boolean) => void,
     now: number,
     cfg: LinkConfig
   ): void {
@@ -289,7 +296,7 @@ export class Pipeline {
 
     this.clock.setTimer(schedDelay, () => {
       deliver(packet);
-      emitEvent('delivered', totalDelay);
+      emitEvent('delivered', totalDelay, isReorder);
     });
   }
 }

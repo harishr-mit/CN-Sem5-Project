@@ -21,6 +21,9 @@ npm run typecheck
 
 # Run headless bot smoke test (through the emulator, Nightmare preset)
 npm run smoke
+
+# Screenshot every screen at 1280×720 and 1920×1080 (local Chrome; output in artifacts/shots/)
+npm run shots
 ```
 
 Project phases and status: [`../PHASES.md`](../PHASES.md).

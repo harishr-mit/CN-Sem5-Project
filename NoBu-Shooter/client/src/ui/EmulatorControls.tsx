@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { EmulatorClient } from '../net/EmulatorClient.js';
 import { useGameStore } from './store.js';
 import { isTypingTarget } from '../game/input.js';
+import { LabSection } from './LabSection.js';
 
 export const EMULATOR_PRESETS = [
   { name: 'Baseline', key: '1' },
@@ -15,6 +16,8 @@ interface EmulatorControlsProps {
   emulatorClient: EmulatorClient;
   /** Hotkeys 1–5 apply the emulator presets (default on). */
   hotkeys?: boolean;
+  /** Sections open/close by their titles (Quick Match Lab); Compare's drawer keeps them open. */
+  collapsible?: boolean;
 }
 
 /**
@@ -22,7 +25,7 @@ interface EmulatorControlsProps {
  * Lab and the Compare view's drawer. The emulator's state broadcast is the
  * single source of truth for the slider values.
  */
-export const EmulatorControls: React.FC<EmulatorControlsProps> = ({ emulatorClient, hotkeys = true }) => {
+export const EmulatorControls: React.FC<EmulatorControlsProps> = ({ emulatorClient, hotkeys = true, collapsible = false }) => {
   // Active preset tracking
   const [activePreset, setActivePreset] = useState<string>('Baseline');
 
@@ -99,8 +102,7 @@ export const EmulatorControls: React.FC<EmulatorControlsProps> = ({ emulatorClie
   return (
     <>
     {/* Section 2: Presets */}
-    <div className="lab-section">
-      <div className="lab-section-title">PRESETS (HOTKEYS 1–5)</div>
+    <LabSection id="presets" title="PRESETS (HOTKEYS 1–5)" collapsible={collapsible} summary={activePreset}>
       <div className="presets-row">
         {EMULATOR_PRESETS.map((p) => (
           <button
@@ -119,11 +121,13 @@ export const EmulatorControls: React.FC<EmulatorControlsProps> = ({ emulatorClie
           </div>
         )}
       </div>
-    </div>
+    </LabSection>
 
     {/* Section 3: Sliders */}
-    <div className="lab-section">
-      <div className="lab-section-title">IMPAIRMENT CONTROLS</div>
+    <LabSection
+      id="impairment" title="IMPAIRMENT CONTROLS" collapsible={collapsible}
+      summary={`${latencyMs}±${jitterMs} ms · ${lossPct} %${bandwidthKbps ? ` · ${bandwidthKbps} kbps` : ''}`}
+    >
 
       {/* Latency */}
       <div className="slider-row">
@@ -273,7 +277,7 @@ export const EmulatorControls: React.FC<EmulatorControlsProps> = ({ emulatorClie
           <span className="toggle-slider" />
         </label>
       </div>
-    </div>
+    </LabSection>
     </>
   );
 };

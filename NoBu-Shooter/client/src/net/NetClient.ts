@@ -177,6 +177,12 @@ interface Listeners {
   reload: (weapon: WeaponId) => void;
   /** Fire pressed with an empty magazine or during a reload (cosmetic click). */
   dryFire: () => void;
+  /** The netcode toggles changed (`setToggles`), e.g. by the Presenter. */
+  toggles: (t: PredictionToggle) => void;
+  /** The sync model changed (`setSync`). */
+  sync: (spec: SyncSpec) => void;
+  /** The developer Invincible switch changed (`setDevInvincible`). */
+  dev: (invincible: boolean) => void;
 }
 
 function moveCfgFor(map: MapId): MoveCfg {
@@ -233,6 +239,7 @@ export class NetClient {
     status: new Set(), welcome: new Set(), snap: new Set(),
     event: new Set(), correction: new Set(), fire: new Set(),
     reload: new Set(), dryFire: new Set(),
+    toggles: new Set(), sync: new Set(), dev: new Set(),
   };
 
   // Connection state
@@ -767,8 +774,29 @@ export class NetClient {
 
   /** Developer invincibility; the server honours it only under `npm run demo`. */
   setDevInvincible(on: boolean): void {
+    const changed = on !== this.devInvincible;
     this.devInvincible = on;
     if (this.connected && this.playerId !== null) this.send({ t: 'dev', invincible: on });
+    if (changed) this.emit('dev', on);
+  }
+
+  get devInvincibleOn(): boolean {
+    return this.devInvincible;
+  }
+
+  /**
+   * Change netcode toggles and tell listeners (the Network Lab follows, so
+   * Presenter changes show up in its switches). Latency averages restart
+   * when prediction or interpolation changes — the old ones would mislead.
+   */
+  setToggles(patch: Partial<PredictionToggle>): void {
+    const next = { ...this.toggles, ...patch };
+    const keys = Object.keys(next) as (keyof PredictionToggle)[];
+    if (keys.every((k) => next[k] === this.toggles[k])) return;
+    const resetLatency = next.prediction !== this.toggles.prediction || next.interpolation !== this.toggles.interpolation;
+    this.toggles = next;
+    if (resetLatency) this.resetLatencySamples();
+    this.emit('toggles', { ...next });
   }
 
   /**
@@ -808,6 +836,7 @@ export class NetClient {
     this.extrapolator.reset();
     this.remoteError.reset();
     if (this.connected && !this.spectating) this.send({ t: 'sync', ...next });
+    this.emit('sync', { ...next });
   }
 
   get sync(): SyncSpec {

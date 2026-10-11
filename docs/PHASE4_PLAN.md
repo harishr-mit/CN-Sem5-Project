@@ -1,7 +1,7 @@
 # Phase 4 Implementation Plan — Presenter mode + polish
 
 **Audience:** the project owner and the agent who implements Phase 4.
-**Status:** **draft, awaiting owner approval** (2026-10-10, `log.md` T68). Owner answers already folded in: **two separate presenter scripts** (Quick Match and Compare, D1); Presenter switches on **Invincible** in Quick Match (D3); **glow in Quick Match only** (D6); `playwright-core` as a **local devDependency**, screenshots **git-ignored** (D10).
+**Status:** **implemented 2026-10-11** (`log.md` T69–T75; approved 2026-10-11, drafted 2026-10-10 as T68). Deviations in §9. Owner answers already folded in: **two separate presenter scripts** (Quick Match and Compare, D1); Presenter switches on **Invincible** in Quick Match (D3); **glow in Quick Match only** (D6); `playwright-core` as a **local devDependency**, screenshots **git-ignored** (D10).
 **Scope:** `PHASES.md` → Phase 4, items P1–P7 (P3 moved to Phase 2.5). This file says *how* to build them. `PHASES.md` stays the source for *what* and the exit criteria.
 
 ---
@@ -62,7 +62,7 @@ Network entries are complete emulator configs (named presets or ad-hoc configs, 
 | Q7 | Jitter, no interpolation | 40 ± 50 ms | interpolation off | Bots stutter |
 | Q8 | Interpolation | 40 ± 50 ms | — | Bots glide, drawn ≈ 100 ms in the past |
 | Q9 | Misprediction | 50 ms | on enter: one **nudge** (+40 px) | One smooth correction with an amber vector |
-| Q10 | Nightmare: full snapshots | Nightmare | — | Give it ≈ 15 s: ack delay ≈ 650–700 ms, ↓ at the 400 kbps cap |
+| Q10 | Nightmare: full snapshots | Nightmare | — | Give it ≈ 15 s: ack delay ≈ 550–700 ms, ↓ ≈ 350–420 kbps, queue bar ≈ 100–200 ms (implemented range, §9 Z6) |
 | Q11 | Nightmare: delta snapshots | Nightmare | sync Delta | ≈ 130 kbps, ≈ 500 B/msg, ack delay ≈ 325 ms |
 | Q12 | Nightmare: state sync | Nightmare | sync State 10 | ≈ 190 kbps; bots extrapolated, no interpolation delay |
 
@@ -144,13 +144,13 @@ Network entries are complete emulator configs (named presets or ad-hoc configs, 
 
 ## 6. Exit checklist
 
-- [ ] `npm test`, `npm run typecheck`, `npm run smoke` pass.
-- [ ] `npm run shots` passes; every shot reviewed against `docs/VISUAL_CHECKLIST.md`; findings fixed or listed.
-- [ ] **Demo checkpoint**: both presenter scripts pressed through with `N` only — every effect appears on cue (the Nightmare steps after ≈ 15 s), `B` returns to identical states, `H` hides the caption.
-- [ ] Quick Match ≥ 55 fps with bloom on the dev laptop; Compare 4 panes + REF still ≥ 55 fps.
-- [ ] No Lab scroll at 1920 × 1080 with default sections.
-- [ ] Docs: `docs/DEMO_SCRIPT.md` (Presenter section; steps = the scripts), `README.md` (landing buttons, `N`/`B`/`H`, UI scale, `npm run shots`), `docs/PROTOCOL.md` (emulator `queueMs`, `reordered`), `docs/ASSUMPTIONS.md`, `GAMERULES.md` (presenter keys are not game actions), `PHASES.md`, `log.md`.
-- [ ] No processes left; ports 5173/8080/9000/9001 free; `artifacts/` ignored and nothing generated is tracked. Suggested tag: `phase-4`.
+- [x] `npm test`, `npm run typecheck`, `npm run smoke` pass.
+- [x] `npm run shots` passes; every shot reviewed against `docs/VISUAL_CHECKLIST.md`; findings fixed or listed.
+- [x] **Demo checkpoint**: both presenter scripts pressed through with `N` only — every effect appears on cue (the Nightmare steps after ≈ 15 s), `B` returns to identical states, `H` hides the caption.
+- [x] Quick Match ≥ 55 fps with bloom on the dev laptop; Compare 4 panes + REF still ≥ 55 fps.
+- [x] No Lab scroll at 1920 × 1080 with default sections.
+- [x] Docs: `docs/DEMO_SCRIPT.md` (Presenter section; steps = the scripts), `README.md` (landing buttons, `N`/`B`/`H`, UI scale, `npm run shots`), `docs/PROTOCOL.md` (emulator `queueMs`, `reordered`), `docs/ASSUMPTIONS.md`, `GAMERULES.md` (presenter keys are not game actions), `PHASES.md`, `log.md`.
+- [x] No processes left; ports 5173/8080/9000/9001 free; `artifacts/` ignored and nothing generated is tracked. Suggested tag: `phase-4`.
 
 ## 7. Risks
 
@@ -170,4 +170,12 @@ Network entries are complete emulator configs (named presets or ad-hoc configs, 
 
 ## 9. Deviations from this plan
 
-*(Filled in while implementing.)*
+| # | Plan | Built | Why |
+|---|---|---|---|
+| Z1 | D5: the Presenter bar overlays the bottom of the arena / the dock | The bar sits **in the layout flow** — between the arena and the packet strip, under the Compare grid; while presenting, the Compare dock drops its own caption (it is in the bar) | An overlay covered the HUD buttons, the weapon panel and sometimes the effect being described; `H` returns the space either way. |
+| Z2 | D6: bloom via `postFX.addBloom(...)` (defaults) | One blur step, `addBloom(0xffffff, 2, 2, 1, 0.7, 1)` | The defaults (4 steps) ran at 28–32 fps on the Intel UHD at 1920×1080 and the auto-off fired at once; 1 step keeps 57–60 fps (ASSUMPTIONS #63). |
+| Z3 | §3.6: reordered dots "hold back for `reorderDelayMs`" | The strip replays **every** packet on its real timeline (enter at `t`, cross the box for `delayMs`) behind an adaptive lag; overtakes and queue crowding follow from the real numbers | The emulator reports a delivery only after it happened, so the old strip drew dots in report order and could never show an overtake (ASSUMPTIONS #68). |
+| Z4 | D8: compact 3-column tiles below 800 px | Also a tighter tier ≤ 920 px (rows, gaps) | 1600 × 900 still scrolled by 38 px. |
+| Z5 | D10: install `playwright-core` in step 6 | Installed in step 2 (exact pin 1.48.2) | Needed for the step-2 browser check of both scripts. |
+| Z6 | — (not in the plan) | Bug fixes found by the checks: Phaser sound teardown on leaving a match; WebGL contexts released when a view closes; no backdrop blur on full-screen modals; Q10's expected numbers widened to the measured range | See `log.md` T71, T74, T75 and ASSUMPTIONS #62, #64, #71, #72. |
+| Z7 | §3.7: ≈ 15 screens | 20 screens per viewport (adds Lab all-open, UI 130 %, inspector, Compare drawer) | They cover P4 and the strip. |

@@ -8,6 +8,7 @@ import { isTypingTarget } from '../game/input.js';
 import { DEV_TOOLS } from '../dev.js';
 import { SYNC_CYCLE, nextSync, sameSync, syncLabel, type SyncSpec } from '@nobu/shared/sync';
 import { loadSettings, saveSettings } from './settings.js';
+import { LabSection } from './LabSection.js';
 
 interface NetworkLabProps {
   netClient: NetClient;
@@ -32,16 +33,28 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
   const emulatorStatus = useGameStore((s) => s.emulatorStatus);
   const emulatorStats = useGameStore((s) => s.emulatorStats);
 
-  // Netcode toggles
+  // Netcode toggles, sync model and Invincible mirror the NetClient (its
+  // events), so changes made elsewhere (Presenter) show up here too.
   const [toggles, setToggles] = useState({ ...netClient.toggles });
-  const [devInvincible, setDevInvincible] = useState(false);
+  const [devInvincible, setDevInvincible] = useState(() => netClient.devInvincibleOn);
   const [sync, setSyncState] = useState<SyncSpec>(() => netClient.sync);
+
+  useEffect(() => {
+    setToggles({ ...netClient.toggles });
+    setSyncState(netClient.sync);
+    setDevInvincible(netClient.devInvincibleOn);
+    const offs = [
+      netClient.on('toggles', (t) => setToggles(t)),
+      netClient.on('sync', (s) => setSyncState(s)),
+      netClient.on('dev', (on) => setDevInvincible(on)),
+    ];
+    return () => offs.forEach((off) => off());
+  }, [netClient]);
 
   /** Switch the sync model live (the player stays in the match) and remember it. */
   const changeSync = (spec: SyncSpec) => {
     netClient.setSync(spec);
     netClient.resetLatencySamples();
-    setSyncState(netClient.sync);
     saveSettings({ ...loadSettings(), syncModel: netClient.sync });
   };
 
@@ -79,16 +92,11 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onToggleOpen, toggles]);
+  }, [onToggleOpen, netClient]);
 
+  // setToggles also restarts the latency averages after prediction / interpolation changes
   const toggleNetcode = (key: keyof typeof toggles) => {
-    setToggles((prev) => {
-      const updated = { ...prev, [key]: !prev[key] };
-      netClient.toggles = updated;
-      return updated;
-    });
-    // Latency averages from the previous mode would be misleading
-    if (key === 'prediction' || key === 'interpolation') netClient.resetLatencySamples();
+    netClient.setToggles({ [key]: !netClient.toggles[key] });
   };
 
   // This client's own emulator session (ground-truth loss, SPEC.md §12)
@@ -181,11 +189,10 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
         </div>
 
         {/* Sections 2–3: presets + impairment sliders */}
-        <EmulatorControls emulatorClient={emulatorClient} />
+        <EmulatorControls emulatorClient={emulatorClient} collapsible />
 
         {/* Sync model (PHASES.md Phase 3): switched live, the player stays in the match */}
-        <div className="lab-section" id="lab-sync-section">
-          <div className="lab-section-title">SYNC MODEL [Y]</div>
+        <LabSection id="sync" domId="lab-sync-section" title="SYNC MODEL [Y]" summary={syncLabel(sync)}>
           <div className="presets-row">
             {SYNC_CYCLE.map((spec) => (
               <button
@@ -201,11 +208,14 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
           <div style={{ fontSize: '0.66rem', color: 'var(--c-text-muted)', marginTop: 4 }}>
             {SYNC_HINT[sync.model]} · {metrics.msgBytesDown} B/msg
           </div>
-        </div>
+        </LabSection>
 
         {/* Section 4: Netcode Toggles */}
-        <div className="lab-section">
-          <div className="lab-section-title">NETCODE TOGGLES</div>
+        <LabSection
+          id="toggles" title="NETCODE TOGGLES"
+          summary={(['prediction', 'reconciliation', 'interpolation', 'redundancy', 'ghost'] as const)
+            .map((k) => (toggles[k] ? k[0].toUpperCase() : '·')).join(' ')}
+        >
 
           <div className="toggle-row">
             <label htmlFor="toggle-pred">Prediction [P]</label>
@@ -274,12 +284,14 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
               <span className="toggle-slider" />
             </label>
           </div>
-        </div>
+        </LabSection>
 
         {/* Developer switches: only under `npm run demo` (dev.ts) */}
         {DEV_TOOLS && (
-          <div className="lab-section" id="lab-dev-section">
-            <div className="lab-section-title" style={{ color: 'var(--c-amber)' }}>DEVELOPER (npm run demo only)</div>
+          <LabSection
+            id="dev" domId="lab-dev-section" title="DEVELOPER (npm run demo only)"
+            titleStyle={{ color: 'var(--c-amber)' }} summary={devInvincible ? 'INVINCIBLE' : 'off'}
+          >
             <div className="toggle-row">
               <label htmlFor="toggle-dev-invincible">Invincible (hits don't kill you)</label>
               <label className="toggle">
@@ -287,21 +299,16 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
                   id="toggle-dev-invincible"
                   type="checkbox"
                   checked={devInvincible}
-                  onChange={() => {
-                    const next = !devInvincible;
-                    setDevInvincible(next);
-                    netClient.setDevInvincible(next);
-                  }}
+                  onChange={() => netClient.setDevInvincible(!netClient.devInvincibleOn)}
                 />
                 <span className="toggle-slider" />
               </label>
             </div>
-          </div>
+          </LabSection>
         )}
 
         {/* Section 5: Metric Tiles */}
-        <div className="lab-section">
-          <div className="lab-section-title">LIVE METRICS (5 HZ)</div>
+        <LabSection id="metrics" title="LIVE METRICS (5 HZ)" summary={`${metrics.rttMs} ms RTT · ${metrics.correctionsPerSec}/s corr`}>
           <div className="metrics-grid">
             {/* RTT */}
             <div className={`metric-tile ${metrics.rttMs > 150 ? 'alert' : metrics.rttMs > 60 ? 'warn' : ''}`}>
@@ -383,11 +390,10 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
               <div className="metric-label">SERVER TICK</div>
             </div>
           </div>
-        </div>
+        </LabSection>
 
         {/* Section 6: Sparklines */}
-        <div className="lab-section">
-          <div className="lab-section-title">REAL-TIME SPARKLINE TRACES (12S)</div>
+        <LabSection id="sparklines" title="REAL-TIME SPARKLINE TRACES (12S)">
           <Sparkline
             data={rttHistory}
             color={rttColor}
@@ -417,7 +423,7 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
             currentValue={`${metrics.recentErrorPx.toFixed(1)} px`}
             min={0}
           />
-        </div>
+        </LabSection>
 
         {/* Section 7: Footer */}
         <div className="lab-footer">
@@ -436,7 +442,10 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
           >
             ⚡ NUDGE ME (SERVER MISPREDICT +40PX)
           </button>
+        </div>
 
+        <LabSection id="notes" title="NOTES">
+          <div className="lab-footer">
           <p style={{ marginBottom: '6px' }}>
             <strong>Note:</strong> Bots are simulated inside the server; their traffic bypasses the emulator.
           </p>
@@ -444,7 +453,8 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
           <p title="docs/PROTOCOL.md §1: The links between browser, emulator, and server are loopback TCP connections. The emulator is the ONLY place where messages are dropped, delayed, duplicated, or reordered per message before forwarding, providing realistic UDP datagram semantics.">
             <strong>About transport:</strong> Frames routed through standalone impairment engine acting as datagram proxy.
           </p>
-        </div>
+          </div>
+        </LabSection>
       </div>
     </div>
   );

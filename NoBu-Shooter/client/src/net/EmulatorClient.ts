@@ -37,6 +37,8 @@ export interface PacketEvent {
   fate: 'delivered' | 'dropped-loss' | 'dropped-queue' | 'duplicated';
   delayMs: number;
   t: number;
+  /** Held back by the emulator's reorder stage (later packets overtake it). */
+  reordered?: boolean;
 }
 
 export class EmulatorClient {
