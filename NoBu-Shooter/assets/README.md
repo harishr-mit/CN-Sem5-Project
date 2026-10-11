@@ -43,7 +43,7 @@ commit both files.
 
 | Path | Used for | Size | Notes |
 |---|---|---|---|
-| `fx/bullet.png` | Projectiles | 12 × 3 | Trail stays procedural. |
+| `fx/bullet.png` | Projectiles | 12 × 3 | Trail stays procedural. Piercing rounds fill the sprite light purple (`setTintFill`, owner 2026-10-12) and add a purple halo + trail: a multiply tint on this yellow sprite came out olive, so a replacement sprite may have any colour. |
 | `fx/muzzle_flash_strip4.png` | Muzzle flash | 4 × 128 × 128 | White, tinted; one random frame per shot. |
 | `fx/spark_strip9.png` | Hit / death particles | 9 × 32 × 32 | |
 | `fx/shield_bubble.png` | Spawn protection + Shield power-up | 269 × 269 | Grey sphere; tinted and translucent. |

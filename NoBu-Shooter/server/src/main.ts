@@ -1,9 +1,12 @@
 /**
- * main.ts — NoBu Shooter authoritative game server (WebSocket adapter).
+ * main.ts — NoBu Shooter authoritative game server (WebSocket + UDP adapters).
  * SPEC.md §9. Game logic lives in core.ts / game/room.ts; this file only
- * bridges WebSocket connections to the GameServer and runs the tick loop.
+ * bridges WebSocket connections and UDP peers (udp.ts) to the GameServer and
+ * runs the tick loop.
  *
- * Ports: server data 8080 (ws). Clients normally connect via the emulator.
+ * Ports: ws 8080, udp 8081. Clients normally connect via the emulator.
+ * Bind address: `--host <ip>` or NOBU_HOST (default: all interfaces, so other
+ * machines can join; docs/PHASE5_PLAN.md D15).
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
@@ -13,8 +16,14 @@ import GAME from '@nobu/shared/config/game.js';
 import { GameServer } from './core.js';
 import { startFixedLoop } from './loop.js';
 import { exitWithParent } from './parentWatch.js';
+import { startUdpServer, type UdpServerHandle } from './udp.js';
+
+const hostIdx = process.argv.indexOf('--host');
+const HOST = (hostIdx !== -1 ? process.argv[hostIdx + 1] : undefined) || process.env.NOBU_HOST || undefined;
+const where = (port: number, scheme: string) => HOST ? `${scheme}${HOST}:${port}` : `${scheme}0.0.0.0:${port} (all interfaces; this machine: 127.0.0.1:${port})`;
 
 const game = new GameServer();
+let udp: UdpServerHandle | null = null;
 
 const httpServer = createServer();
 const wss = new WebSocketServer({ server: httpServer });
@@ -30,8 +39,15 @@ wss.on('connection', (ws: WebSocket) => {
 });
 
 const PORT = NET.ports.server;
-httpServer.listen(PORT, async () => {
-  console.log(`[server] Listening on ws://127.0.0.1:${PORT}`);
+httpServer.listen(PORT, HOST, async () => {
+  console.log(`[server] Listening on ${where(PORT, 'ws://')}`);
+  try {
+    udp = await startUdpServer(game, { port: NET.ports.serverUdp, host: HOST });
+    console.log(`[server] Listening on ${where(udp.port, 'udp ')}`);
+  } catch (err) {
+    console.error(`[server] UDP adapter failed: ${(err as Error).message}`);
+    process.exit(1);
+  }
   let lastTimeoutCheck = 0;
   await startFixedLoop(GAME.sim.hz, () => game.tick(), () => {
     const t = Date.now();
@@ -43,6 +59,7 @@ httpServer.listen(PORT, async () => {
 });
 
 exitWithParent(() => {
+  void udp?.close();
   wss.close();
   httpServer.close();
 });

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { NetClient } from '../net/NetClient.js';
-import type { EmulatorClient } from '../net/EmulatorClient.js';
+import { DASHBOARD_URL, GAME_ROUTE, SWARM_ROUTE, type EmulatorClient } from '../net/EmulatorClient.js';
 import { useGameStore } from './store.js';
 import { Sparkline } from './Sparkline.js';
 import { EmulatorControls } from './EmulatorControls.js';
@@ -213,6 +213,16 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
             <span style={{ fontSize: '0.7rem' }}>
               {emulatorStatus === 'connected' ? 'LIVE' : emulatorStatus === 'offline' ? 'EMULATOR OFF' : 'CONNECTING'}
             </span>
+            <a
+              id="lab-dashboard-link"
+              className="lab-dashboard-link"
+              href={DASHBOARD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`Emulator dashboard (new tab). This Lab changes only the game's route ${GAME_ROUTE}; the dashboard controls every route, incl. the network players on ${SWARM_ROUTE}.`}
+            >
+              DASHBOARD ↗
+            </a>
           </div>
         </div>
 
@@ -503,6 +513,10 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
           <div className="lab-footer">
           <p style={{ marginBottom: '6px' }}>
             <strong>Note:</strong> Bots are simulated inside the server; their traffic bypasses the emulator.
+            Network players (<code>UDP-1</code>…, <code>npm run swarm</code>) are not bots: their own UDP traffic goes through the emulator's {SWARM_ROUTE} route.
+          </p>
+          <p style={{ marginBottom: '6px' }}>
+            <strong>Scope:</strong> this Lab changes only the game's route {GAME_ROUTE}; use the dashboard for the other routes.
           </p>
 
           <p title="docs/PROTOCOL.md §1: The links between browser, emulator, and server are loopback TCP connections. The emulator is the ONLY place where messages are dropped, delayed, duplicated, or reordered per message before forwarding, providing realistic UDP datagram semantics.">

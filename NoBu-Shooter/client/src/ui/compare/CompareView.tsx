@@ -187,7 +187,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, pr
   // Network: apply the preset's conditions once the emulator is reachable
   useEffect(() => {
     const net = networkRequest.network;
-    if (emulatorStatus === 'connected' && net) emulator.applyPreset(net.name, 'all', net.config);
+    if (emulatorStatus === 'connected' && net) emulator.applyPreset(net.name, undefined, net.config);
   }, [emulatorStatus, networkRequest, emulator]);
 
   // Layout: measure the body area

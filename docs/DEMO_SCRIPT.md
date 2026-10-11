@@ -25,6 +25,8 @@ Reference: `PHASES.md` (this script grows with each phase). Since Phase 4 the sa
 | Sync model (Full → Delta → State 10 → State 30) | `Y` (Quick Match: Network Lab; Compare: the selected pane) |
 | Presenter mode | `N` next step, `B` previous step, `H` hide the caption; bar buttons **⟲ RESTART**, map, **END** (§12) |
 | Projector | Settings (`Esc`) → **UI Scale** 100 / 115 / 130 % |
+| Emulator dashboard | Landing **EMULATOR DASHBOARD ↗**, Lab **DASHBOARD ↗**, or `http://127.0.0.1:9001/` (§13) |
+| Network players | `npm run demo -- --swarm 3`, or `npm run swarm` beside a running demo (§13) |
 
 ---
 
@@ -133,7 +135,7 @@ Start from the landing page. Each step sets everything at once (network, all net
 - In Quick Match the **match clock is stopped** while presenting (the HUD shows ∞), so the match never ends mid-talk; END starts the clock again.
 - These and Invincible need `npm run demo` (the bar says so otherwise).
 
-**Presenter — Quick Match** (12 steps; turns on the developer **Invincible** switch so bots can't interrupt — `[DEV]` tag, needs `npm run demo`; turned off again on END). Walk around while you talk.
+**Presenter — Quick Match** (13 steps; step 13 needs network players: start with `npm run demo -- --swarm 3`; turns on the developer **Invincible** switch so bots can't interrupt — `[DEV]` tag, needs `npm run demo`; turned off again on END). Walk around while you talk.
 
 | Step | Title | Network | Changes from the defaults | Watch / expect |
 |---|---|---|---|---|
@@ -149,7 +151,38 @@ Start from the landing page. Each step sets everything at once (network, all net
 | Q10 | Nightmare: full snapshots | Nightmare | — | After ≈ 15 s: ack delay ≈ 550–700 ms, ↓ ≈ 350–420 kbps, queue bar ≈ 100–200 ms |
 | Q11 | Nightmare: delta snapshots | Nightmare | sync Delta | ↓ ≈ 130 kbps, ≈ 500 B/msg instead of ≈ 1.9 kB, ack delay ≈ 325 ms |
 | Q12 | Nightmare: state sync | Nightmare | sync State 10 Hz | ↓ ≈ 190 kbps; bots most current but overshoot at turns |
+| Q13 | Network players over UDP | Baseline (you) · network players' route `udp:9100`: 120 ± 40 ms, 10 % loss | — | Your corrections 0/s; the `UDP-n` players stutter, jump and aim at stale positions. **OPEN DASHBOARD ↗**: their sessions at ≈ 10 % loss; their full snapshots need 2–4 fragments, so ≈ 20–34 % are lost. The bar says how many are connected (or how to start them) |
 
 **Presenter — Compare** (6 steps = the six Compare presets of §8 and §11, in order): C1 Prediction, C2 Interpolation, C3 Redundancy, C4 Sync, C5 Bandwidth, C6 State Hz. The bar shows the preset's caption and the expected numbers from §8 / §11 (the dock then shows only its table and chart). Give C4 and C5 ≈ 15 s.
 
-Rehearsal: `npm run shots` (README) captures both scripts' first steps and the Nightmare step; `docs/VISUAL_CHECKLIST.md` says what to look for.
+Rehearsal: `npm run shots` (README) captures both scripts' first steps, the Nightmare step and step 13 with two network players; `docs/VISUAL_CHECKLIST.md` says what to look for.
+
+### 13. Standalone Emulator & Network Players (Phase 5)
+
+**a) The emulator with no game** (`emulator/README.md`). Three terminals:
+
+```bash
+npm run udp-echo -- --port 7000
+npm run emulator                        # open http://127.0.0.1:9001/
+npm run udp-send -- --to 9100 --rate 5
+```
+
+1. On the dashboard, **ADD ROUTE**: UDP, listen `9100`, target `127.0.0.1:7000`. Every `#n hello` comes back (`✓ #12 back after 2 ms`).
+2. Select the route, choose **UP ↑** and set **Loss** to 20 %: `udp-send` prints `✗ #17 never came back` for about one message in five, and the packet log lists them as `lost`.
+3. With **BOTH**, a round trip survives only 0.8 × 0.8 = 64 % of the time.
+4. Add **Latency 100 ms**: the round trip grows by ≈ 200 ms.
+5. Stop `udp-send` (Ctrl+C) to see the summary, e.g. *sent 150, back 116, lost 34 (22.7 %)* (measured 2026-10-12).
+
+Point: the emulator works on any WS or UDP app. The game is just one of its clients.
+
+**b) Network players.** `npm run demo -- --swarm 3` adds `UDP-1…3`: headless game clients that play with the bots' brain but send their own traffic over UDP through `udp:9100`. With you, that makes 4 participants, so no server bots are added from the next countdown (Presenter ⟲ RESTART starts one at once).
+
+1. Open the dashboard: it lists the browser's session on `ws:9000` and three `UDP-n` sessions on `udp:9100`.
+2. Select `udp:9100` and press **Nightmare**. In the arena the UDP players stutter and teleport, while your own link (and the Lab's numbers) stay clean: the Lab changes only `ws:9000`.
+3. The swarm terminal prints, every 2 s, each player's RTT, ack delay, corrections/s and **frag-lost/s**: snapshots lost because one of their 2–4 fragments was lost.
+4. `npm run swarm -- --sync delta` in another terminal shows the difference: deltas fit one datagram.
+
+Measured (2026-10-12):
+- **Clean link:** 300 snapshots in 10 s per player, all reassembled, ≈ 2.7 fragments each, RTT ≈ 15 ms.
+- **Nightmare** (smoke step 7): ≈ 22 world messages/s still arrive, ≈ 3 % of the fragmented ones are lost to fragment loss, ack delay ≈ 500 ms.
+- The few corrections on a clean link happen at the moment the player dies (death isn't predicted).

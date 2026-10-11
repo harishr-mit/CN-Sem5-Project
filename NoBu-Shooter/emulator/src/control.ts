@@ -1,95 +1,136 @@
 /**
- * control.ts — emulator control WebSocket server.
- * SPEC.md §11.4, §11.5.
+ * control.ts — the emulator's control API and dashboard (never impaired).
+ * SPEC.md §11.4, docs/PHASE5_PLAN.md D5, D7, D12.
  *
- * Accepts commands from the UI on port 9001 (never impaired).
+ * One HTTP server on the control port (127.0.0.1 by default):
+ *   GET /, /app.js, /style.css  → the dashboard (emulator/dashboard/, fixed allowlist)
+ *   WebSocket upgrade           → the control API (JSON commands / events)
+ * Browsers must come from an allowlisted Origin; Node tools send none.
  */
 
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http';
+import { readFile } from 'fs/promises';
+import { fileURLToPath } from 'url';
 import { WebSocket, WebSocketServer } from 'ws';
-import type { Session } from './session.js';
-import type { LinkConfig, PacketEvent } from './pipeline.js';
+import type { PacketEvent } from './pipeline.js';
 import { DEFAULT_LINK_CONFIG } from './pipeline.js';
+import { PRESETS, completeConfig, sanitizePatch } from './presets.js';
+import type { RouteManager, RouteSpec } from './routes/index.js';
 
-// ── Presets per SPEC.md §11.5 ────────────────────────────────
-// Every preset is a complete LinkConfig so switching presets never leaves
-// settings from the previous one behind (e.g. burst loss after Nightmare).
-const preset = (p: Partial<LinkConfig>): LinkConfig => ({ ...DEFAULT_LINK_CONFIG, ...p });
+export { PRESETS, completeConfig } from './presets.js';
 
-export const PRESETS: Record<string, LinkConfig> = {
-  Baseline: preset({}),
-  'Café Wi-Fi': preset({ latencyMs: 25, jitterMs: 15, lossPct: 1 }),
-  'Mobile 4G': preset({ latencyMs: 45, jitterMs: 25, lossPct: 2, bandwidthKbps: 5000 }),
-  Transatlantic: preset({ latencyMs: 90, jitterMs: 8, lossPct: 0.5 }),
-  Nightmare: preset({
-    latencyMs: 120, jitterMs: 50, lossPct: 12, lossModel: 'burst', burstLen: 4,
-    duplicatePct: 3, reorderPct: 5, bandwidthKbps: 400,
-  }),
+/** The only files the dashboard server answers with (no path joins from the URL). */
+const DASHBOARD_FILES: Record<string, { file: string; type: string }> = {
+  '/': { file: 'index.html', type: 'text/html; charset=utf-8' },
+  '/index.html': { file: 'index.html', type: 'text/html; charset=utf-8' },
+  '/app.js': { file: 'app.js', type: 'text/javascript; charset=utf-8' },
+  '/style.css': { file: 'style.css', type: 'text/css; charset=utf-8' },
 };
+const DASHBOARD_DIR = fileURLToPath(new URL('../dashboard/', import.meta.url));
 
-/**
- * Complete a partial config from the defaults, ignoring unknown keys and
- * values of the wrong type. Used for ad-hoc presets (`preset` + `config`),
- * so a one-off preset never inherits settings from the previous one.
- */
-export function completeConfig(partial: unknown): LinkConfig {
-  const out: LinkConfig = { ...DEFAULT_LINK_CONFIG };
-  if (typeof partial !== 'object' || partial === null) return out;
-  const src = partial as Record<string, unknown>;
-  for (const key of Object.keys(DEFAULT_LINK_CONFIG) as (keyof LinkConfig)[]) {
-    const v = src[key];
-    if (v !== undefined && typeof v === typeof DEFAULT_LINK_CONFIG[key]) {
-      (out as unknown as Record<string, unknown>)[key] = v;
-    }
-  }
-  return out;
+export interface ControlOptions {
+  port: number;
+  /** Default 127.0.0.1 (D7). */
+  host?: string;
+  /** Extra browser origins allowed to use the control API. */
+  allowOrigins?: string[];
 }
 
-// ─── Control server ───────────────────────────────────────────
 export class ControlServer {
-  private wss: WebSocketServer;
-  private sessions: Map<string, Session>;
-  private defaults: LinkConfig = { ...DEFAULT_LINK_CONFIG };
-  /** Name of the preset last applied to "all", or "Custom" after a manual change. */
-  private activePreset = 'Baseline';
-  private controlClients = new Set<WebSocket>();
+  private readonly http: Server;
+  private readonly wss: WebSocketServer;
+  private readonly routes: RouteManager;
+  private readonly opts: ControlOptions;
+  private readonly controlClients = new Set<WebSocket>();
+  private readonly packetSubscribers = new Set<WebSocket>();
+  private packetBuffer: PacketEvent[] = [];
+  private timers: ReturnType<typeof setInterval>[] = [];
+  private stateQueued = false;
+  /** Actual port (after listen). */
+  port = 0;
 
-  getDefaults(): LinkConfig {
-    return { ...this.defaults };
+  constructor(routes: RouteManager, opts: ControlOptions) {
+    this.routes = routes;
+    this.opts = opts;
+    this.http = createServer((req, res) => void this.serveStatic(req, res));
+    this.wss = new WebSocketServer({
+      server: this.http,
+      verifyClient: ({ origin }: { origin?: string }) => this.originAllowed(origin),
+    });
+    this.wss.on('connection', (ws) => this.onClient(ws));
+    routes.onChange = () => this.queueState();
+    routes.onPacketEvent = (ev) => this.onPacketEvent(ev);
   }
 
-  // Packet event subscribers
-  private packetSubscribers = new Set<WebSocket>();
-  private packetBuffer: PacketEvent[] = [];
-  private lastFlush = 0;
-
-  constructor(port: number, sessions: Map<string, Session>) {
-    this.sessions = sessions;
-    this.wss = new WebSocketServer({ port });
-
-    this.wss.on('connection', (ws: WebSocket) => {
-      this.controlClients.add(ws);
-      // Send full state on connect
-      this.sendState(ws);
-
-      ws.on('message', (raw: Buffer | string) => {
-        try {
-          const cmd = JSON.parse(raw.toString()) as Record<string, unknown>;
-          this.handleCmd(ws, cmd);
-        } catch { /* ignore */ }
-      });
-
-      ws.on('close', () => {
-        this.controlClients.delete(ws);
-        this.packetSubscribers.delete(ws);
+  async listen(): Promise<number> {
+    const host = this.opts.host ?? '127.0.0.1';
+    this.port = await new Promise<number>((resolve, reject) => {
+      this.http.once('error', reject);
+      this.http.listen(this.opts.port, host, () => {
+        this.http.off('error', reject);
+        const a = this.http.address();
+        resolve(typeof a === 'object' && a ? a.port : this.opts.port);
       });
     });
+    this.timers.push(setInterval(() => this.broadcastStats(), 500));
+    this.timers.push(setInterval(() => this.flushPacketEvents(), 100));
+    return this.port;
+  }
 
-    // Stats every 500 ms
-    setInterval(() => this.broadcastStats(), 500);
-    // Packet events every 100 ms
-    setInterval(() => this.flushPacketEvents(), 100);
+  close(): Promise<void> {
+    for (const t of this.timers) clearInterval(t);
+    this.timers = [];
+    for (const ws of this.controlClients) ws.terminate();
+    this.wss.close();
+    return new Promise((resolve) => {
+      this.http.close(() => resolve());
+      this.http.closeAllConnections?.();
+    });
+  }
 
-    console.log(`[emulator] Control listening on ws://127.0.0.1:${port}`);
+  /** No Origin (Node tools) or an allowlisted browser origin (D7). */
+  originAllowed(origin: string | undefined): boolean {
+    if (!origin) return true;
+    const allowed = new Set([
+      `http://127.0.0.1:${this.port}`, `http://localhost:${this.port}`,
+      'http://localhost:5173', 'http://127.0.0.1:5173',
+      ...(this.opts.allowOrigins ?? []),
+    ]);
+    return allowed.has(origin.replace(/\/$/, ''));
+  }
+
+  private async serveStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const path = (req.url ?? '/').split('?')[0];
+    const entry = req.method === 'GET' ? DASHBOARD_FILES[path] : undefined;
+    if (!entry) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found\n');
+      return;
+    }
+    try {
+      const body = await readFile(DASHBOARD_DIR + entry.file);
+      res.writeHead(200, { 'Content-Type': entry.type, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
+      res.end(body);
+    } catch {
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Dashboard files missing\n');
+    }
+  }
+
+  private onClient(ws: WebSocket): void {
+    this.controlClients.add(ws);
+    this.send(ws, this.stateMessage());
+    ws.on('message', (raw) => {
+      let cmd: Record<string, unknown>;
+      try { cmd = JSON.parse(raw.toString()) as Record<string, unknown>; } catch { return; }
+      if (typeof cmd !== 'object' || cmd === null) return;
+      void this.handleCmd(ws, cmd);
+    });
+    ws.on('close', () => {
+      this.controlClients.delete(ws);
+      this.packetSubscribers.delete(ws);
+    });
+    ws.on('error', () => ws.close());
   }
 
   onPacketEvent(ev: PacketEvent): void {
@@ -106,137 +147,141 @@ export class ControlServer {
     const items = this.packetBuffer.slice(-60);
     this.packetBuffer = [];
     const msg = JSON.stringify({ evt: 'packets', items });
-    for (const ws of this.packetSubscribers) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+    for (const ws of this.packetSubscribers) this.send(ws, msg);
   }
 
-  private handleCmd(ws: WebSocket, cmd: Record<string, unknown>): void {
-    switch (cmd['cmd']) {
+  private async handleCmd(ws: WebSocket, cmd: Record<string, unknown>): Promise<void> {
+    const name = cmd['cmd'];
+    const target = typeof cmd['target'] === 'string' ? cmd['target'] : 'all';
+    const fail = (msg: string) => this.send(ws, JSON.stringify({ evt: 'error', cmd: name, msg }));
+    switch (name) {
       case 'get':
-        this.sendState(ws);
+        this.send(ws, this.stateMessage());
         break;
 
       case 'set': {
-        const target = cmd['target'] as string ?? 'all';
-        const direction = (cmd['direction'] as string ?? 'both') as 'up' | 'down' | 'both';
-        const patch = cmd['patch'] as Partial<LinkConfig> ?? {};
-
-        if (target === 'all') {
-          Object.assign(this.defaults, patch);
-          this.activePreset = 'Custom';
-          for (const session of this.sessions.values()) {
-            session.applyConfig(direction, patch);
-          }
-        } else {
-          const session = this.findSession(target);
-          if (session) session.applyConfig(direction, patch);
-        }
+        const d = cmd['direction'];
+        const direction = d === 'up' || d === 'down' ? d : 'both';
+        if (!this.routes.setConfig(target, direction, sanitizePatch(cmd['patch']))) return fail(`unknown target "${target}"`);
         this.broadcastState();
         break;
       }
 
       case 'preset': {
         // A named preset, or an ad-hoc one when `config` is given
-        const name = cmd['name'];
-        if (typeof name !== 'string') return;
-        const preset = cmd['config'] !== undefined ? completeConfig(cmd['config']) : PRESETS[name];
-        if (!preset) return;
-        const target = cmd['target'] as string ?? 'all';
-
-        if (target === 'all') {
-          this.defaults = { ...preset };
-          this.activePreset = name;
-          for (const session of this.sessions.values()) {
-            session.applyConfig('both', preset);
-          }
-        } else {
-          const session = this.findSession(target);
-          if (session) session.applyConfig('both', preset);
-        }
+        const pname = cmd['name'];
+        if (typeof pname !== 'string') return fail('preset needs a name');
+        const config = cmd['config'] !== undefined ? completeConfig(cmd['config']) : PRESETS[pname];
+        if (!config) return fail(`unknown preset "${pname}"`);
+        if (!this.routes.applyPreset(target, pname, config)) return fail(`unknown target "${target}"`);
         this.broadcastState();
         break;
       }
 
-      case 'reset': {
-        const target = cmd['target'] as string ?? 'all';
-        const baseConfig = { ...DEFAULT_LINK_CONFIG };
-        if (target === 'all') {
-          this.defaults = { ...DEFAULT_LINK_CONFIG };
-          this.activePreset = 'Baseline';
-          for (const session of this.sessions.values()) {
-            session.applyConfig('both', baseConfig);
-          }
-        } else {
-          const session = this.findSession(target);
-          if (session) session.applyConfig('both', baseConfig);
-        }
+      case 'reset':
+        if (!this.routes.applyPreset(target, 'Baseline', { ...DEFAULT_LINK_CONFIG })) return fail(`unknown target "${target}"`);
         this.broadcastState();
         break;
-      }
 
       case 'seed': {
-        const val = cmd['value'] as number;
-        for (const session of this.sessions.values()) session.reseed(val);
+        const v = cmd['value'];
+        if (typeof v === 'number' && Number.isFinite(v)) this.routes.reseed(v);
         break;
       }
 
-      case 'subscribe': {
-        if (cmd['packets']) {
-          this.packetSubscribers.add(ws);
-        } else {
-          this.packetSubscribers.delete(ws);
+      case 'subscribe':
+        if (cmd['packets']) this.packetSubscribers.add(ws);
+        else this.packetSubscribers.delete(ws);
+        break;
+
+      case 'route.add': {
+        const spec = parseRouteCmd(cmd);
+        if (typeof spec === 'string') return fail(spec);
+        try {
+          const info = await this.routes.add(spec);
+          this.send(ws, JSON.stringify({ evt: 'ack', cmd: name, id: info.id }));
+        } catch (err) {
+          return fail((err as Error).message);
         }
         break;
       }
-    }
-  }
 
-  private findSession(target: string): Session | undefined {
-    return this.sessions.get(target) ??
-      [...this.sessions.values()].find(s => s.label === target);
+      case 'route.remove': {
+        const id = cmd['id'];
+        if (typeof id !== 'string' || !(await this.routes.remove(id))) return fail(`unknown route "${String(id)}"`);
+        this.send(ws, JSON.stringify({ evt: 'ack', cmd: name, id }));
+        break;
+      }
+
+      case 'session.label': {
+        // Find by session id or peer address ("127.0.0.1:53114"); optional route
+        const who = cmd['peer'] ?? cmd['session'];
+        const label = cmd['label'];
+        const route = typeof cmd['route'] === 'string' ? cmd['route'] : undefined;
+        if (typeof who !== 'string' || typeof label !== 'string' || label.length === 0 || label.length > 40) {
+          return fail('session.label needs peer (or session) and a label of 1–40 characters');
+        }
+        if (!this.routes.labelSession(who, label, route)) return fail(`no session for "${who}"`);
+        break;
+      }
+
+      default:
+        fail(`unknown command "${String(name)}"`);
+    }
   }
 
   private stateMessage(): string {
     return JSON.stringify({
       evt: 'state',
-      sessions: [...this.sessions.values()].map(s => s.getState()),
-      defaults: this.defaults,
-      preset: this.activePreset,
+      sessions: [...this.routes.sessions.values()].map((s) => s.getState()),
+      routes: this.routes.list(),
+      defaults: this.routes.defaults,
+      defaultsDown: this.routes.defaultsDown,
+      preset: this.routes.preset,
       presets: Object.keys(PRESETS),
+      presetConfigs: PRESETS,
+      control: { port: this.port },
     });
   }
 
-  private sendState(ws: WebSocket): void {
-    if (ws.readyState === WebSocket.OPEN) ws.send(this.stateMessage());
+  private send(ws: WebSocket, msg: string): void {
+    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+  }
+
+  /** Coalesce state broadcasts from bursts of session changes. */
+  private queueState(): void {
+    if (this.stateQueued) return;
+    this.stateQueued = true;
+    setTimeout(() => { this.stateQueued = false; this.broadcastState(); }, 20).unref?.();
   }
 
   private broadcastState(): void {
     const msg = this.stateMessage();
-    for (const ws of this.controlClients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+    for (const ws of this.controlClients) this.send(ws, msg);
   }
 
   private broadcastStats(): void {
+    if (this.controlClients.size === 0) return;
     const now = Date.now();
     const msg = JSON.stringify({
       evt: 'stats',
       t: now,
-      sessions: [...this.sessions.values()].map(s => ({
-        id: s.id,
-        label: s.label,
-        up: s.upLink.getStats(now),
-        down: s.downLink.getStats(now),
-      })),
+      sessions: [...this.routes.sessions.values()].map((s) => s.getStats(now)),
+      routes: this.routes.list().map((r) => ({ id: r.id, sessions: r.sessions, refused: r.refused })),
     });
-    for (const ws of this.controlClients) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-    }
+    for (const ws of this.controlClients) this.send(ws, msg);
   }
+}
 
-  /** Called when a new session is created so control clients get updated state. */
-  onNewSession(): void {
-    this.broadcastState();
-  }
+/** Validate a `route.add` command into a RouteSpec, or return an error message. */
+function parseRouteCmd(cmd: Record<string, unknown>): RouteSpec | string {
+  const proto = cmd['proto'];
+  const port = cmd['port'];
+  const target = cmd['target'];
+  const host = cmd['host'];
+  if (proto !== 'ws' && proto !== 'udp') return 'proto must be "ws" or "udp"';
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) return 'port must be 1–65535';
+  if (typeof target !== 'string' || target.length === 0) return 'target is required';
+  if (host !== undefined && host !== '' && typeof host !== 'string') return 'host must be a string';
+  return { proto, port, target, ...(typeof host === 'string' && host !== '' ? { host } : {}) };
 }

@@ -2,16 +2,38 @@
  * pipeline.ts — game-agnostic network impairment pipeline.
  * SPEC.md §11.2.
  *
- * Works on opaque Packet objects and an injected Clock.
- * A WebSocket adapter feeds it; a UDP adapter (P2) could replace it.
+ * Works on opaque Packet objects and an injected Clock. The WS and UDP route
+ * adapters (routes/) feed it bytes; it never looks inside a payload except to
+ * build a short preview for the packet log.
  */
 
-import { mulberry32 } from '@nobu/shared/sim';
+import { mulberry32 } from './prng.js';
 
 export interface Packet {
-  data: string;
-  /** Payload bytes (size = len(data) + 28 to simulate UDP/IP header). */
+  /** Opaque payload: bytes from the route adapters, or text (tests, in-process harness). */
+  data: Buffer | string;
+  /** Wire bytes (payload + 28 to simulate the UDP/IP header). */
   size: number;
+  /** WS only: the frame was binary (forwarded as binary again). */
+  binary?: boolean;
+}
+
+const PREVIEW_CHARS = 64;
+
+/**
+ * Packet-log preview: text as is (first 64 chars); bytes as text when they are
+ * printable ASCII, otherwise as hex ("hex 0a ff …").
+ */
+export function previewOf(data: Buffer | string): string {
+  if (typeof data === 'string') return data.slice(0, PREVIEW_CHARS);
+  const head = data.subarray(0, PREVIEW_CHARS);
+  let printable = true;
+  for (const b of head) {
+    if (!((b >= 0x20 && b <= 0x7e) || b === 0x09 || b === 0x0a || b === 0x0d)) { printable = false; break; }
+  }
+  if (printable) return head.toString('latin1');
+  const hex = [...data.subarray(0, 20)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+  return `hex ${hex}${data.length > 20 ? ' …' : ''}`;
 }
 
 export interface LinkConfig {
@@ -200,7 +222,7 @@ export class Pipeline {
     const now = this.clock.now();
     link.recordIn(packet.size, now);
 
-    const preview = packet.data.slice(0, 64);
+    const preview = previewOf(packet.data);
 
     const emitEvent = (fate: PacketFate, delayMs: number, reordered = false) => {
       onEvent({ sid, dir, size: packet.size, preview, fate, delayMs, t: now, ...(reordered ? { reordered: true as const } : {}) });
@@ -262,7 +284,7 @@ export class Pipeline {
       if (queueDelay > cfg.queueLimitMs) {
         link.pktsDroppedQueue++;
         link.recordDropped();
-        emitEvent('dropped-queue', queueDelay);
+        emitEvent('dropped-queue', Math.round(queueDelay));
         return;
       }
       depart = start + transmitMs;

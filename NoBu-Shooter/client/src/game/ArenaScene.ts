@@ -60,7 +60,10 @@ const C_RESPAWN_RING   = 0x7c4dff; // violet pulse
 const C_MOVER          = 0xc6b5ff; // pale violet drone
 const C_TRUTH          = 0xffffff;
 const C_MUZZLE         = 0xffe08a;
-const C_PIERCE         = 0xb388ff; // piercing rounds
+// Piercing rounds (owner, 2026-10-12): clearly purple. The bullet texture is
+// yellow, so a multiply tint turned it olive; the core is filled instead.
+const C_PIERCE_SHOT    = 0xa23cff; // trail + halo
+const C_PIERCE_CORE    = 0xd8a8ff; // bullet core (tint fill)
 
 const PICKUP_COLORS: Record<string, number> = {
   rapid_fire: 0x8fa3c0, spread_shot: 0xff9a3c, shield: 0x39ff14, speed: 0xffd400, piercing: 0xb388ff, dash: 0x2fd6ff,
@@ -563,8 +566,16 @@ export class ArenaScene extends Phaser.Scene {
     projectiles.forEach((proj, i) => {
       const dx = Number.isFinite(proj.dx) ? proj.dx : 0;
       const dy = Number.isFinite(proj.dy) ? proj.dy : 0;
-      g.lineStyle(2, proj.pierce ? C_PIERCE : C_PROJECTILE, proj.pierce ? 0.6 : 0.3);
-      if (dx || dy) g.lineBetween(proj.x - dx * 14, proj.y - dy * 14, proj.x, proj.y);
+      if (proj.pierce) {
+        // A purple halo and a stronger trail make piercing rounds unmistakable
+        g.fillStyle(C_PIERCE_SHOT, 0.35);
+        g.fillCircle(proj.x, proj.y, PROJ_RADIUS + 5);
+        g.lineStyle(3, C_PIERCE_SHOT, 0.85);
+        if (dx || dy) g.lineBetween(proj.x - dx * 18, proj.y - dy * 18, proj.x, proj.y);
+      } else {
+        g.lineStyle(2, C_PROJECTILE, 0.3);
+        if (dx || dy) g.lineBetween(proj.x - dx * 14, proj.y - dy * 14, proj.x, proj.y);
+      }
       if (sprite) {
         let img = this.projSprites[i];
         if (!img) {
@@ -572,9 +583,9 @@ export class ArenaScene extends Phaser.Scene {
           this.projSprites[i] = img;
         }
         img.setVisible(true).setPosition(proj.x, proj.y).setRotation(Math.atan2(dy, dx));
-        if (proj.pierce) img.setTint(C_PIERCE); else img.clearTint();
+        if (proj.pierce) img.setTintFill(C_PIERCE_CORE); else img.clearTint();
       } else {
-        g.fillStyle(C_PROJECTILE, 1);
+        g.fillStyle(proj.pierce ? C_PIERCE_CORE : C_PROJECTILE, 1);
         g.fillCircle(proj.x, proj.y, PROJ_RADIUS);
       }
     });

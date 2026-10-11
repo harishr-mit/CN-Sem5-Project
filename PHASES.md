@@ -1,10 +1,10 @@
 # NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
-**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). Phase 4 (Presenter mode + polish) done 2026-10-11 (plan, decisions D1–D11 and deviations in `docs/PHASE4_PLAN.md`). **Next: Phase 5** (realistic transport + standalone emulator).
+**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). Phase 4 (Presenter mode + polish) done 2026-10-11 (plan, decisions D1–D11 and deviations in `docs/PHASE4_PLAN.md`). Phase 5 (realistic transport + standalone emulator) done 2026-10-12 (plan, decisions D1–D15 and deviations in `docs/PHASE5_PLAN.md`). **Next: Phase 6** (lockstep + final verification).
 **Replaces:** `ROADMAP.md` (draft of 2026-10-09). The v1 build spec is archived at `docs/archive/SPEC-v1.md`. `GAMERULES.md` remains the source of truth for gameplay.
 
-The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10-10. Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
+The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10-10 (and a candidate Phase 7, multiplayer readiness, added on 2026-10-12 and not scheduled). Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
 
 ---
 
@@ -27,8 +27,9 @@ The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10
 | 2.5 | **Gameplay + textures** | Textured survivor avatars with colour rings and a local-player marker, four rotating maps, ammo + reload, five power-ups, sound effects | G4 (and netcode material for G1/G2) | **done 2026-10-10** |
 | 3 | **Sync models: snapshot vs state** | Full snapshots vs delta snapshots vs state sync with extrapolation, side by side, with a live bandwidth chart | G1 | **done 2026-10-10** |
 | 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena and UI | G4 | **done 2026-10-11** |
-| 5 | **Realistic transport + standalone emulator** | Real UDP between Node "network players", emulator and server. The emulator dashboard works with no game running | G3 | **next** |
-| 6 | **Lockstep + final verification** | Deterministic lockstep freezing under 2–5 % loss beside snapshot sync. Full rehearsal and docs | G1, all | planned |
+| 5 | **Realistic transport + standalone emulator** | Real UDP between Node "network players", emulator and server. The emulator dashboard works with no game running | G3 | **done 2026-10-12** |
+| 6 | **Lockstep + final verification** | Deterministic lockstep freezing under 2–5 % loss beside snapshot sync. Full rehearsal and docs | G1, all | **next** |
+| 7 | **Multiplayer readiness** (candidate, owner 2026-10-12) | Players on other machines join a match; operator tools stay with the operator | — | candidate, not scheduled |
 
 Each phase builds on the previous one. Phases 4 and 5 are independent of each other and can be swapped if the presentation date requires it.
 
@@ -41,7 +42,7 @@ Each phase builds on the previous one. Phases 4 and 5 are independent of each ot
    - `npm run smoke`
    - a browser check of the demo checkpoint (from Phase 4 on, `npm run shots`)
 3. Update the docs the phase touches (`docs/PROTOCOL.md`, `docs/DEMO_SCRIPT.md`, `docs/ASSUMPTIONS.md`, `README.md`).
-4. Leave no running processes and no bound ports (5173, 8080, 9000, 9001).
+4. Leave no running processes and no bound ports (TCP 5173, 8080, 9000, 9001; from Phase 5 also UDP 8081 and 9100).
 5. Suggested: commit and tag the end of each phase (`phase-1`, `phase-2`, …) so every stage can be checked out and demoed on its own.
 
 ---
@@ -233,27 +234,44 @@ Suggested order: A0 + A1 → A2 → A3 → A4 → A5 (A6 alongside each).
 
 **Goal:** real game networking uses UDP, so the server and emulator speak UDP too. The emulator becomes a tool in its own right.
 
+**Implementation plan:** `docs/PHASE5_PLAN.md` (decisions D1–D15, drafted 2026-10-12, revised the same day, approved and implemented 2026-10-12; deviations in its §8). Owner answers of 2026-10-12 included: messages over 1200 B are split into **app-level fragments** (U2); the in-game Lab and Presenter impair **only the game's own WS route**; the dashboard is a **self-contained page**, and the emulator can start **with no routes** and get any listen → target route (WS or UDP, any ports) from the dashboard at runtime (U8, new); network players play like the server bots, start with `npm run demo -- --swarm 3` too, and get a Presenter step. **Revision (owner, 2026-10-12):** because the game is meant to become a real multiplayer game, only the emulator's control port (`:9001`) is locked to this machine. The server's WS and UDP ports and the emulator's data routes accept connections from other machines, as `:8080` / `:9000` do today, and every bind address is configurable (plan D7, D15).
+
 ```text
 Browser (Phaser)  ──WS──►  Emulator :9000 (WS mode)  ──WS──►  Server :8080
 Node net-players  ──UDP─►  Emulator :9100 (UDP mode) ──UDP─►  Server :8081
-Emulator dashboard + control API: http/ws :9001 (never impaired)
+Emulator dashboard + control API: http/ws :9001 (never impaired, localhost only)
 ```
 
 Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emulator treats each WS frame as a datagram. There is **no TCP mode**: impairing a byte stream is not meaningful, and TCP retransmission would hide the loss.
 
 | ID | Task |
 |---|---|
-| U1 | Server UDP adapter on :8081, feeding the existing `GameServer` core (`server/src/core.ts`, already transport-agnostic). |
-| U2 | Datagram discipline: every server → client datagram ≤ 1200 bytes (delta/state fit naturally; full snapshots trim events). |
-| U3 | Emulator UDP mode: `--proto udp`, one session per source address (NAT-like), each with its own upstream socket, using the same `Pipeline` unchanged. |
-| U4 | **Network players**: `npm run swarm -- --n 3` runs headless `NetClient`s over UDP through the emulator. They are remote players whose *own* traffic is impaired, which removes the "bots bypass the emulator" caveat. |
-| U5 | **Emulator dashboard** served by the emulator on :9001: sessions, per-session and per-direction sliders, presets, live charts and a packet log. It works with no game running. |
+| U1 | Server UDP adapter on :8081, feeding the existing `GameServer` core (`server/src/core.ts`, already transport-agnostic). It listens on the same interfaces as the WS server; `--host` / `NOBU_HOST` sets both. |
+| U2 | Datagram discipline: every UDP datagram ≤ 1200 bytes. Full snapshots (1.3–2.1 kB) cannot be trimmed that far, so larger messages are split into **app-level fragments** and reassembled by the receiver (owner, 2026-10-12). The emulator impairs each fragment on its own, so one lost fragment loses the whole message; delta and state usually fit in one datagram. |
+| U3 | Emulator UDP routes (`--route udp:9100=127.0.0.1:8081`): one session per source address (NAT-like), each with its own upstream socket, using the same `Pipeline`. Payloads are bytes, and the emulator no longer imports anything from the game. |
+| U4 | **Network players**: `npm run swarm -- --n 3` (or `npm run demo -- --swarm 3`) runs headless `NetClient`s over UDP through the emulator. They play like the server bots (move, aim, shoot) from their own lagged view. They are remote players whose *own* traffic is impaired, which removes the "bots bypass the emulator" caveat. Presenter — Quick Match gains step Q13 "Network players" (owner). |
+| U5 | **Emulator dashboard** served by the emulator on :9001 as a self-contained page (owner): routes, sessions, per-route / per-session and per-direction sliders, presets, live charts and a packet log. It works with no game running. The Landing button opens it. The in-game Lab and Presenter impair only the game's own route (owner). |
 | U6 | `emulator/README.md`: how to put the emulator in front of *any* WS or UDP app, with a two-terminal example using generic tools. Optional: capturing the loopback UDP traffic in Wireshark. |
-| U7 | Tests: the UDP adapter delivers exactly what the pipeline decides; two clients on one host get separate sessions. |
+| U7 | Tests: the UDP adapter delivers exactly what the pipeline decides; two clients on one host get separate sessions; fragments reassemble and a lost fragment drops the message; routes added at runtime; the emulator imports nothing from the game. |
+| U8 | **Runtime routes** (owner, 2026-10-12): `npm run emulator` starts only the dashboard + control API, with no data routes; routes (`ws` or `udp`, any listen port → any target) are added and removed from the dashboard or control API while it runs. `npm run demo` starts it with the two game routes. |
 
-**Demo checkpoint:** run the emulator and two generic UDP tools with no game, set 20 % loss on the dashboard, and watch messages vanish. Then start the swarm: the network players visibly lag and correct in the browser while the dashboard shows their sessions.
+**Demo checkpoint:** run the emulator alone (`npm run emulator`), add a UDP route on the dashboard, put two generic UDP tools on either side of it (`npm run udp-send` / `udp-echo`, no game), set 20 % loss, and watch messages vanish. Then start the swarm: the network players visibly lag and correct in the browser while the dashboard shows their sessions.
 
 **Exit criteria:** the phase rules; the smoke test also runs one UDP network player under Nightmare.
+
+**Result (met, 2026-10-12):**
+- **Tests:** 196 (new: `emulator-routes` 12, `emulator-udp` 8 over real sockets, `fragment` 7, `server-udp` 4, presenter Q13, an emulator queue-drop test). They include U7's "the UDP route delivers exactly what the pipeline decides" (seeded 30 % loss) and "two clients on one host get separate sessions", plus NetClient → emulator UDP → server UDP with 0 corrections on a clean link and fragmented full snapshots lost ≈ 19 % vs deltas at 10 % loss. Typecheck clean.
+- **Smoke:** 7 steps; step 7 = one UDP network player under Nightmare: 220 world messages in 10 s, fragments reassembled, 6 lost to fragment loss, ack delay ≈ 500 ms.
+- **`npm run shots`:** 23 screens × 2 viewports (new: Presenter Q13 with two network players, the dashboard, the dashboard under Nightmare), 0 console errors.
+- **Demo checkpoint, part 1** (scratch browser check): emulator alone → route added on the dashboard → `udp-echo` / `udp-send` → 20 % loss → 22.7 % of the messages never came back, and the packet log showed them.
+- **Demo checkpoint, part 2:** `swarm --n 3` through `udp:9100`: 300 snapshots each in 10 s, sessions named `UDP-1…3` on the dashboard.
+- **Owner additions during the phase:** runtime routes between any ports (U8, `npm run emulator`); only the control port is local; purple piercing rounds (T96); README quickstart + command reference (T97).
+- **Found and fixed on the way:**
+  - a WS route on a busy port crashed the emulator instead of reporting the error;
+  - a direction-only change on a route reached later sessions in both directions;
+  - queue-drop delays were reported unrounded (since Phase 1);
+  - dashboard layout at 420 px and 1280 px.
+- Details: `log.md` T88–T97, `docs/ASSUMPTIONS.md` #85–#96.
 
 ---
 
@@ -271,12 +289,31 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 
 **Demo checkpoint (final):** the complete Presenter run. It covers prediction and reconciliation, the four sync models side by side, the impairments shown live in the packet strip and dashboard, and the emulator used on its own.
 
+---
+
+## Phase 7 (candidate) — Multiplayer readiness
+
+**Status:** candidate, added by the owner on 2026-10-12. Not scheduled; it needs its own plan and the owner's go-ahead. Some items move entries out of "Out of scope" below, and doing that is the owner's call.
+
+**Goal:** turn the demo into a game that players on other machines can join, without handing them the operator's tools.
+
+**What Phase 5 already prepares:** a transport-agnostic server with WS and UDP ports reachable from other machines (configurable bind address), and an emulator whose data routes can face the LAN while its control port stays local (`docs/PHASE5_PLAN.md` D7, D15).
+
+| ID | Candidate item |
+|---|---|
+| M1 | **Server address in the client:** today the client has `ws://127.0.0.1:…` hard-coded (`App.tsx`, `CompareView.tsx`). Derive it from the page's host, a setting or a build variable, and choose per deployment whether players go straight to the server or through the emulator. |
+| M2 | **Serving the client to other machines:** a production build (`vite build`) served by the game server or a static host. For LAN tests, a dev-server host option. |
+| M3 | **Operator-only controls:** the Network Lab's emulator controls, Presenter, and the `dev` / `perturb` / `lab` messages are honoured only for the operator (localhost connection or an operator token) and never for remote players. `NOBU_DEV` is never set on a public server. The emulator's control port stays local, as it is from Phase 5. |
+| M4 | **Transport hardening:** `wss://` (TLS) when served over the internet; on UDP, a return-routability challenge before any snapshot is streamed (so a spoofed `hello` can't turn the server into a reflector); per-IP connection and rate limits. |
+| M5 | **Browser datagrams** (today out of scope): WebTransport or a WebRTC DataChannel, if browser players should get UDP-like transport instead of WS. |
+| M6 | **Many players:** a room list or join codes, and more than one match room. Matchmaking and accounts stay out of scope unless the owner asks. |
+
 ### Definition of Done (all phases)
 
 - [ ] G1: four sync models are selectable and comparable side by side with measured bandwidth, latency and error. *(Three done in Phase 3 — full, delta, state; lockstep is Phase 6.)*
 - [ ] G2: 0 corrections on a clean network; corrections under loss that converge; redundancy removes them (covered by tests and visible in the UI).
-- [ ] G3: the emulator runs standalone (WS + UDP) with its own dashboard and README, and the game is just one client of it.
-- [ ] G4: Presenter mode runs the whole talk; screenshots pass the visual checklist; textures and sounds drop in through the manifest (Phase 2.5). *(Done for the talk as of Phase 4; Phases 5–6 add their steps.)*
+- [x] G3: the emulator runs standalone (WS + UDP) with its own dashboard and README, and the game is just one client of it. *(Phase 5: `npm run emulator`, runtime routes, no game dependency.)*
+- [ ] G4: Presenter mode runs the whole talk; screenshots pass the visual checklist; textures and sounds drop in through the manifest (Phase 2.5). *(Done for the talk as of Phase 4; Phase 5 added step Q13; Phase 6 adds lockstep.)*
 - [ ] `npm run demo`, `npm test`, `npm run typecheck`, `npm run smoke` and `npm run shots` pass from a fresh clone.
 
 ---

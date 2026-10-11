@@ -18,6 +18,7 @@ import { PRESETS } from '../emulator/src/control.js';
 /** Records the latest state of everything a step can set, plus a call log. */
 class FakeStage implements PresenterStage {
   network: CompareNetwork | null = null;
+  swarm: CompareNetwork | null = null;
   toggles: PredictionToggle | null = null;
   sync: SyncSpec | null = null;
   invincible = false;
@@ -26,6 +27,7 @@ class FakeStage implements PresenterStage {
   endless = false;
   restarts: (MapId | undefined)[] = [];
   applyNetwork(n: CompareNetwork) { this.network = structuredClone(n); }
+  applySwarmNetwork(n: CompareNetwork) { this.swarm = structuredClone(n); }
   setToggles(t: PredictionToggle) { this.toggles = { ...t }; }
   setSync(s: SyncSpec) { this.sync = { ...s }; }
   setInvincible(on: boolean) { this.invincible = on; }
@@ -34,13 +36,13 @@ class FakeStage implements PresenterStage {
   setEndless(on: boolean) { this.endless = on; }
   restartGame(map?: MapId) { this.restarts.push(map); }
   snapshot() {
-    return JSON.stringify({ n: this.network, t: this.toggles, s: this.sync, p: this.preset, i: this.invincible, e: this.endless });
+    return JSON.stringify({ n: this.network, w: this.swarm, t: this.toggles, s: this.sync, p: this.preset, i: this.invincible, e: this.endless });
   }
 }
 
 describe('Presenter scripts (plan test 1)', () => {
-  it('Quick Match has 12 steps and Compare 6, with unique ids', () => {
-    expect(QUICK_SCRIPT.steps.map((s) => s.id)).toEqual(['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10', 'Q11', 'Q12']);
+  it('Quick Match has 13 steps and Compare 6, with unique ids', () => {
+    expect(QUICK_SCRIPT.steps.map((s) => s.id)).toEqual(['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10', 'Q11', 'Q12', 'Q13']);
     expect(COMPARE_SCRIPT.steps.map((s) => s.id)).toEqual(['C1', 'C2', 'C3', 'C4', 'C5', 'C6']);
     for (const script of Object.values(PRESENTER_SCRIPTS)) {
       const ids = script.steps.map((s) => s.id);
@@ -53,7 +55,7 @@ describe('Presenter scripts (plan test 1)', () => {
     }
   });
 
-  it('every Quick Match step is complete: network, all five toggles, sync model', () => {
+  it('every Quick Match step is complete: network, swarm network, all five toggles, sync model', () => {
     for (const s of QUICK_SCRIPT.steps) {
       expect(s.quick, s.id).toBeDefined();
       expect(s.compare).toBeUndefined();
@@ -62,7 +64,25 @@ describe('Presenter scripts (plan test 1)', () => {
       const net = s.quick!.network;
       // A named network must exist in the emulator; an ad-hoc one carries its config
       if (!net.config) expect(PRESETS[net.name], `${s.id}: ${net.name}`).toBeDefined();
+      const swarm = s.quick!.swarmNetwork;
+      expect(swarm, `${s.id} swarmNetwork`).toBeDefined();
+      if (!swarm.config) expect(PRESETS[swarm.name], `${s.id}: ${swarm.name}`).toBeDefined();
     }
+  });
+
+  it('Q13 (PHASE5_PLAN D11): a clean browser link, the network players on a lossy one; every other step resets them', () => {
+    const q13 = QUICK_SCRIPT.steps.find((s) => s.id === 'Q13')!.quick!;
+    expect(q13.network.name).toBe('Baseline');
+    expect(q13.swarmNetwork.config).toEqual({ latencyMs: 120, jitterMs: 40, lossPct: 10 });
+    expect(q13.toggles).toEqual(DEFAULT_TOGGLES);
+    for (const s of QUICK_SCRIPT.steps.filter((x) => x.id !== 'Q13')) expect(s.quick!.swarmNetwork.name, s.id).toBe('Baseline');
+    const stage = new FakeStage();
+    const c = new PresenterController(QUICK_SCRIPT, stage);
+    c.start();
+    c.goTo(12);
+    expect(stage.swarm!.config!.lossPct).toBe(10);
+    c.prev();
+    expect(stage.swarm!.name).toBe('Baseline');
   });
 
   it('every Compare step maps to an existing Compare preset, in order (plan test 4)', () => {

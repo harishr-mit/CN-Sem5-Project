@@ -5,6 +5,18 @@
  */
 
 import { useGameStore } from '../ui/store.js';
+import NET from '@nobu/shared/config/net.js';
+
+/**
+ * The game's own emulator route (docs/PHASE5_PLAN.md D6): presets, sliders and
+ * resets from the Network Lab, Compare and Presenter reach only the browser
+ * sessions on this route, never the UDP network players (`udp:9100`).
+ */
+export const GAME_ROUTE = `ws:${NET.ports.emulatorData}`;
+/** The network players' route (Presenter step Q13). */
+export const SWARM_ROUTE = `udp:${NET.ports.emulatorUdp}`;
+/** The emulator dashboard (served by the emulator's control port). */
+export const DASHBOARD_URL = `http://127.0.0.1:${NET.ports.emulatorControl}/`;
 
 export interface LinkConfig {
   latencyMs: number;
@@ -47,13 +59,16 @@ export class EmulatorClient {
   private retryCount = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  /** Route this client configures by default (`GAME_ROUTE`). */
+  readonly route: string;
 
   onStats?: (sessions: EmulatorStats[]) => void;
   onPacketEvent?: (items: PacketEvent[]) => void;
   onState?: (state: unknown) => void;
 
-  constructor(url: string) {
+  constructor(url: string, route = GAME_ROUTE) {
     this.url = url;
+    this.route = route;
   }
 
   connect(): void {
@@ -89,8 +104,9 @@ export class EmulatorClient {
           this.onStats?.(sessions);
           useGameStore.getState().setEmulatorStats(sessions);
         } else if (msg['evt'] === 'state') {
-          this.onState?.(msg);
-          useGameStore.getState().setEmulatorState(msg);
+          const state = routeView(msg, this.route);
+          this.onState?.(state);
+          useGameStore.getState().setEmulatorState(state);
         } else if (msg['evt'] === 'packets') {
           this.onPacketEvent?.(msg['items'] as PacketEvent[]);
           useGameStore.getState().addPacketEvents(msg['items'] as PacketEvent[]);
@@ -132,15 +148,15 @@ export class EmulatorClient {
   }
 
   /** A named emulator preset, or an ad-hoc one when `config` is given (completed from the defaults). */
-  applyPreset(name: string, target = 'all', config?: Partial<LinkConfig>): void {
+  applyPreset(name: string, target = this.route, config?: Partial<LinkConfig>): void {
     this.send({ cmd: 'preset', target, name, ...(config ? { config } : {}) });
   }
 
-  setConfig(patch: Partial<LinkConfig>, direction: 'up' | 'down' | 'both' = 'both', target = 'all'): void {
+  setConfig(patch: Partial<LinkConfig>, direction: 'up' | 'down' | 'both' = 'both', target = this.route): void {
     this.send({ cmd: 'set', target, direction, patch });
   }
 
-  reset(target = 'all'): void {
+  reset(target = this.route): void {
     this.send({ cmd: 'reset', target });
   }
 
@@ -151,4 +167,17 @@ export class EmulatorClient {
   setPacketSubscription(active: boolean): void {
     this.send({ cmd: 'subscribe', packets: active });
   }
+}
+
+interface RouteState { id: string; defaults?: unknown; preset?: string }
+
+/**
+ * The emulator's `state` as seen from one route: `defaults` and `preset` are
+ * that route's (the UI shows what its own sessions get). Without the route
+ * (an emulator started without it), the global ones are kept.
+ */
+export function routeView(msg: Record<string, unknown>, route: string): Record<string, unknown> {
+  const routes = Array.isArray(msg['routes']) ? (msg['routes'] as RouteState[]) : [];
+  const mine = routes.find((r) => r.id === route);
+  return mine ? { ...msg, defaults: mine.defaults, preset: mine.preset, route } : msg;
 }

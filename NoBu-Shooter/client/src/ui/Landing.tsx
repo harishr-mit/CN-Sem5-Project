@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { DASHBOARD_URL } from '../net/EmulatorClient.js';
 
 interface LandingProps {
   onStartQuickMatch: (name: string) => void;
@@ -83,8 +84,13 @@ export const Landing: React.FC<LandingProps> = ({ onStartQuickMatch, onStartComp
             </button>
           </div>
 
-          <button id="dashboard-btn" className="btn-ghost landing-disabled" disabled title="Arrives in Phase 5">
-            EMULATOR DASHBOARD <span>· PHASE 5</span>
+          <button
+            id="dashboard-btn"
+            className="btn-ghost landing-dashboard"
+            onClick={() => window.open(DASHBOARD_URL, '_blank', 'noopener')}
+            title="The emulator's own page (new tab): routes, sessions, impairments, live charts and a packet log. Works without the game."
+          >
+            EMULATOR DASHBOARD <span>↗</span>
           </button>
 
           <p className="landing-controls-hint">

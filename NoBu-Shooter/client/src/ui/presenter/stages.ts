@@ -5,14 +5,19 @@
 
 import { sameSync } from '@nobu/shared/sync';
 import type { NetClient } from '../../net/NetClient.js';
-import type { EmulatorClient } from '../../net/EmulatorClient.js';
+import { SWARM_ROUTE, type EmulatorClient } from '../../net/EmulatorClient.js';
 import type { MapId } from '@nobu/shared/protocol';
 import type { PresenterStage } from '../../presenter/types.js';
 
-/** Quick Match: the match's NetClient and the emulator (every session, like presets 1–5). */
+/**
+ * Quick Match: the match's NetClient and the emulator — the game's own route
+ * (like presets 1–5) and, separately, the network players' route.
+ */
 export function quickStage(net: NetClient, emu: EmulatorClient, devTools: boolean): PresenterStage {
   return {
-    applyNetwork: (n) => emu.applyPreset(n.name, 'all', n.config),
+    applyNetwork: (n) => emu.applyPreset(n.name, undefined, n.config),
+    // An emulator without the UDP route answers with an error event: harmless
+    applySwarmNetwork: (n) => emu.applyPreset(n.name, SWARM_ROUTE, n.config),
     setToggles: (t) => net.setToggles(t),
     setSync: (s) => {
       if (sameSync(s, net.sync)) return;
@@ -38,6 +43,7 @@ export function compareStage(selectPreset: (id: string) => void, restart: (map?:
   const none = () => {};
   return {
     applyNetwork: none,
+    applySwarmNetwork: none,
     setToggles: none,
     setSync: none,
     setInvincible: none,

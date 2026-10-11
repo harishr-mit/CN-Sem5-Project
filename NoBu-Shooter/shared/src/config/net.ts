@@ -1,5 +1,7 @@
 export const NET = {
-  ports: { client: 5173, server: 8080, emulatorData: 9000, emulatorControl: 9001 },
+  ports: { client: 5173, server: 8080, emulatorData: 9000, emulatorControl: 9001, serverUdp: 8081, emulatorUdp: 9100 },
+  /** UDP datagram discipline: larger messages travel as fragments (docs/PHASE5_PLAN.md D2). */
+  udp: { maxDatagram: 1200, reassemblyMs: 250, maxPending: 8 },
   snapshotHz: 30,
   inputSendHz: 30,
   redundancyMax: 10,

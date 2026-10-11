@@ -20,15 +20,20 @@ const LOSS_10: CompareNetwork = { name: '50 ms + 10 % loss', config: { latencyMs
 const JITTER_50: CompareNetwork = { name: '40 ± 50 ms jitter', config: { latencyMs: 40, jitterMs: 50 } };
 const DELAY_50: CompareNetwork = { name: '50 ms one-way', config: { latencyMs: 50 } };
 const NIGHTMARE: CompareNetwork = { name: 'Nightmare' };
+/** Q13: what the network players get (docs/PHASE5_PLAN.md D11). */
+export const SWARM_LOSSY: CompareNetwork = { name: 'Network players: 120 ± 40 ms, 10 % loss', config: { latencyMs: 120, jitterMs: 40, lossPct: 10 } };
 
 function quick(
   id: string, title: string, caption: string, expect: string,
   network: CompareNetwork, changes: Partial<PredictionToggle> = {}, sync: SyncSpec = FULL,
-  nudge?: { dx: number; dy: number },
+  nudge?: { dx: number; dy: number }, swarmNetwork: CompareNetwork = BASELINE,
 ): PresenterStep {
   return {
     id, title, caption, expect,
-    quick: { network, toggles: { ...DEFAULT_TOGGLES, ...changes }, sync: { ...sync }, ...(nudge ? { nudge } : {}) },
+    quick: {
+      network, swarmNetwork: { ...swarmNetwork }, toggles: { ...DEFAULT_TOGGLES, ...changes }, sync: { ...sync },
+      ...(nudge ? { nudge } : {}),
+    },
   };
 }
 
@@ -87,6 +92,10 @@ export const QUICK_SCRIPT: PresenterScript = {
       'State sync at 10 Hz: positions + velocities, remote players extrapolated — no interpolation delay.',
       '↓ ≈ 190 kbps · bots most current but overshoot at turns',
       NIGHTMARE, {}, STATE10),
+    quick('Q13', 'Network players over UDP',
+      'Your link is clean again. The UDP-n players are real clients (npm run swarm) whose own UDP traffic now crosses a 120 ± 40 ms, 10 % loss link: they stutter, jump and aim at stale positions. Open the dashboard to see their sessions.',
+      'Your corrections 0/s · UDP-n move in jumps · dashboard: udp:9100 sessions ≈ 10 % loss, full snapshots need 2–4 fragments so ≈ 20–34 % of them are lost',
+      BASELINE, {}, FULL, undefined, SWARM_LOSSY),
   ],
 };
 

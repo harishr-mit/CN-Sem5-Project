@@ -10,6 +10,10 @@
   ],
   "scripts": {
     "demo": "node scripts/demo.mjs",
+    "emulator": "node --import tsx emulator/src/main.ts",
+    "swarm": "node --import tsx scripts/swarm.ts",
+    "udp-echo": "node emulator/tools/udp-echo.mjs",
+    "udp-send": "node emulator/tools/udp-send.mjs",
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
     "shots": "node scripts/shots.mjs",

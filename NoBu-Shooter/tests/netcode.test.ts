@@ -69,13 +69,13 @@ function makeHarness(
     const transport: TransportFactory = (_url, h) => {
       const conn = server.addConnection(
         (text) => pipeline.process({ data: text, size: text.length + 28 }, down,
-          (p) => { bytesDown[i] += p.data.length + 28; h.onMessage(p.data); }, () => {}, 's', 'down'),
+          (p) => { bytesDown[i] += p.data.length + 28; h.onMessage(String(p.data)); }, () => {}, 's', 'down'),
         () => h.onClose(),
       );
       setTimeout(() => h.onOpen(), 0);
       return {
         send: (text) => pipeline.process({ data: text, size: text.length + 28 }, up,
-          (p) => server.handleMessage(conn, p.data), () => {}, 's', 'up'),
+          (p) => server.handleMessage(conn, String(p.data)), () => {}, 's', 'up'),
         close: () => server.removeConnection(conn),
       };
     };

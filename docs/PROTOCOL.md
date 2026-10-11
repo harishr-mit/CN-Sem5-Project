@@ -7,9 +7,37 @@ Source of truth: `shared/src/protocol/messages.ts` (types + validators). Origina
 
 ## 1. Overview & Transport Caveat
 
-All messages on the wire are UTF-8 JSON text frames carrying exactly one message per frame with a discriminatory type field `"t"`.
+Every message is UTF-8 JSON carrying exactly one message, with a type field `"t"`. Two transports carry the same messages to the same server core (`server/src/core.ts`; Phase 5):
 
-> **Transport Caveat**: The links between the browser, emulator, and authoritative game server are loopback TCP connections. TCP never drops or reorders packets at the socket layer. The standalone **Network Emulator** is the sole subsystem that drops, delays, duplicates, or reorders frames. By intercepting frames prior to forwarding, the application observes authentic UDP datagram semantics without head-of-line blocking.
+| Transport | Who | Path | One message = |
+|---|---|---|---|
+| **WebSocket** | the browser (and the Node smoke clients) | client → emulator route `ws:9000` → server `:8080` | one text frame |
+| **UDP** | network players (`npm run swarm`), tests | client → emulator route `udp:9100` → server `:8081` | one datagram, or several **fragments** (§1.1) |
+
+> **Transport caveat (WebSocket):** the browser's links are loopback TCP connections, and TCP never drops or reorders. The standalone **Network Emulator** is the only place that drops, delays, duplicates or reorders. It treats every frame as a datagram, so the game sees UDP-like behaviour without head-of-line blocking. Over the **UDP** transport the datagrams are real; on loopback the emulator is still the only source of loss.
+
+The protocol was built for datagrams from the start:
+- `hello` is retried until a `welcome` arrives, and a repeated `hello` gets the same `welcome`;
+- inputs carry sequence numbers and optional redundancy;
+- delta snapshots fall back to full ones when their base was lost;
+- a silent peer times out after `timeoutMs` (5 s).
+
+### 1.1 UDP datagram discipline (fragments)
+
+Every UDP datagram is at most **1200 bytes** (`net.json` `udp.maxDatagram`), a safe size below common path MTUs. A message whose UTF-8 encoding is larger is split by the sender (`shared/src/net/fragment.ts`) into fragments with an ASCII header:
+
+```text
+~<msgId>.<index>/<count>|<bytes of the message>        e.g.  ~k2.0/3|{"t":"snap","tick":…
+```
+
+- `msgId` is base 36, per sender; `count` ≤ 64. A JSON message always starts with `{`, so a leading `~` marks a fragment. A message that fits but starts with `~` is sent as a 1-fragment message.
+- The receiver keeps one reassembler per peer. It accepts fragments in any order and ignores duplicates and late fragments of an already completed message.
+- A message is **dropped** if a fragment is still missing after `udp.reassemblyMs` (250 ms), or when more than `udp.maxPending` (8) messages are incomplete.
+- Fragmentation is used in both directions on UDP only. The emulator does **not** reassemble: it impairs every fragment on its own.
+
+Losing one fragment therefore loses the whole message: at loss rate p, a k-fragment message arrives with probability (1 − p)^k.
+- **Full snapshots** in a 4-player match are ≈ 2–4.5 kB, i.e. 2–4 fragments (more projectiles and events during a fight). At 10 % loss, ≈ 19–34 % of them are lost.
+- **Delta and state messages** usually fit one datagram.
 
 ---
 
@@ -317,32 +345,71 @@ Every event also carries `eid` (unique, used for de-duplication) and `tick`. Eve
 
 ## 5. Emulator (game-agnostic proxy)
 
-The emulator never parses game messages; each WebSocket frame is one packet (accounted as payload bytes + 28 bytes UDP/IP header).
+The emulator never parses or reassembles application messages, and it imports nothing from the game; `emulator/README.md` describes using it with any app. Each WebSocket frame or UDP datagram is one packet, accounted as payload bytes + 28 bytes (a UDP/IP header). Payloads are forwarded byte for byte: WS text stays text, WS binary stays binary.
 
-### 5.1 Data port (`ws://127.0.0.1:9000`)
-Clients connect here instead of to the server. Every connection becomes a **session** with its own upstream connection to `--target` and independent `up` (client → server) / `down` links. The query parameter `?label=` is stored as the session's display name. `NetClient` uses a unique label (`<name>-<4 chars>`) so the UI can find its own session in the stats.
+### 5.1 Routes and sessions
 
-### 5.2 Control port (`ws://127.0.0.1:9001`, never impaired)
+A **route** listens on one port and forwards every client to one target. Its id is `<proto>:<port>`:
+
+| Route (`npm run demo`) | Listens on | Target |
+|---|---|---|
+| `ws:9000` | all interfaces, TCP 9000 | `ws://127.0.0.1:8080` |
+| `udp:9100` | all interfaces, UDP 9100 | `127.0.0.1:8081` |
+
+Routes come from the command line (`--route <proto>:[host:]<port>=<target>`, repeatable; the old `--listen <port> --target <ws-url>` = one WS route) or are added and removed at runtime through the control API (§5.2), which is what the dashboard does. `npm run emulator` starts with none.
+
+Every client gets a **session** with independent `up` (client → target) and `down` (target → client) links:
+- **WS route:** one session per connection, with its own upstream connection to the target (path and query passed on). `?label=` names the session; `NetClient` uses a unique label (`<name>-<4 chars>`) so the game can find its own session.
+- **UDP route:** one session per client source address `ip:port` (NAT-like), with its own upstream UDP socket on an ephemeral port, so the target sees one peer per client and replies reach the right client. A session ends after `--udp-idle-ms` (30 s) without traffic; a later datagram opens a new one (its label is remembered). Default label `udp <ip:port>`; network players rename theirs `UDP-n` with `session.label`.
+- **Limits:** at most `--max-sessions` (64) per route; further clients are refused and counted in the route's `refused`.
+
+**Defaults and presets per route:** each route keeps defaults for its up and down links and an active preset name. A new session starts from its route's defaults. The global defaults (target `all`) apply to routes added later.
+
+**Bind addresses** (`docs/PHASE5_PLAN.md` D7, D15):
+- **Control port:** 127.0.0.1 only (`--control-host` to override, with a warning).
+- **Data routes:** all interfaces by default, so other machines can join; `--route udp:127.0.0.1:9100=…` or the dashboard's *this machine only* binds a route locally.
+- **Server:** listens on all interfaces for WS `:8080` and UDP `:8081`; `--host` / `NOBU_HOST` sets the address.
+
+### 5.2 Control API (`http://127.0.0.1:9001`, never impaired)
+
+One HTTP server:
+- `GET /`, `/app.js`, `/style.css` serve the dashboard (a fixed list of files; anything else is 404).
+- A WebSocket upgrade on the same port opens the control API. Browser pages are accepted only from an allowlisted `Origin`: `http://127.0.0.1:9001`, `http://localhost:9001`, `http://localhost:5173`, `http://127.0.0.1:5173`, plus `--allow-origin <url>`. Clients without an `Origin` (Node tools) are accepted.
+
+**Targets** of `set` / `preset` / `reset`:
+- `"all"`: every route, plus the defaults for routes added later;
+- a route id (`"ws:9000"`): its defaults and its sessions;
+- a session id (`"s3"`) or a session label: that session only.
+
+The game sends **`ws:9000`** wherever it used to send `"all"` (Network Lab, Compare, Presenter), so its presets never reach the network players. Presenter step Q13 targets `udp:9100`. An unknown target is answered with an `error` event.
 
 UI → emulator:
 
 | Command | Meaning |
 |---|---|
 | `{ "cmd": "get" }` | Reply with a `state` message |
-| `{ "cmd": "set", "target", "direction", "patch" }` | Merge `patch` into the link config. `target`: `"all"` (also the default for new sessions), a session id or a label. `direction`: `"both"`, `"up"` or `"down"` |
-| `{ "cmd": "preset", "target", "name" }` | Apply a complete preset (`Baseline`, `Café Wi-Fi`, `Mobile 4G`, `Transatlantic`, `Nightmare`); fields not in the preset get defaults |
-| `{ "cmd": "preset", "target", "name", "config" }` | **Ad-hoc preset**: `config` (a partial link config) is completed from the defaults (unknown keys and wrong types are ignored) and applied like a named preset; `name` is reported as the active preset. Used by the Compare view, e.g. `{ "name": "Jitter 50±30", "config": { "latencyMs": 50, "jitterMs": 30 } }` |
-| `{ "cmd": "reset", "target" }` | Back to zero impairment |
-| `{ "cmd": "seed", "value" }` | Reseed the RNG |
+| `{ "cmd": "set", "target", "direction", "patch" }` | Merge `patch` into the link config (unknown keys, wrong types, negative or non-finite numbers are dropped; percentages capped at 100). `direction`: `"both"`, `"up"` or `"down"` — for a route or `all`, the defaults of that direction only. Marks the route(s) `Custom` |
+| `{ "cmd": "preset", "target", "name" }` | Apply a complete preset (`Baseline`, `Café Wi-Fi`, `Mobile 4G`, `Transatlantic`, `Nightmare`) to both directions; fields not in the preset get defaults |
+| `{ "cmd": "preset", "target", "name", "config" }` | **Ad-hoc preset**: `config` (a partial link config) is completed from the defaults (unknown keys and wrong types are ignored) and applied like a named preset; `name` is reported as the active preset. Used by the Compare view and the Presenter, e.g. `{ "name": "Jitter 50±30", "config": { "latencyMs": 50, "jitterMs": 30 } }` |
+| `{ "cmd": "reset", "target" }` | Back to zero impairment (preset `Baseline`) |
+| `{ "cmd": "seed", "value" }` | Reseed every session's RNG |
 | `{ "cmd": "subscribe", "packets": true }` | Start/stop the packet-event stream |
+| `{ "cmd": "route.add", "proto", "port", "target", "host"? }` | Start a route (Phase 5). `proto` `"ws"` (target `ws://…`) or `"udp"` (target `host:port`); `host` omitted = all interfaces. Answered with `ack` (`id`) or `error` (bad spec, port in use, route exists); a failed bind leaves nothing open |
+| `{ "cmd": "route.remove", "id" }` | Close a route's sessions and its listener; `ack` or `error` |
+| `{ "cmd": "session.label", "peer" \| "session", "label", "route"? }` | Rename the session of client address `peer` (`"127.0.0.1:53114"`) or id `session`, optionally only within `route`; 1–40 characters |
 
 Emulator → UI:
 
 | Event | Contents |
 |---|---|
-| `{ "evt": "state", "sessions", "defaults", "preset", "presets" }` | On connect and on every change. `preset` is the name of the preset last applied to `all`, or `"Custom"` after a manual change |
-| `{ "evt": "stats", "t", "sessions": [{ "id", "label", "up", "down" }] }` | Every 500 ms. Per direction: cumulative `pktsIn`, `pktsDelivered`, `pktsDroppedLoss`, `pktsDroppedQueue`, `pktsDuplicated`, `pktsReordered`, `lossPct`; last-second `throughputKbps`, `lossPctWindow`, `pktsInWindow`, `deliveredWindow`; current **`queueMs`** (Phase 4): how long a packet arriving now would wait for the bandwidth cap before it starts transmitting (0 without a cap; packets that would wait longer than `queueLimitMs` are tail-dropped as `dropped-queue`) |
-| `{ "evt": "packets", "items": [{ "sid", "dir", "size", "preview", "fate", "delayMs", "t", "reordered"? }] }` | Every 100 ms while subscribed; the newest ≤ 60 events. `fate`: `delivered`, `dropped-loss`, `dropped-queue`, `duplicated`. `t` = when the packet reached the emulator (ms since epoch); `delayMs` = how long it was held (queue + latency + jitter + reorder hold; for `dropped-queue`, the queue wait it was refused). A `delivered` event is sent when the packet is delivered, a drop or `duplicated` event at once. **`reordered: true`** (Phase 4) marks a delivery the reorder stage held back by `reorderDelayMs`, so packets sent after it overtook it; the field is absent otherwise |
+| `{ "evt": "state", "routes", "sessions", "defaults", "defaultsDown", "preset", "presets", "presetConfigs", "control" }` | On connect and on every change. `routes[]`: `id`, `proto`, `host` (`""` = all interfaces), `port`, `target`, `defaults` (up link), `defaultsDown`, `preset` (name, or `"Custom"` after a manual change), `sessions` (count), `refused`. `sessions[]`: `id`, `label`, `route`, `proto`, `peer`, `ageMs`, `up` / `down` (the link configs), `stats` (`{ up, down }` counters at that moment; kept apart because both have a `lossPct`: configured vs measured). `defaults` / `defaultsDown` / `preset`: the global ones (target `all`) |
+| `{ "evt": "stats", "t", "sessions": [{ "id", "label", "route", "up", "down" }], "routes": [{ "id", "sessions", "refused" }] }` | Every 500 ms. Per direction: cumulative `pktsIn`, `pktsDelivered`, `pktsDroppedLoss`, `pktsDroppedQueue`, `pktsDuplicated`, `pktsReordered`, `lossPct`; last-second `throughputKbps`, `lossPctWindow`, `pktsInWindow`, `deliveredWindow`; current **`queueMs`** (Phase 4): how long a packet arriving now would wait for the bandwidth cap before it starts transmitting (0 without a cap; packets that would wait longer than `queueLimitMs` are tail-dropped as `dropped-queue`) |
+| `{ "evt": "packets", "items": [{ "sid", "dir", "size", "preview", "fate", "delayMs", "t", "reordered"? }] }` | Every 100 ms while subscribed; the newest ≤ 60 events. `fate`: `delivered`, `dropped-loss`, `dropped-queue`, `duplicated`. `t` = when the packet reached the emulator (ms since epoch); `delayMs` = how long it was held, in whole ms (queue + latency + jitter + reorder hold; for `dropped-queue`, the queue wait it was refused). `preview`: the first 64 characters as text, or `hex …` for non-printable bytes. **`reordered: true`** (Phase 4) marks a delivery the reorder stage held back by `reorderDelayMs`, so packets sent after it overtook it |
+| `{ "evt": "ack", "cmd", "id" }` | `route.add` / `route.remove` succeeded |
+| `{ "evt": "error", "cmd", "msg" }` | A command was refused (unknown target, bad route, port in use, …) |
 
 Link config fields (defaults): `latencyMs` 0, `jitterMs` 0, `jitterDist` `"normal"`, `lossPct` 0, `lossModel` `"random"` (or `"burst"`, Gilbert-Elliott), `burstLen` 4, `duplicatePct` 0, `reorderPct` 0, `reorderDelayMs` **80**, `bandwidthKbps` 0 (unlimited), `queueLimitMs` 400, `allowJitterReorder` false. The reorder delay must exceed the input send interval + one tick (~50 ms) for reordered inputs to act like loss (see `docs/ASSUMPTIONS.md` #10).
 
+### 5.3 Server UDP adapter (`:8081`)
+
+`server/src/udp.ts` gives every remote `address:port` its own connection in the `GameServer` core, with fragments both ways (§1.1). `bye` or 5 s of silence removes the connection, and its address is forgotten; a later datagram from it starts a new connection (a new `hello` is needed). The Node client transport is `scripts/lib/udp-transport.ts` (`udp://host:port`); it is never part of the browser bundle.

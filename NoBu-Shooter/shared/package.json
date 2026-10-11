@@ -15,7 +15,8 @@
     "./protocol": "./src/protocol/index.ts",
     "./protocol/*": "./src/protocol/*",
     "./sync": "./src/sync/index.ts",
-    "./sync/*": "./src/sync/*"
+    "./sync/*": "./src/sync/*",
+    "./net/*": "./src/net/*"
   },
   "scripts": {
     "build": "tsc",
