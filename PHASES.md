@@ -1,7 +1,7 @@
 # NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
-**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). **Next: Phase 4.**
+**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). **Next: Phase 4** — implementation plan `docs/PHASE4_PLAN.md` (draft 2026-10-10, awaiting owner approval).
 **Replaces:** `ROADMAP.md` (draft of 2026-10-09). The v1 build spec is archived at `docs/archive/SPEC-v1.md`. `GAMERULES.md` remains the source of truth for gameplay.
 
 The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10-10. Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
@@ -205,17 +205,19 @@ Suggested order: A0 + A1 → A2 → A3 → A4 → A5 (A6 alongside each).
 
 **Goal:** a talk you can give with one hand on the keyboard, on an arena that looks finished.
 
+**Implementation plan:** `docs/PHASE4_PLAN.md` (decisions D1–D11; owner answers of 2026-10-10 included: two separate presenter scripts, Invincible on during Quick Match presenter steps, glow in Quick Match only, `playwright-core` as a local devDependency with git-ignored screenshots). Name tags, consistent player colours and rotating aim already exist from Phase 2.5.
+
 | ID | Task |
 |---|---|
-| P1 | **Presenter mode**: a scripted sequence of steps (data file mirroring `docs/DEMO_SCRIPT.md`). Each step sets presets, toggles, the Compare layout and the sync model automatically, and shows a caption ("Watch the amber ghost lag behind…"). `N` / `B` move to the next or previous step; `H` hides the captions. Optional: different network conditions per pane (the emulator already targets sessions by label). |
-| P2 | Arena: name tags, remote aim chevrons, death markers, a respawn pulse, glow/bloom (Phaser FX) with automatic degrade, and consistent player colours across the scoreboard and arena. |
+| P1 | **Presenter mode**: two scripted step sequences (data files mirroring `docs/DEMO_SCRIPT.md`), each started from its own landing button (owner): **Quick Match** (12 steps: baseline → prediction → loss/redundancy → reconciliation → jitter/interpolation → nudge → Nightmare with Full / Delta / State) and **Compare** (6 steps: the six comparison presets). Each step is a complete state (network, toggles, sync model or Compare preset) and shows a caption with what to watch, the expected numbers and a step timer. `N` / `B` move to the next or previous step; `H` hides the caption; an END button leaves. In Quick Match the presenter switches on the developer **Invincible** toggle (owner; needs `npm run demo`). Per-pane network conditions: not in Phase 4. |
+| P2 | Arena: remote aim chevrons, death markers, a respawn pulse for every player, and camera bloom (Phaser FX) in **Quick Match only** (owner), on at Graphics Quality *high* and switched off automatically below 45 fps. Name tags and consistent colours: done in Phase 2.5. |
 | P3 | ~~Texture-ready assets~~ — moved to Phase 2.5 (A0). |
-| P4 | Lab panel: collapsible sections, no scroll at 1920×1080, compact at 1280×720, and a projector font-scale setting. |
-| P5 | Packet strip: queue-depth bar, visible reorder overtakes, legend. |
-| P6 | Landing page: Quick Match, Compare, Presenter, Emulator dashboard (Phase 5). |
-| P7 | `npm run shots`: a Playwright script using the locally installed Chrome (`channel: 'chrome'`, no browser download) that captures every screen at 1280×720 and 1920×1080 into `artifacts/shots/`. |
+| P4 | Lab panel: collapsible sections (remembered), no scroll at 1920×1080, compact at 1280×720, and a projector UI-scale setting (100 / 115 / 130 %). |
+| P5 | Packet strip: queue-depth bar (emulator reports `queueMs`), visible reorder overtakes (emulator marks `reordered`), legend. |
+| P6 | Landing page: Quick Match, Compare, Presenter — Quick Match, Presenter — Compare, Emulator dashboard (disabled until Phase 5). |
+| P7 | `npm run shots`: a script using `playwright-core` (local devDependency of `NoBu-Shooter`, owner) with the locally installed Chrome (`channel: 'chrome'`, no browser download) that starts the demo, captures every screen at 1280×720 and 1920×1080 into `NoBu-Shooter/artifacts/shots/` (git-ignored, owner), records fps and console errors, and stops the demo. |
 
-**Demo checkpoint:** start Presenter mode and press `N` through the whole talk, with no mouse fiddling and every effect appearing on cue.
+**Demo checkpoint:** start each Presenter script and press `N` through it, with no mouse fiddling and every effect appearing on cue.
 
 **Exit criteria:** the phase rules; `npm run shots` output reviewed against a short visual checklist (no unstyled elements, no overlap, readable at 1280×720).
 

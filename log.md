@@ -21,7 +21,7 @@ Shared context for every agent working in this directory. Read this file **befor
 
 ## Current Status
 
-* **Last updated:** 2026-10-10 (Claude Opus 5.5) — **Phases 1, 2 and 2.5 of `PHASES.md` complete**, plus the owner's Phase 2.5 revision 2 (T58–T60: random power-up spots capped at ⌊players/2⌋, weighted kinds, 1 + 1 magazines, infinite pistol reloads, Piercing + Dash instead of Ammo, ring rules, developer Invincible switch under `npm run demo` only). Keys: `R` reload, `Space` dash, `C` reconciliation, `M` mute. **Phase 3 (T32 = T61–T67) complete** (2026-10-10): sync models full / delta / state (10 or 30 Hz) per connection, switchable live; Compare presets Sync / Bandwidth / State Hz with a live bandwidth chart; Quick Match Network Lab SYNC MODEL (`Y`, default Full). 130 tests, smoke (6 steps) and browser check pass. **Next: Phase 4 (T33).**
+* **Last updated:** 2026-10-10 (Claude Opus 5.5) — **Phases 1, 2 and 2.5 of `PHASES.md` complete**, plus the owner's Phase 2.5 revision 2 (T58–T60: random power-up spots capped at ⌊players/2⌋, weighted kinds, 1 + 1 magazines, infinite pistol reloads, Piercing + Dash instead of Ammo, ring rules, developer Invincible switch under `npm run demo` only). Keys: `R` reload, `Space` dash, `C` reconciliation, `M` mute. **Phase 3 (T32 = T61–T67) complete** (2026-10-10): sync models full / delta / state (10 or 30 Hz) per connection, switchable live; Compare presets Sync / Bandwidth / State Hz with a live bandwidth chart; Quick Match Network Lab SYNC MODEL (`Y`, default Full). 130 tests, smoke (6 steps) and browser check pass. **Next: Phase 4 (T33)** — plan drafted in `docs/PHASE4_PLAN.md` (T68, decisions D1–D11), **awaiting owner approval** before T69–T75. Branch `phase4` (Phase 3 merged via PR #6).
 * **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot-vs-state sync models, and a standalone network emulator (latency, jitter, loss, bandwidth, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (`main` holds everything as of T49; earlier work branches: `game`, `game-phase2plus`).
 * **Plan:** `PHASES.md` — six phases, each with a demo checkpoint and exit criteria. `GAMERULES.md` = gameplay rules. v1 spec archived at `docs/archive/SPEC-v1.md`.
 * **Architecture:** Browser (Phaser + React) ⇄ Emulator (:9000 data, :9001 control) ⇄ Authoritative server (:8080). Server core is transport-agnostic (`server/src/core.ts`); `NetClient` is headless (injectable transport/clock).
@@ -103,12 +103,29 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T66: Phase 3 step 5 — Quick Match: Network Lab SYNC MODEL row, `Y`, settings, ControlsOverlay
 * [x] T67: Phase 3 step 6 — smoke extension, browser check, measurements, docs, phase exit
 
+* [x] T68: Phase 4 implementation plan (`docs/PHASE4_PLAN.md`) + owner decisions; PHASES.md Phase 4 synced
+* [ ] T69: Phase 4 step 1 — presenter core (`client/src/presenter/`: types, scripts, controller), NetClient `setToggles` + `toggles`/`sync`/`dev` events, NetworkLab follows them (plan tests 1–3) — waits for owner approval of the plan
+* [ ] T70: Phase 4 step 2 — Presenter UI (`PresenterBar`, N/B/H, END), App views, CompareView `presetId`, Landing buttons (P1, P6)
+* [ ] T71: Phase 4 step 3 — arena polish: death markers, respawn pulse for all, aim chevrons, camera bloom (Quick Match, quality high, auto-degrade) (P2)
+* [ ] T72: Phase 4 step 4 — Lab collapsible sections + UI scale setting (P4)
+* [ ] T73: Phase 4 step 5 — emulator `queueMs` + `reordered`; strip queue bar, overtakes, legend (P5, plan test 5)
+* [ ] T74: Phase 4 step 6 — `npm run shots` (playwright-core devDependency, `artifacts/` ignored, root proxy) + `docs/VISUAL_CHECKLIST.md` (P7)
+* [ ] T75: Phase 4 step 7 — shots review, docs, phase exit
+
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
 
 ## Change Log
 
 <!-- Newest first. Copy the template below for each entry. -->
+
+### 2026-10-10 — Claude (Opus 5.5) — T68: Phase 4 implementation plan
+
+* **Task:** Owner (after committing Phase 3 on `phase3`, merged as PR #6; now on branch `phase4`): plan Phase 4 and prepare everything; ask about critical decisions.
+* **Status:** DONE (plan only — no source files changed). Implementation T69–T75 waits for owner approval.
+* **Owner answers (asked mid-run):** two separate presenter scripts (Quick Match and Compare, each with its own landing button); Presenter switches on Invincible in Quick Match; glow in Quick Match only; `playwright-core` as a local devDependency of `NoBu-Shooter`, screenshots git-ignored.
+* **Findings while reading the code:** name tags, consistent colours and rotating aim already exist (Phase 2.5); `ArenaScene` has an fps check with a `bloomEnabled` TODO and Settings has an unused Graphics Quality; `NetworkLab` keeps private copies of toggles / sync / Invincible (Presenter changes would show stale switches → `NetClient` events in step 1); `CompareView` can't be driven from outside (→ `presetId` prop); the emulator reports neither queue depth nor reordering (→ `queueMs`, `reordered`); Phaser 3.87 has built-in WebGL bloom; `Esc` already opens Settings, so Presenter ends with a bar button instead.
+* **Files:** `docs/PHASE4_PLAN.md` (created: starting point, D1–D11, both scripts as tables, design, build order, tests, exit checklist, risks), `PHASES.md` (status line, Phase 4: plan link, P1/P2/P4–P7 per the owner's answers, checkpoint), `log.md` (T68–T75, Current Status, this entry).
 
 ### 2026-10-10 — Claude (Opus 5.5) — Phase 3 implementation (T32, T62–T67)
 
