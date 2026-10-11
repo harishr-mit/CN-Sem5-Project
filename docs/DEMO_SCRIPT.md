@@ -133,7 +133,7 @@ Start from the landing page. Each step sets everything at once (network, all net
 - In Quick Match the **match clock is stopped** while presenting (the HUD shows ∞), so the match never ends mid-talk; END starts the clock again.
 - These and Invincible need `npm run demo` (the bar says so otherwise).
 
-**Presenter — Quick Match** (12 steps; turns on the developer **Invincible** switch so bots can't interrupt — `[DEV]` tag, needs `npm run demo`; turned off again on END). Walk around while you talk.
+**Presenter — Quick Match** (12 steps — a 13th, *Network players*, is planned for Phase 5; turns on the developer **Invincible** switch so bots can't interrupt — `[DEV]` tag, needs `npm run demo`; turned off again on END). Walk around while you talk.
 
 | Step | Title | Network | Changes from the defaults | Watch / expect |
 |---|---|---|---|---|

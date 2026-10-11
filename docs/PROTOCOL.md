@@ -319,6 +319,8 @@ Every event also carries `eid` (unique, used for de-duplication) and `tick`. Eve
 
 The emulator never parses game messages; each WebSocket frame is one packet (accounted as payload bytes + 28 bytes UDP/IP header).
 
+> **Planned (Phase 5, `docs/PHASE5_PLAN.md`, not implemented yet):** the emulator gets **routes** (`ws:9000 → ws://127.0.0.1:8080`, `udp:9100 → 127.0.0.1:8081`, or any ports), added from the CLI or at runtime (`route.add` / `route.remove`), and can start with none (`npm run emulator`). Each route owns its defaults and active preset, and `target` may name a route. The game sends `ws:9000` where it sends `"all"` today, so its presets no longer reach UDP network players. Payloads become bytes (binary-safe). UDP messages over 1200 B travel as `~<msgId>.<i>/<n>|…` fragments. The dashboard and control API move to an HTTP + WS server bound to 127.0.0.1 with an `Origin` allowlist; that is the only port locked to this machine. Data routes and the server (WS `:8080`, new UDP adapter `:8081`) keep listening on all interfaces, with a configurable bind address.
+
 ### 5.1 Data port (`ws://127.0.0.1:9000`)
 Clients connect here instead of to the server. Every connection becomes a **session** with its own upstream connection to `--target` and independent `up` (client → server) / `down` links. The query parameter `?label=` is stored as the session's display name. `NetClient` uses a unique label (`<name>-<4 chars>`) so the UI can find its own session in the stats.
 

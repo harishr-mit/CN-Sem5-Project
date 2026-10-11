@@ -49,7 +49,7 @@ WAITING ──(participants >= 2)──► COUNTDOWN ──(3 s)──► RUNNIN
 - A **participant** is a human player or a bot. Bots count toward the 2-participant minimum (§12), so one human alone can play against bots.
 - **Late join:** a human may join at any time. During `RUNNING` they spawn immediately with score 0. During `COUNTDOWN` or `ENDED` they join the next match flow normally.
 - **Restart:** after `ENDED` the room automatically returns to `COUNTDOWN` with all scores reset to 0 and all players re-spawned. No lobby, no vote.
-- **Presenter (owner, 2026-10-11; `npm run demo` only, §19):** Presenter — Quick Match stops the match clock (the HUD shows ∞; a 2-minute match would end mid-talk) and starts it again on END. Its **RESTART** begins a new match on the same map through the countdown; choosing a **map** on the Presenter bar does the same on that map. Neither moves the normal rotation.
+- **Presenter (owner, 2026-10-11; `npm run demo` only, §19):** Presenter — Quick Match stops the match clock (the HUD shows ∞; a 2-minute match would end mid-talk) and starts it again on END. Its **RESTART** begins a new match on the same map through the countdown; choosing a **map** on the Presenter bar does the same on that map. Neither moves the normal rotation. *Planned (Phase 5): a 13th Quick Match step, "Network players", which impairs only the UDP network players' route.*
 - **Demo shortcut:** `match.durationMs` is configuration. The default is 120 000. Setting it lower (for example 60 000 via a URL parameter `?match=60`) must work without code changes.
 - When the last human leaves, the room removes all bots and returns to `WAITING`.
 
@@ -266,6 +266,7 @@ Bots exist so that a single viewer sees a living arena and so that the 2-partici
   - Aim and fire: if an alive, non-protected opponent is within `sightRange` and the straight segment to them is not blocked by an obstacle, aim at them with a random angular error of ±`aimErrorDeg`, after a `reactionMs` delay since first seeing them, and fire whenever the cooldown and magazine allow. Bots reload only automatically (empty magazine) and use the same weapon and power-up rules as humans.
 - Bot traffic is server-local and **bypasses the network emulator**. The UI must say so in the Network Lab ("Bots are simulated inside the server").
 - The bot RNG is seeded from `bots.seed` so behavior is reproducible in tests.
+- *Planned (Phase 5, `docs/PHASE5_PLAN.md` D8/D10):* **network players** (`npm run swarm`, names `UDP-1`…) are not bots. They are ordinary human-slot participants: headless clients that run the same bot decision code on their own lagged view and send their inputs over UDP through the emulator. They count as humans in the bot formula above.
 
 ---
 
