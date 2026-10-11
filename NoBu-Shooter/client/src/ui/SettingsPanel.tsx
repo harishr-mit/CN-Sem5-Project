@@ -114,34 +114,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           />
         </div>
 
-        {/* Graphics Quality */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-xs)' }}>
-          <div style={{ fontSize: '0.9rem', color: 'var(--c-text)' }}>Graphics Quality</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--sp-s)' }}>
-            {(['low', 'medium', 'high'] as const).map((q) => (
-              <button
-                key={q}
-                onClick={() => updateSetting('graphicsQuality', q)}
-                style={{
-                  padding: '6px',
-                  borderRadius: '4px',
-                  textTransform: 'uppercase',
-                  fontSize: '0.75rem',
-                  fontFamily: 'var(--font-display)',
-                  letterSpacing: '0.08em',
-                  background: settings.graphicsQuality === q ? 'var(--c-violet)' : 'rgba(255, 255, 255, 0.05)',
-                  color: settings.graphicsQuality === q ? '#fff' : 'var(--c-text-muted)',
-                  border: settings.graphicsQuality === q ? '1px solid var(--c-cyan)' : '1px solid var(--c-border)',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* UI scale for projectors (PHASES.md P4): all panels and text, not the arena */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-xs)' }} id="settings-ui-scale">
           <div style={{ fontSize: '0.9rem', color: 'var(--c-text)' }}>UI Scale (projector)</div>

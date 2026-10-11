@@ -72,7 +72,7 @@ Click **Quick Match (vs bots)** to play, or **Network Lab — Compare** to compa
 
 **Presenter mode** (for giving the talk): **Presenter — Quick Match** runs 12 scripted steps in a match (baseline → server delay → prediction → loss → redundancy → reconciliation off → jitter → interpolation → nudge → Nightmare with full / delta / state sync); **Presenter — Compare** steps through the six Compare presets. Each step sets the network, every netcode toggle and the sync model at once and shows a caption bar with what to watch, the expected numbers and a step timer. `N` next, `B` back (exactly the same state again), `H` hides the caption, **END** leaves. Every normal key still works in between. The bar also has **⟲ RESTART** (the game back to its starting case and the talk back to step 1) and **map** buttons (restart the game on that map; the talk stays on its step). In Quick Match the presenter stops the match clock (HUD ∞) and turns on the developer **Invincible** switch so bots can't interrupt; these, RESTART and the map buttons need `npm run demo`. The steps are listed in `docs/DEMO_SCRIPT.md` §12. **Emulator dashboard** (landing page) arrives in Phase 5.
 
-Quick Match rotates through four maps (`neon → warehouse → plaza → overgrown`, one per match), with ammo and reloads, six power-ups at random spots, survivor avatars and sound (`GAMERULES.md`). `npm run demo` also enables a developer **Invincible** switch in the Network Lab (not available any other way). To start on a particular map: `NOBU_MAPS=plaza npm run demo` (PowerShell: `$env:NOBU_MAPS='plaza'; npm run demo`).
+Quick Match rotates through four maps (`neon → warehouse → plaza → overgrown`, one per 2-minute match), with ammo and reloads, six power-ups at random spots, survivor avatars and sound (`GAMERULES.md`). `npm run demo` also enables a developer **Invincible** switch in the Network Lab (not available any other way). To start on a particular map: `NOBU_MAPS=plaza npm run demo` (PowerShell: `$env:NOBU_MAPS='plaza'; npm run demo`).
 
 Stop everything with `Ctrl+C` — all four ports are released. (If the launcher is killed some other way, its child processes notice within ~1 s and exit by themselves.)
 
@@ -83,7 +83,7 @@ Stop everything with `Ctrl+C` — all four ports are released. (If the launcher 
 Ensure your environment passes all test suites and the headless end-to-end simulation:
 
 ```bash
-# Run unit and integration tests (162 tests: sim, protocol, emulator pipeline incl. queue
+# Run unit and integration tests (163 tests: sim, protocol, emulator pipeline incl. queue
 # depth and reorder marks, game rules, weapons/ammo/reload, power-ups, map layouts, sync models
 # (delta/state encoders, extrapolation), movement keys, movers/spectators, Compare
 # layout/input/presets, Presenter scripts + controller, developer/Presenter room commands,
@@ -120,14 +120,14 @@ npm run pack-assets
 | **Aim** | Mouse cursor |
 | **Shoot** | Hold Left Click |
 | **Reload** | `R` (also automatic when the magazine is empty) |
-| **Power-ups** | Walk over one (random spots, ≤ 1 per 2 players): Rapid Fire (rifle), Spread Shot (shotgun), Shield, Speed, Piercing, Dash (`Space`) |
+| **Power-ups** | Walk over one (random spots, up to one per player, a new one every 7 s): Rapid Fire (rifle), Spread Shot (shotgun), Shield, Speed, Piercing, Dash (`Space`) |
 | **Developer toggle** | `npm run demo` only: Network Lab → **Developer → Invincible**, and **Give power-up** (Rapid, Spread, Shield, Speed, Pierce, Dash — applied as if picked up) |
 | **Mute sounds** | `M` (volume in Settings, `Esc`) |
 | **Toggle Network Lab** | `Tab` |
 | **Netcode toggles** | `P` prediction, `C` reconciliation (was `R` until 2026-10-10; `R` is now reload), `I` interpolation, `G` ghost (while shown it replaces your cyan ring) |
 | **Sync model** | `Y` cycles Full → Delta → State 10 Hz → State 30 Hz, live (Network Lab → **SYNC MODEL**; remembered; default Full). Exactly one is active, shown in two groups: **Snapshots** (interpolated) — Full = whole world every snapshot, Delta = only changes since the last acknowledged snapshot — and **State sync** (extrapolated) — records + velocity at 10 or 30 Hz |
 | **Controls / Settings** | `F1` / `Esc` |
-| **Graphics / projector** | Settings → **Graphics Quality** (*high* adds a neon glow to the Quick Match arena; it switches itself off after 3 s below 45 fps) and **UI Scale** 100 / 115 / 130 % (all panels and text, not the arena; remembered) |
+| **Projector** | Settings → **UI Scale** 100 / 115 / 130 % (all panels and text, not the arena; remembered) |
 | **Network Lab sections** | Click a section title to fold it; the Lab remembers. Defaults fit 1920 × 1080 and 1280 × 720 without scrolling |
 | **Presenter mode** | Landing page **Presenter — Quick Match** / **Presenter — Compare**: `N` next step, `B` previous step, `H` hide the caption; bar buttons **⟲ RESTART**, **map** (Neon / Warehouse / Plaza / Overgrown — restarts the game there) and **END** |
 | **Leave match** | **◄ LEAVE MATCH** (bottom-left of the arena), or `Esc` → **◄ LEAVE MATCH — BACK TO MAIN MENU** (end of the settings menu). Compare: **◄ EXIT** (top bar) |

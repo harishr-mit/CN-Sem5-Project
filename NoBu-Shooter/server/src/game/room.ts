@@ -530,7 +530,7 @@ export class Room {
 
   /**
    * Power-ups (GAMERULES.md §6b): collect (lowest player id wins a same-tick
-   * tie), keep at most ⌊participants / 2⌋ on the map, and add one at a random
+   * tie), keep at most ⌊participants / perPlayers⌋ (one per participant) on the map, and add one at a random
    * spot `respawnMs` after the count drops below the cap.
    */
   private stepPickups(): void {

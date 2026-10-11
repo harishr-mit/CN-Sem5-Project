@@ -22,7 +22,6 @@ import { MapView, DEPTH } from './MapView.js';
 import { PlayerView, bakePlayerTextures, type PlayerLook } from './PlayerView.js';
 import { Sfx } from './audio.js';
 import { PLAYER_COLORS } from './playerColors.js';
-import { loadSettings, onSettingsChange, type UserSettings } from '../ui/settings.js';
 
 /**
  * Compare-view rendering options (PHASES.md C1-C4). Without them the scene
@@ -116,13 +115,6 @@ export class ArenaScene extends Phaser.Scene {
   // Particle system
   private particles: ParticleEffect[] = [];
   private correctionLines: CorrectionLine[] = [];
-
-  // Camera bloom (Quick Match, Graphics Quality high) + fps auto-degrade (D6)
-  /** Frame times (ms) of the last fpsDegrade.forSeconds while bloom is on. */
-  private fpsSamples: number[] = [];
-  private bloom: Phaser.FX.Bloom | null = null;
-  /** Switched off for low fps; stays off until the quality setting changes. */
-  private bloomDegraded = false;
 
   // Arena polish (PHASES.md P2)
   private deathMarks: DeathMark[] = [];
@@ -257,13 +249,6 @@ export class ArenaScene extends Phaser.Scene {
     this.events.once('shutdown', cleanup);
     this.events.once('destroy', cleanup);
 
-    // Bloom follows Graphics Quality, live (Quick Match only, D6)
-    this.applyQuality(loadSettings());
-    this.unsubscribers.push(onSettingsChange((s) => {
-      this.bloomDegraded = false;
-      this.fpsSamples = [];
-      this.applyQuality(s);
-    }));
 
     const net = this.netClient;
     this.unsubscribers.push(
@@ -342,25 +327,6 @@ export class ArenaScene extends Phaser.Scene {
     this.sfx.play(key, { at, listener, rate: weapon === 'shotgun' ? 0.7 : 1, gain: at ? 0.7 : 0.85 });
   }
 
-  /**
-   * Camera bloom: one full-screen WebGL pass (cheaper than per-object glow).
-   * Only in Quick Match at quality high, and not after an fps degrade.
-   */
-  private applyQuality(s: UserSettings): void {
-    const cam = this.cameras?.main;
-    if (!cam) return;
-    const want = !this.isCompare && s.graphicsQuality === 'high' && !this.bloomDegraded
-      && this.game.renderer.type === Phaser.WEBGL;
-    if (want && !this.bloom) {
-      // One blur step: 4 steps cost ≈ 30 fps on the dev laptop's Intel UHD (1920×1080),
-      // 1 step ≈ 2 fps (docs/ASSUMPTIONS.md); the 2 px offset widens the glow for free.
-      this.bloom = cam.postFX.addBloom(0xffffff, 2, 2, 1, 0.7, 1);
-    } else if (!want && this.bloom) {
-      cam.postFX.remove(this.bloom);
-      this.bloom = null;
-    }
-  }
-
   private colorFor(id: number): number {
     return this.options.playerColors?.().get(id) ?? PLAYER_COLORS[id % PLAYER_COLORS.length];
   }
@@ -387,20 +353,6 @@ export class ArenaScene extends Phaser.Scene {
       if (this.inputSendAccum >= sendMs) {
         this.netClient.sendInputs();
         this.inputSendAccum %= sendMs;
-      }
-    }
-
-    // ── FPS auto-degrade: bloom off after forSeconds below minFps ─
-    if (this.bloom) {
-      this.fpsSamples.push(dt);
-      const windowMs = NET.fpsDegrade.forSeconds * 1000;
-      let total = this.fpsSamples.reduce((a, b) => a + b, 0);
-      while (this.fpsSamples.length > 1 && total - this.fpsSamples[0] >= windowMs) total -= this.fpsSamples.shift()!;
-      if (total >= windowMs && (this.fpsSamples.length * 1000) / total < NET.fpsDegrade.minFps) {
-        this.bloomDegraded = true;
-        this.fpsSamples = [];
-        this.applyQuality(loadSettings());
-        console.info(`[arena] bloom switched off: below ${NET.fpsDegrade.minFps} fps for ${NET.fpsDegrade.forSeconds} s`);
       }
     }
 

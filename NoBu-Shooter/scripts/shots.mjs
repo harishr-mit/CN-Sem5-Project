@@ -201,7 +201,7 @@ try {
       page.on('console', (m) => {
         if (m.type() === 'error') errors.push(m.text());
         else if (m.type() === 'warning') warnings++;
-        else if (m.text().startsWith('[arena]')) notes.push(m.text()); // e.g. bloom switched off for low fps
+        else if (m.text().startsWith('[arena]')) notes.push(m.text()); // arena notices
       });
       const row = { name: screen.name, file, fps: null, errors, notes, warnings: 0, ok: true };
       try {
@@ -225,7 +225,6 @@ try {
       rows.push(row);
       const flags = [
         row.labScrolls ? 'LAB SCROLLS' : '', row.pageOverflowX ? 'OVERFLOW-X' : '', row.pageOverflowY ? 'OVERFLOW-Y' : '',
-        notes.some((n) => n.includes('bloom')) ? 'BLOOM OFF (low fps)' : '',
       ].filter(Boolean).join(' ');
       console.log(`[shots] ${w}x${h} ${file.padEnd(36)} ${String(row.fps ?? '–').padStart(3)} fps  ${errors.length ? `✘ ${errors.length} error(s): ${errors[0]}` : '✔'} ${flags}`);
       await context.close();

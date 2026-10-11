@@ -230,35 +230,40 @@ describe('Phase 2.5 rules: maps, weapons, reload, power-ups', () => {
     expect(mine).toHaveLength(3);
   });
 
-  it('power-ups: ⌊players / 2⌋ at random valid spots; lowest id wins a tie; a new one 10 s after a pickup', () => {
+  it('power-ups: one per player at random valid spots; lowest id wins a tie; a new one 7 s after a pickup', () => {
     seqs = new Map();
     const { room, it, a, b } = runningMain();
     const map = mapDef(it.state.map);
-    expect(it.state.pickups).toHaveLength(1); // 2 players → 1
+    expect(GAME.powerups.respawnMs).toBe(7000);
+    expect(it.state.pickups).toHaveLength(2); // 2 players → 2
     for (const pk of it.state.pickups) expect(isValidPowerupSpot(map, pk)).toBe(true);
     const pk = it.state.pickups[0];
+    const other = it.state.pickups[1];
     pk.kind = 'speed';
     for (const id of [a, b]) { const p = it.state.players.get(id)!; p.x = pk.x; p.y = pk.y; }
     room.tick();
-    expect(it.state.pickups).toHaveLength(0);
+    expect(it.state.pickups.map((p) => p.id)).toEqual([other.id]);
     expect(it.state.players.get(Math.min(a, b))!.combat.speedTicks).toBeGreaterThan(0);
     expect(it.state.players.get(Math.max(a, b))!.combat.speedTicks).toBe(0);
     expect(it.state.events.some((e) => e.type === 'PICKUP' && e.kind === 'speed')).toBe(true);
     for (const id of [a, b]) it.state.players.get(id)!.x = 30;
     const respawn = Math.round(GAME.powerups.respawnMs * GAME.sim.hz / 1000);
     for (let i = 0; i < respawn - 1; i++) room.tick();
-    expect(it.state.pickups).toHaveLength(0);
-    room.tick();
     expect(it.state.pickups).toHaveLength(1);
-    expect(it.state.pickups[0].id).not.toBe(pk.id);
-    expect(isValidPowerupSpot(map, it.state.pickups[0])).toBe(true);
+    room.tick();
+    expect(it.state.pickups).toHaveLength(2);
+    const fresh = it.state.pickups.find((p) => p.id !== other.id)!;
+    expect(fresh.id).not.toBe(pk.id);
+    expect(isValidPowerupSpot(map, fresh)).toBe(true);
 
-    // Two more players: the cap rises to 2, the second one arrives 10 s later
+    // Two more players: the cap rises to 4; the missing two arrive one per 7 s
     room.addPlayer('C', false);
     room.addPlayer('D', false);
     for (const p of it.state.players.values()) p.x = 30;
     for (let i = 0; i < respawn + 1; i++) room.tick();
-    expect(it.state.pickups).toHaveLength(2);
+    expect(it.state.pickups).toHaveLength(3);
+    for (let i = 0; i < respawn + 1; i++) room.tick();
+    expect(it.state.pickups).toHaveLength(4);
   });
 
   it('developer invincibility: refused without npm run demo; when on, hits never kill', () => {

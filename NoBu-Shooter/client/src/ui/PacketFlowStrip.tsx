@@ -276,7 +276,7 @@ export const PacketFlowStrip: React.FC<PacketFlowStripProps> = ({
           }
 
           // Halo as a second, faint circle: canvas shadowBlur on ~200 dots per
-          // frame (a full Nightmare queue) cost enough to trip the bloom auto-off
+          // frame (a full Nightmare queue) cost several fps
           ctx.save();
           const a = Math.max(0, alpha);
           ctx.fillStyle = d.color;

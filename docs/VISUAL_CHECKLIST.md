@@ -19,7 +19,7 @@ NoBu-Shooter/artifacts/shots/
   1920x1080/ (same 20 screens)
 ```
 
-Each `index.json` row has `fps` (requestAnimationFrame over 2 s), `errors` (console errors and page errors — the run fails on any), `notes` (e.g. `[arena] bloom switched off…`), `warnings` (count; React StrictMode's "closed before established" WebSocket warnings in Compare are expected, `docs/ASSUMPTIONS.md` #18), `labScrolls`, `pageOverflowX/Y`.
+Each `index.json` row has `fps` (requestAnimationFrame over 2 s), `errors` (console errors and page errors — the run fails on any), `notes` (`[arena] …` notices, if any), `warnings` (count; React StrictMode's "closed before established" WebSocket warnings in Compare are expected, `docs/ASSUMPTIONS.md` #18), `labScrolls`, `pageOverflowX/Y`.
 
 ## What to check on every shot
 
@@ -35,10 +35,10 @@ Each `index.json` row has `fps` (requestAnimationFrame over 2 s), `errors` (cons
 |---|---|---|
 | 01 | landing | Five buttons: Quick Match, Compare, Presenter — Quick Match, Presenter — Compare, Emulator dashboard (disabled, "Phase 5"); controls hint fits in two lines. |
 | 02 | credits | Modal centred, CC-BY avatar credit present, CLOSE visible. |
-| 03 | quick-match | Lab open with default sections and **no Lab scroll** (`labScrolls: false`); SYNC MODEL in two groups (SNAPSHOTS: FULL/DELTA, STATE SYNC: 10/30 Hz), one chip lit; aim chevrons in front of the bots' rings; soft glow on walls (bloom, quality high); packet strip legend visible next to INSPECT PACKETS. |
+| 03 | quick-match | Lab open with default sections and **no Lab scroll** (`labScrolls: false`); SYNC MODEL in two groups (SNAPSHOTS: FULL/DELTA, STATE SYNC: 10/30 Hz), one chip lit; aim chevrons in front of the bots' rings; arena crisp (no glow or haze); packet strip legend visible next to INSPECT PACKETS. |
 | 04 | quick-nightmare | Strip: EMULATOR chips list the Nightmare impairments; **queue bar** amber/red with `QUEUE ↓… ms`; dots crowd inside the box; red lost dots fall. |
 | 05 | quick-inspector | Drawer readable; doesn't cover the Lab. |
-| 06 | quick-settings | UI Scale row (100 / 115 / 130 %), Graphics Quality, Leave Match at the end; no blur artefacts. |
+| 06 | quick-settings | UI Scale row (100 / 115 / 130 %), Leave Match at the end; no blur artefacts. |
 | 07 | quick-controls | `Y`, presenter keys and power-ups listed. |
 | 08 | quick-lab-all-open | Every section open: the Lab scrolls (expected), section titles have carets, nothing overlaps; Developer shows Invincible and six GIVE POWER-UP chips with icons. |
 | 09 | quick-ui-130 | UI 30 % larger, Lab wider; at 1920 × 1080 still no Lab scroll; strip side column doesn't collide with SERVER. |

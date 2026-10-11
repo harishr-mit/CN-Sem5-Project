@@ -6,7 +6,7 @@
 
 export const GAME = {
   sim: { hz: 60 },
-  match: { durationMs: 180000, countdownMs: 3000, endedMs: 10000, minParticipants: 2, maxParticipants: 8 },
+  match: { durationMs: 120000, countdownMs: 3000, endedMs: 10000, minParticipants: 2, maxParticipants: 8 },
   arena: { width: 1280, height: 720 },
   player: { radius: 16, speed: 200, respawnDelayMs: 2000, spawnProtectionMs: 1000, maxNameLength: 12 },
   projectile: { radius: 4, speed: 600 },
@@ -20,8 +20,8 @@ export const GAME = {
     kinds: ['rapid_fire', 'spread_shot', 'shield', 'speed', 'piercing', 'dash'],
     weights: { rapid_fire: 1, spread_shot: 2, shield: 2, speed: 4, piercing: 2, dash: 3 },
     radius: 14,
-    perPlayers: 2,
-    respawnMs: 10000,
+    perPlayers: 1,
+    respawnMs: 7000,
     obstacleClearancePx: 24,
     edgeMarginPx: 40,
     minSeparationPx: 160,

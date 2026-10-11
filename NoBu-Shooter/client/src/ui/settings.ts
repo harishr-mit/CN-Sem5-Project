@@ -2,7 +2,6 @@ import { DEFAULT_SYNC, isSyncSpec, normalizeSync, type SyncSpec } from '@nobu/sh
 
 export interface UserSettings {
   mouseSensitivity: number;
-  graphicsQuality: 'low' | 'medium' | 'high';
   showGhost: boolean;
   showParticleTrails: boolean;
   soundVolume: number;
@@ -33,7 +32,6 @@ const SETTINGS_KEY = 'nobu_shooter_settings';
 
 export const DEFAULT_SETTINGS: UserSettings = {
   mouseSensitivity: 1.0,
-  graphicsQuality: 'high',
   showGhost: true,
   showParticleTrails: true,
   soundVolume: 80,

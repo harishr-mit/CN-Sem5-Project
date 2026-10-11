@@ -39,7 +39,7 @@ export interface PresenterScript {
   view: 'game' | 'compare';
   /** Switch the developer Invincible toggle on while presenting (D3). */
   invincible: boolean;
-  /** Stop the match clock while presenting (owner, 2026-10-11): a 3-minute match would end mid-talk. */
+  /** Stop the match clock while presenting (owner, 2026-10-11): a 2-minute match would end mid-talk. */
   endless: boolean;
   steps: PresenterStep[];
 }

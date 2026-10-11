@@ -191,7 +191,7 @@ export const App: React.FC = () => {
       controller={presenter}
       version={presenterVersion}
       notice={DEV_TOOLS ? null : presenter.script.view === 'game'
-        ? 'Invincible, the stopped match clock, RESTART and map switching need npm run demo — this run uses normal 3-minute matches.'
+        ? 'Invincible, the stopped match clock, RESTART and map switching need npm run demo — this run uses normal 2-minute matches.'
         : 'Map switching needs npm run demo; RESTART here only resets the panes and charts.'}
       currentMap={() => (presenter.script.view === 'game' ? netClient?.mapId ?? null : compareMap)}
       onEnd={() => {

@@ -232,7 +232,7 @@ While a Presenter has stopped the match clock (`dev.endless`, §2.6), `match` al
 - `match.map`: the map being played (`neon`, `warehouse`, `plaza`, `overgrown`; `GAMERULES.md` §3). It changes only at `COUNTDOWN`; the client switches its art and its prediction geometry when it does.
 - `players[]`: `aim` (radians, sprite rotation), `weapon` (`handgun` | `rifle` | `shotgun`), `reloading`, `shield` (Shield power-up), `fast` (Speed power-up), `invincible: true` (developer toggle; omitted when off). Movers send `aim: 0`, `weapon: "handgun"` and `false` flags.
 - `projectiles[].pierce: true` (omitted when false): fired under the Piercing power-up, passes through obstacles.
-- `pickups`: power-ups on the map, at random spots; `id` is unique per room (a new id for every power-up). At most ⌊participants / 2⌋; empty outside `RUNNING` and always empty in `lab`. Pickups are never predicted.
+- `pickups`: power-ups on the map, at random spots; `id` is unique per room (a new id for every power-up). At most one per participant (`powerups.perPlayers` = 1); empty outside `RUNNING` and always empty in `lab`. Pickups are never predicted.
 - `me` (absent for spectators): the recipient's own weapon state (`CombatState`, `shared/src/sim/combat.ts`), exact to the acknowledged input (`*Ticks` count inputs, 60 per second; `reserve: -1` = unlimited). The client replays its unacknowledged inputs on top of it, like its position.
 - `events`: Array of redundant event entries covering the last 500 ms; deduplicated via `eid`.
 - Size: these Phase 2.5 fields make a 4-player main-room snapshot ≈ 2.1 kB (≈ 1.6 kB before), ≈ 510 kbps at 30 Hz — the full-snapshot baseline for Phase 3 (`docs/ASSUMPTIONS.md` #40).

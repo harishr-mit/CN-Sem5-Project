@@ -23,7 +23,6 @@ export const NET = {
   timeoutMs: 5000,
   metricsWindowMs: 10000,
   debug: { allowPerturb: true, perturbPx: 40 },
-  fpsDegrade: { minFps: 45, forSeconds: 3 },
 } as const;
 
 export default NET;

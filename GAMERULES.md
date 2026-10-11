@@ -34,7 +34,7 @@ The game is deliberately simple. Its purpose is to make network effects (lag, lo
 A **room** runs one match at a time. The default room is `main`. A second room, `lab`, is a movement-only sandbox (§14).
 
 ```text
-WAITING ──(participants >= 2)──► COUNTDOWN ──(3 s)──► RUNNING ──(180 s)──► ENDED ──(10 s)──► COUNTDOWN ...
+WAITING ──(participants >= 2)──► COUNTDOWN ──(3 s)──► RUNNING ──(120 s)──► ENDED ──(10 s)──► COUNTDOWN ...
    ▲                                                                                              │
    └────────────────────────(all human players gone)──────────────────────────────────────────────┘
 ```
@@ -43,14 +43,14 @@ WAITING ──(participants >= 2)──► COUNTDOWN ──(3 s)──► RUNNIN
 |---|---|
 | `WAITING` | Fewer than `minParticipants` participants. Players cannot move or fire. UI shows "WAITING FOR PLAYERS". |
 | `COUNTDOWN` | 3 s ("3, 2, 1, GO!"). All players are placed at spawn points (alive and visible, with a new `life` number so clients treat it as a respawn) and start the match from there. Movement and firing are ignored. |
-| `RUNNING` | Normal play for exactly 180 s. The server owns the timer. |
+| `RUNNING` | Normal play for exactly 120 s (2 minutes; owner, 2026-10-11 — was 180 s). The server owns the timer. |
 | `ENDED` | Movement, firing and projectile spawning are ignored. Remaining projectiles are removed. Final scores are computed and broadcast. Lasts 10 s. |
 
 - A **participant** is a human player or a bot. Bots count toward the 2-participant minimum (§12), so one human alone can play against bots.
 - **Late join:** a human may join at any time. During `RUNNING` they spawn immediately with score 0. During `COUNTDOWN` or `ENDED` they join the next match flow normally.
 - **Restart:** after `ENDED` the room automatically returns to `COUNTDOWN` with all scores reset to 0 and all players re-spawned. No lobby, no vote.
-- **Presenter (owner, 2026-10-11; `npm run demo` only, §19):** Presenter — Quick Match stops the match clock (the HUD shows ∞; a 3-minute match would end mid-talk) and starts it again on END. Its **RESTART** begins a new match on the same map through the countdown; choosing a **map** on the Presenter bar does the same on that map. Neither moves the normal rotation.
-- **Demo shortcut:** `match.durationMs` is configuration. The default is 180 000. Setting it lower (for example 60 000 via a URL parameter `?match=60`) must work without code changes.
+- **Presenter (owner, 2026-10-11; `npm run demo` only, §19):** Presenter — Quick Match stops the match clock (the HUD shows ∞; a 2-minute match would end mid-talk) and starts it again on END. Its **RESTART** begins a new match on the same map through the countdown; choosing a **map** on the Presenter bar does the same on that map. Neither moves the normal rotation.
+- **Demo shortcut:** `match.durationMs` is configuration. The default is 120 000. Setting it lower (for example 60 000 via a URL parameter `?match=60`) must work without code changes.
 - When the last human leaves, the room removes all bots and returns to `WAITING`.
 
 ---
@@ -155,7 +155,7 @@ The client sends **inputs**, never state. The server decides all resulting state
 ### 6b. Power-ups
 
 - **Where:** power-ups appear at **random spots** (room's seeded PRNG): ≥ 40 px from the arena edge, ≥ 24 px from every obstacle, outside the HUD zones (`powerups.hudKeepOut`: score, timer, scoreboard, button bar, weapon panel), and — when possible — ≥ 160 px from other power-ups and ≥ 80 px from alive players. Every such spot is reachable (`tests/maps.test.ts`).
-- **How many:** at most **⌊participants / 2⌋** at a time (bots count; 4 players → 2, 8 → 4). At the start of `RUNNING` the map is filled to that cap at once. Whenever there are fewer, the next one appears **10 s** (`powerups.respawnMs`) later. If players leave and the cap drops, the oldest extra power-ups disappear. None during `COUNTDOWN`/`ENDED` and never in the `lab` room.
+- **How many:** at most **one per participant** at a time (`powerups.perPlayers` = 1; bots count; 4 players → 4, 8 → 8; owner, 2026-10-11 — was ⌊participants / 2⌋). At the start of `RUNNING` the map is filled to that cap at once. Whenever there are fewer, the next one appears **7 s** (`powerups.respawnMs`; was 10 s) later, one at a time. If players leave and the cap drops, the oldest extra power-ups disappear. None during `COUNTDOWN`/`ENDED` and never in the `lab` room.
 - **Which:** a weighted draw (`powerups.weights`): Speed 4, Dash 3, Spread Shot 2, Shield 2, Piercing 2, **Rapid Fire 1** (the rifle is the strongest, so the rarest).
 - A pickup is a circle of radius 14 px. An alive player whose circle overlaps it collects it. The **server** decides; if several players overlap in the same tick, the lowest player id wins. Clients never predict a pickup (they show it only when the server confirms it), so under lag a player can run over a pickup and see it go to someone else — intended.
 - Bots collect pickups they touch but do not seek them (and never dash).
@@ -302,7 +302,7 @@ Save this block verbatim. Derived tick counts use `ticks = Math.round(ms × sim.
 {
   "sim": { "hz": 60 },
   "match": {
-    "durationMs": 180000,
+    "durationMs": 120000,
     "countdownMs": 3000,
     "endedMs": 10000,
     "minParticipants": 2,
@@ -327,8 +327,8 @@ Save this block verbatim. Derived tick counts use `ticks = Math.round(ms × sim.
     "kinds": ["rapid_fire", "spread_shot", "shield", "speed", "piercing", "dash"],
     "weights": { "rapid_fire": 1, "spread_shot": 2, "shield": 2, "speed": 4, "piercing": 2, "dash": 3 },
     "radius": 14,
-    "perPlayers": 2,
-    "respawnMs": 10000,
+    "perPlayers": 1,
+    "respawnMs": 7000,
     "obstacleClearancePx": 24,
     "edgeMarginPx": 40,
     "minSeparationPx": 160,
@@ -480,7 +480,7 @@ Save this block verbatim. Derived tick counts use `ticks = Math.round(ms × sim.
 
 Do not build: weapons other than the three in §6, weapon switching or inventories (the weapon comes only from power-ups), damage values, health bars or health packs, melee, power-ups other than the six in §6b, health or ammo pickups, teams, classes, player-vs-player body collision, grenades, bouncing or homing projectiles, moving or destructible obstacles, procedural or player-made maps, map voting, matchmaking, accounts, progression, sudden death, music, or a reconnect-to-same-player mechanism.
 
-The game is: **move + shoot + reload + pick up + collide + die + respawn + score + 3-minute match, on a rotating set of hand-made maps.**
+The game is: **move + shoot + reload + pick up + collide + die + respawn + score + 2-minute match, on a rotating set of hand-made maps.**
 
 ---
 
@@ -493,7 +493,7 @@ Rendering never changes the simulation. All art lives in `NoBu-Shooter/assets/` 
 - **Shields:** spawn protection and the Shield power-up both use the shield bubble; spawn protection is the player's colour and pulses, the Shield power-up is green and steady.
 - **Power-ups:** the pickup icon at its spot, bobbing slightly. Piercing shots are tinted violet.
 - **Readability (Phase 4, Quick Match):** a small **aim chevron** in each remote player's colour just outside their ring; a **death marker** (✕ in the victim's colour) where a player died, fading over the respawn delay; a **respawn pulse** (two expanding rings) wherever any player reappears. All three are drawn in code (no asset files); the Compare view keeps only the death marker and pulse.
-- **Glow (Phase 4):** at Graphics Quality *high* the Quick Match camera gets a bloom pass (a soft neon halo). It switches itself off after 3 s below 45 fps and is never used in the Compare view.
+- **No camera glow** (owner, 2026-10-11): the bloom pass added in Phase 4 was removed — it blurred the whole frame and made the arena look worse. The neon look comes from the maps' own glowing edges.
 - **Maps:** floor texture tiled across the arena; obstacles drawn with the map's skin (§3).
 - **Credits:** the CC-BY assets (survivor avatar; RC Art props) are credited on a Credits screen reachable from the landing page and in `README.md`.
 

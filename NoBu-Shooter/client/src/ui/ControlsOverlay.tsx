@@ -21,7 +21,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
       ],
     },
     {
-      category: 'POWER-UPS (walk over one; up to 1 per 2 players)',
+      category: 'POWER-UPS (walk over one; up to one per player, a new one every 7 s)',
       items: [
         { keys: ['RAPID'], desc: 'Rifle for 10 s or 2 magazines (rarest)' },
         { keys: ['SPREAD'], desc: 'Shotgun for 10 s or 2 magazines — 3 pellets per shot' },

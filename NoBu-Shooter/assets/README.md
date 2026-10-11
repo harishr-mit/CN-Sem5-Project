@@ -80,8 +80,8 @@ Respawn, power-up end and UI clicks are **silent** (owner decision).
 
 Phase 4 added arena details that are baked into textures at start-up rather than
 loaded: the death marker (`death-x`), the remote aim chevron (`aim-chevron`),
-the respawn pulse rings and the camera glow (Phaser bloom). No asset files were
-added or changed in Phase 4.
+and the respawn pulse rings (the Phase 4 camera glow was removed again on
+2026-10-11). No asset files were added or changed in Phase 4.
 
 Compare panes preload no floors or props (the lab was Neon only); since the
 Presenter can switch the lab's map (2026-10-11), a pane loads that map's floor
