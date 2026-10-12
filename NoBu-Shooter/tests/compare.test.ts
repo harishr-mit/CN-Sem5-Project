@@ -163,6 +163,22 @@ describe('Comparison presets (one setting each)', () => {
     expect(byId['staterate'].movers).toEqual(['zigzag', 'reversal']);
   });
 
+  it('Snapshot vs Lockstep (docs/PHASE6_PLAN.md D8, test 8): 3 panes, each neighbour one setting apart, 50 ms + 5 %', () => {
+    const p = byId['lockstep'];
+    expect(p.panes.map((x) => x.sync)).toEqual([{ model: 'full' }, { model: 'lockstep' }, { model: 'lockstep' }]);
+    // A → B: only the sync model; B → C: only Rd (lockstep's recovery mode)
+    expect(changedKeys({ ...p, panes: [p.panes[0], p.panes[1]] })).toEqual([]);
+    expect(changedKeys({ ...p, panes: [p.panes[1], p.panes[2]] })).toEqual(['redundancy']);
+    expect(p.panes[2].toggles.redundancy).toBe(true);
+    expect(p.network?.config).toEqual({ latencyMs: 50, lossPct: 5 });
+    expect(p.movers).toHaveLength(4);
+    expect(p.reference).toBe(false);
+    // Lockstep is offered only in Compare's sync cycle (Quick Match can't replay a match)
+    for (const other of COMPARE_PRESETS.filter((x) => x.id !== 'lockstep')) {
+      for (const pane of other.panes) expect(pane.sync.model).not.toBe('lockstep');
+    }
+  });
+
   it('Custom keeps the previous panes and adds default ones', () => {
     const from = COMPARE_PRESETS[1];
     const custom = customPreset(3, from);

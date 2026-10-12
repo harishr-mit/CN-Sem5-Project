@@ -28,6 +28,8 @@ interface Harness {
   bytesDown: number[];
   /** Direct (unimpaired) spectator connection, when requested. */
   spectator: NetClient | null;
+  /** Each client's emulator links [up, down] (tests change their config mid-run). */
+  links: [LinkState, LinkState][];
   corrections: number[];
   /** Advance one 60 Hz frame: clients step/send/render, server ticks, timers run. */
   frame(): void;
@@ -46,6 +48,7 @@ function makeHarness(
   const clients: NetClient[] = [];
   const corrections: number[] = [];
   const bytesDown: number[] = [];
+  const links: [LinkState, LinkState][] = [];
 
   let spectator: NetClient | null = null;
   if (opts.spectator) {
@@ -63,6 +66,7 @@ function makeHarness(
     const pipeline = new Pipeline(seed + i, fakeClock);
     const up = new LinkState({ ...DEFAULT_LINK_CONFIG, ...link });
     const down = new LinkState({ ...DEFAULT_LINK_CONFIG, ...link });
+    links.push([up, down]);
 
     // In-process transport routed through the emulator pipeline both ways
     bytesDown.push(0);
@@ -90,7 +94,7 @@ function makeHarness(
   }
 
   const h: Harness = {
-    server, clients, corrections, spectator, bytesDown,
+    server, clients, corrections, spectator, bytesDown, links,
     frame() {
       for (const c of clients) c.simStep();
       if (frameNo % 2 === 0) for (const c of clients) c.sendInputs(); // 30 Hz
@@ -588,4 +592,182 @@ describe('Netcode harness: Presenter restart / map switch (owner, 2026-10-11)', 
       expect(big).toEqual([]);
     });
   }
+});
+
+describe('Netcode harness: lockstep (PHASES.md L1, L2; docs/PHASE6_PLAN.md tests 5–7)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    frameNo = 0;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubEnv('NOBU_DEV', '1');
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  const LS: SyncSpec = { model: 'lockstep' };
+  const LS_RD: SyncSpec = { model: 'lockstep', rd: true };
+
+  /** Every position (players and movers) of a snapshot, by id. */
+  const positions = (s: MsgSnap) => new Map(s.players.map((p) => [p.id, [p.x, p.y]]));
+
+  /**
+   * Lab with all movers, a direct spectator (the truth) and one client per
+   * spec. Returns how many of each client's shown ticks matched the truth.
+   */
+  function lockstepHarness(link: Partial<LinkConfig>, syncs: SyncSpec[]) {
+    const h = makeHarness(link, syncs.length, 11, { spectator: true, syncs });
+    const ref = h.spectator!;
+    for (const c of h.clients) c.setTruthClock(() => ref.serverNow());
+    ref.setMovers([...MOVER_PATTERNS]);
+    const truth = new Map<number, MsgSnap>();
+    ref.on('snap', (s) => truth.set(s.tick, s));
+    const compared = h.clients.map(() => 0);
+    const mismatches: string[] = [];
+    h.clients.forEach((c, i) => c.on('snap', (s) => {
+      const t = truth.get(s.tick);
+      if (!t) return;
+      compared[i]++;
+      const a = positions(s);
+      const b = positions(t);
+      if (a.size !== b.size || [...b].some(([id, xy]) => a.get(id)?.[0] !== xy[0] || a.get(id)?.[1] !== xy[1])) {
+        mismatches.push(`client ${i} tick ${s.tick}`);
+      }
+    }));
+    h.run(30);
+    return { h, compared, mismatches };
+  }
+
+  /** Let the 5 Hz metrics refresh while frames keep being drawn (a frozen render loop would read as "behind"). */
+  let settleMetrics = () => {};
+
+  it('L2: 50 ms + 5 % random loss, then 10 % burst loss with duplication and reordering — bit-identical, 0 desyncs', () => {
+    const { h, compared, mismatches } = lockstepHarness({ latencyMs: 50, lossPct: 5 }, [LS, LS_RD]);
+    settleMetrics = () => h.run(15, scriptedKeys);
+    const [nack, rd] = h.clients;
+    expect(nack.isLockstep && rd.isLockstep).toBe(true);
+    expect(nack.sync).toEqual(LS);
+    expect(rd.sync).toEqual(LS_RD);
+    h.run(900, scriptedKeys); // 15 s
+    settleMetrics();
+    const stalledNack = nack.metrics.lsStalledPct;
+    const stalledRd = rd.metrics.lsStalledPct;
+    for (const [up, down] of h.links) {
+      for (const l of [up, down]) l.config = { ...l.config, lossPct: 10, lossModel: 'burst', burstLen: 4, duplicatePct: 5, reorderPct: 5 };
+    }
+    h.run(900, (f) => scriptedKeys(f + 900));
+    settleMetrics();
+
+    expect(mismatches).toEqual([]);
+    // Only ticks shown on their own frame are compared (a catch-up frame shows its last tick only)
+    for (const n of compared) expect(n).toBeGreaterThan(300);
+    for (const c of h.clients) {
+      expect(c.metrics.lsDesyncs).toBe(0);
+      expect(c.metrics.lsHashChecks).toBeGreaterThan(40);
+      expect(c.connectionStatus).toBe('connected');
+    }
+    // Both stall at times; resend-on-request (one round trip per loss) far more than the redundant window
+    // Measured (seed 11): 21 % vs 1.8 % of frames frozen
+    expect(stalledNack).toBeGreaterThan(8);
+    expect(stalledRd).toBeLessThan(5);
+    expect(nack.metrics.lsNackedTicks).toBeGreaterThan(10);
+    expect(rd.metrics.lsNackedTicks).toBe(0);
+    expect(rd.metrics.lsDuplicateRecords).toBeGreaterThan(nack.metrics.lsDuplicateRecords);
+    // The own player is where the replay puts it (not predicted)
+    for (const c of h.clients) {
+      const me = c.lockstepWorld!.players.get(c.myPlayerId!)!;
+      expect(c.getLocalRenderPos(c.getInterpolatedState())).toEqual({ x: me.x, y: me.y });
+    }
+    expect(h.corrections).toEqual([]);
+  });
+
+  it('recovery: a 2 s outage ends in a resync, then identical again; RESTART and a map switch arrive as keyframes', () => {
+    const { h, compared, mismatches } = lockstepHarness({ latencyMs: 30 }, [LS, LS_RD]);
+    settleMetrics = () => h.run(15, scriptedKeys);
+    h.run(240, scriptedKeys);
+    for (const [up, down] of h.links) { up.config = { ...up.config, lossPct: 100 }; down.config = { ...down.config, lossPct: 100 }; }
+    h.run(120, scriptedKeys);
+    // Down for 2 s: frozen, and the server's window / ring moved on
+    settleMetrics();
+    for (const c of h.clients) expect(c.metrics.lsLongestStallMs).toBeGreaterThan(1000);
+    for (const [up, down] of h.links) { up.config = { ...up.config, lossPct: 0 }; down.config = { ...down.config, lossPct: 0 }; }
+    const before = compared.slice();
+    h.run(240, scriptedKeys);
+    h.clients[0].devRestart();
+    h.run(120, scriptedKeys);
+    h.clients[1].devRestart('warehouse');
+    h.run(240, scriptedKeys);
+    settleMetrics();
+
+    expect(mismatches).toEqual([]);
+    h.clients.forEach((c, i) => {
+      expect(compared[i] - before[i]).toBeGreaterThan(250);
+      expect(c.metrics.lsDesyncs).toBe(0);
+      expect(c.lockstepWorld!.map).toBe('warehouse');
+      expect(c.metrics.lsStalledPct).toBeLessThan(25); // the outage is leaving the 10 s window
+    });
+    // Rd on: 2 s behind is beyond its 1 s window → the server sent a keyframe
+    expect(h.clients[1].metrics.lsResyncs).toBeGreaterThanOrEqual(1);
+  });
+
+  it('clean link (30 ms): no stalls after start-up, ≈ buffer + one-way behind, own movement ≈ RTT + buffer after the key', () => {
+    const { h, mismatches } = lockstepHarness({ latencyMs: 30 }, [LS]);
+    const c = h.clients[0];
+    settleMetrics = () => h.run(15, scriptedKeys);
+    h.run(120);
+    c.resetLatencySamples();
+    h.run(600, scriptedKeys);
+    settleMetrics();
+    const m = c.metrics;
+    expect(mismatches).toEqual([]);
+    expect(m.lsStallsPerSec).toBe(0);
+    expect(m.lsLongestStallMs).toBe(0);
+    // Buffer (2 ticks ≈ 33 ms) + 30 ms one-way + up to a send interval
+    expect(m.lsBehindMs).toBeGreaterThan(30);
+    expect(m.lsBehindMs).toBeLessThan(110);
+    // No prediction: the key must reach the server and come back (RTT 60 ms) and pass the buffer
+    expect(m.inputToScreenMs).toBeGreaterThan(60);
+    expect(m.inputToScreenMs).toBeLessThan(200);
+    expect(m.correctionsPerSec).toBe(0);
+    // Inputs only (≈ 30 kbps, most of it per-message overhead): far below a full snapshot stream
+    expect(m.bwDownKbps).toBeLessThan(50);
+    expect(m.lsHashChecks).toBeGreaterThan(15);
+  });
+
+  it('Quick Match refuses lockstep (lab only) and the client keeps its model', () => {
+    const h = makeHarness({}, 1, 7, { room: 'main', noBots: true });
+    const c = h.clients[0];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    c.setSync(LS);
+    expect(c.sync).toEqual({ model: 'full' });
+    expect(c.isLockstep).toBe(false);
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('switching Full → Lockstep → Full keeps the player; the Rd chip switches the recovery live', () => {
+    const { h, mismatches } = lockstepHarness({ latencyMs: 30, lossPct: 5 }, [{ model: 'full' }]);
+    const c = h.clients[0];
+    const id = c.myPlayerId;
+    h.run(120, scriptedKeys);
+    c.setSync(LS);
+    h.run(240, scriptedKeys);
+    expect(c.isLockstep).toBe(true);
+    expect(c.lockstepWorld?.players.has(id!)).toBe(true);
+    const conn = () => [...(h.server as unknown as { connections: Set<{ playerId: number | null; lockstep: { rd: boolean } | null }> }).connections]
+      .find((x) => x.playerId === id)!;
+    expect(conn().lockstep!.rd).toBe(false);
+    c.setToggles({ redundancy: true });
+    h.run(60, scriptedKeys);
+    expect(c.sync).toEqual(LS_RD);
+    expect(conn().lockstep!.rd).toBe(true);
+    c.setSync({ model: 'full' });
+    h.run(240, scriptedKeys);
+    h.run(60);
+    expect(c.isLockstep).toBe(false);
+    expect(c.myPlayerId).toBe(id);
+    expect(h.server.rooms.get('lab')!.playerCount).toBe(1);
+    expect(mismatches).toEqual([]);
+  });
 });

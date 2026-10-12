@@ -28,6 +28,7 @@ const FULL: SyncSpec = { model: 'full' };
 const DELTA: SyncSpec = { model: 'delta' };
 const STATE10: SyncSpec = { model: 'state', hz: 10 };
 const STATE30: SyncSpec = { model: 'state', hz: 30 };
+const LOCKSTEP: SyncSpec = { model: 'lockstep' };
 
 export const COMPARE_PRESETS: readonly ComparePreset[] = [
   {
@@ -112,6 +113,22 @@ export const COMPARE_PRESETS: readonly ComparePreset[] = [
     reference: true,
     network: { name: 'Transatlantic' },
     movers: ['zigzag', 'reversal'],
+  },
+  // ── Phase 6: lockstep (docs/PHASE6_PLAN.md D8) ─────────────────
+  {
+    id: 'lockstep',
+    title: 'Snapshot vs Lockstep',
+    label: 'Lockstep',
+    caption: '50 ms one-way, 5 % loss. A: full snapshots carry on. B: lockstep replays the relayed inputs exactly, so every lost tick freezes the whole world until it is sent again (≈ one round trip). C: lockstep + Rd repeats unacknowledged ticks and is smooth again, but your own player still moves only a round trip after the key (no prediction). Lockstep sends only inputs: a fraction of the bytes.',
+    panes: [
+      makePane('A', 'FULL SNAPSHOTS', {}, FULL),
+      // B → C differs only by Rd, which for lockstep picks the recovery (D4)
+      makePane('B', 'LOCKSTEP', { redundancy: false }, LOCKSTEP),
+      makePane('C', 'LOCKSTEP + RD', { redundancy: true }, LOCKSTEP),
+    ],
+    reference: false,
+    network: { name: 'Lockstep 50 ms + 5 %', config: { latencyMs: 50, lossPct: 5 } },
+    movers: [...MOVER_PATTERNS],
   },
 ];
 

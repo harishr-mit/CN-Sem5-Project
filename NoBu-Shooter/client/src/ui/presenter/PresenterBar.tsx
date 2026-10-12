@@ -75,7 +75,7 @@ export const PresenterBar: React.FC<PresenterBarProps> = ({ controller, version,
             <span className={swarmSessions ? 'presenter-swarm-ok' : 'presenter-swarm-missing'}>
               {swarmSessions
                 ? `${swarmSessions} network player session(s) on ${SWARM_ROUTE}`
-                : 'No network players connected — start them with: npm run demo -- --swarm 3 (or npm run swarm)'}
+                : 'No network players connected — start them now in a second terminal: npm run swarm -- --n 3'}
             </span>
           </div>
         )}

@@ -17,6 +17,12 @@ export const NET = {
   delta: { ringSize: 32, maxBaseAgeMs: 1000, clientRingSize: 64 },
   /** State sync + extrapolation (docs/PHASE3_PLAN.md D5, D6). */
   state: { defaultHz: 10, rates: [10, 30], extrapolateMaxMs: 250, extrapolateBackMs: 100, blendHalfLifeMs: 100 },
+  /**
+   * Lockstep (docs/PHASE6_PLAN.md D3–D6): playout buffer and catch-up (ticks),
+   * the server's record ring, the redundant window cap, the hash interval and
+   * the NACK retry (× RTT, at least nackRetryMinMs).
+   */
+  lockstep: { bufferTicks: 2, maxCatchUpTicks: 3, ringTicks: 256, windowMaxTicks: 60, hashEveryTicks: 30, nackRetryRtt: 1.5, nackRetryMinMs: 50 },
   clockSmoothing: 0.05,
   reconcile: { epsilonPx: 0.01, smoothHalfLifeMs: 80, snapThresholdPx: 64 },
   pingIntervalMs: 500,

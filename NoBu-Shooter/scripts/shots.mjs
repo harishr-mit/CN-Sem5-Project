@@ -84,6 +84,8 @@ const SCREENS = [
   { name: 'compare-sync', run: (p) => comparePreset(p, 'sync') },
   { name: 'compare-bandwidth', run: (p) => comparePreset(p, 'bandwidth') },
   { name: 'compare-staterate', run: (p) => comparePreset(p, 'staterate') },
+  // Phase 6: Snapshot vs Lockstep — let B's stalls and C's smoothness show in the dock (docs/PHASE6_PLAN.md D11)
+  { name: 'compare-lockstep', run: async (p) => { await comparePreset(p, 'lockstep'); await sleep(4000); } },
   {
     name: 'compare-custom-4-ref',
     run: async (p) => {
@@ -125,6 +127,17 @@ const SCREENS = [
   {
     name: 'presenter-compare-1',
     run: async (p) => { await p.click('#presenter-compare-btn'); await p.waitForSelector('#presenter-bar'); await sleep(4000); },
+  },
+  {
+    name: 'presenter-compare-7',
+    run: async (p) => {
+      await p.click('#presenter-compare-btn');
+      await p.waitForSelector('#presenter-bar');
+      await sleep(2000);
+      for (let i = 0; i < 6; i++) { await p.keyboard.press('n'); await sleep(250); }
+      await p.waitForSelector('#presenter-bar[data-step="C7"]');
+      await sleep(SETTLE_MS);
+    },
   },
   {
     // The emulator's own page with the demo's two routes and the network players

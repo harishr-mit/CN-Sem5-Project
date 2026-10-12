@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { encodeClient, decodeClient, encodeServer, decodeServer } from '../shared/src/protocol/codec.js';
+import { validateLs, type MsgLs } from '../shared/src/protocol/messages.js';
 
 describe('Wire Protocol Serialization & Validation (SPEC.md §8)', () => {
   it('encodes and decodes valid client hello message', () => {
@@ -121,7 +122,7 @@ describe('Wire Protocol Serialization & Validation (SPEC.md §8)', () => {
     const hello = { t: 'hello', v: 1, name: 'A', room: 'lab', nonce: 'n' };
     expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'delta' } }))).not.toBeNull();
     expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'state', hz: 30 } }))).not.toBeNull();
-    expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'lockstep' } }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'rollback' } }))).toBeNull(); // lockstep is valid since Phase 6
     expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'state', hz: 20 } }))).toBeNull();
     expect(decodeClient(JSON.stringify({ ...hello, sync: 'delta' }))).toBeNull();
 
@@ -138,5 +139,49 @@ describe('Wire Protocol Serialization & Validation (SPEC.md §8)', () => {
     const input = { t: 'input', inputs: [{ s: 1, k: 0, a: 0, f: 0 }] };
     expect(decodeClient(JSON.stringify({ ...input, sa: 12 }))).not.toBeNull();
     expect(decodeClient(JSON.stringify({ ...input, sa: 'x' }))).toBeNull();
+  });
+});
+
+describe('Lockstep messages (docs/PHASE6_PLAN.md test 3)', () => {
+  it('sync and hello accept lockstep with rd; bad rd is rejected', () => {
+    expect(decodeClient(JSON.stringify({ t: 'sync', model: 'lockstep' }))).toEqual({ t: 'sync', model: 'lockstep' });
+    expect(decodeClient(JSON.stringify({ t: 'sync', model: 'lockstep', rd: true }))).toEqual({ t: 'sync', model: 'lockstep', rd: true });
+    expect(decodeClient(JSON.stringify({ t: 'sync', model: 'lockstep', rd: 'yes' }))).toBeNull();
+    const hello = { t: 'hello', v: 1, name: 'A', room: 'lab', nonce: 'n' };
+    expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'lockstep', rd: true } }))).not.toBeNull();
+    expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'lockstep', rd: 1 } }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ ...hello, sync: { model: 'rollback' } }))).toBeNull();
+  });
+
+  it('lsNack: ticks, from <= to, a bounded span, key only true', () => {
+    expect(decodeClient(JSON.stringify({ t: 'lsNack', from: 10, to: 12 }))).toEqual({ t: 'lsNack', from: 10, to: 12 });
+    expect(decodeClient(JSON.stringify({ t: 'lsNack', from: 0, to: 0, key: true }))).toEqual({ t: 'lsNack', from: 0, to: 0, key: true });
+    expect(decodeClient(JSON.stringify({ t: 'lsNack', from: 12, to: 10 }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'lsNack', from: -1, to: 3 }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'lsNack', from: 1.5, to: 3 }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'lsNack', from: 0, to: 100000 }))).toBeNull();
+    expect(decodeClient(JSON.stringify({ t: 'lsNack', from: 0, to: 0, key: false }))).toBeNull();
+  });
+
+  it('validateLs accepts good tick records and rejects malformed ones', () => {
+    const key = { map: 'neon', players: [{ id: 3, name: 'A', x: 1.5, y: 2, life: 1 }], movers: [{ id: 9, pattern: 'circle' }] };
+    const good = { t: 'ls', tick: 20, ack: 7, recs: [{ k: 19, key }, { k: 20, in: { 3: [8, 1] }, h: 4294967295 }] };
+    expect(validateLs(JSON.parse(encodeServer(good as MsgLs)))).toEqual(good);
+    const bad: unknown[] = [
+      { ...good, tick: -1 },
+      { ...good, ack: 'x' },
+      { ...good, recs: [{ k: 1.5 }] },
+      { ...good, recs: [{ k: 1, in: { 3: [16] } }] },
+      { ...good, recs: [{ k: 1, in: { x: [1] } }] },
+      { ...good, recs: [{ k: 1, in: [[1]] }] },
+      { ...good, recs: [{ k: 1, in: { 3: [1, 1, 1, 1, 1, 1, 1, 1, 1] } }] },
+      { ...good, recs: [{ k: 1, h: -2 }] },
+      { ...good, recs: [{ k: 1, key: { ...key, map: 'moon' } }] },
+      { ...good, recs: [{ k: 1, key: { ...key, players: [{ id: 3, name: 'A', x: null, y: 2, life: 1 }] } }] },
+      { ...good, recs: [{ k: 1, key: { ...key, movers: [{ id: 9, pattern: 'spiral' }] } }] },
+      { ...good, recs: 'none' },
+      { ...good, t: 'snap' },
+    ];
+    for (const b of bad) expect(validateLs(b), JSON.stringify(b)).toBeNull();
   });
 });

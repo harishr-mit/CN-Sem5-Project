@@ -7,7 +7,10 @@
 
 import { decodeClient, encodeServer } from '@nobu/shared/protocol';
 import type { MsgInput, MsgSnap, ServerMsg } from '@nobu/shared/protocol';
-import { createEncoder, DEFAULT_SYNC, normalizeSync, sameSync, type SyncEncoder, type SyncSpec, type VelocityTable } from '@nobu/shared/sync';
+import {
+  createEncoder, DEFAULT_SYNC, normalizeSync, sameSync, sameSyncModel, LockstepEncoder,
+  type SyncEncoder, type SyncSpec, type VelocityTable,
+} from '@nobu/shared/sync';
 import NET from '@nobu/shared/config/net.js';
 import GAME from '@nobu/shared/config/game.js';
 import { Room } from './game/room.js';
@@ -22,6 +25,8 @@ export interface Connection {
   /** Sync model of this connection and its encoder (spectators: always full). PHASES.md Phase 3. */
   sync: SyncSpec;
   encoder: SyncEncoder;
+  /** Lockstep connections (lab only): what to send instead of snapshots (docs/PHASE6_PLAN.md D9). */
+  lockstep: LockstepEncoder | null;
   room: Room | null;
   nonce: string | null;
   lastMsg: number;
@@ -49,7 +54,11 @@ export class GameServer {
         name,
         (playerId, snap, vel) => {
           for (const conn of this.connections) {
-            if (conn.room === room && conn.playerId === playerId) { this.sendSnapshot(conn, snap, vel); break; }
+            if (conn.room === room && conn.playerId === playerId) {
+              if (conn.lockstep) this.sendLockstep(conn, room!, snap.ack);
+              else this.sendSnapshot(conn, snap, vel);
+              break;
+            }
           }
         },
         (snap) => {
@@ -67,7 +76,7 @@ export class GameServer {
     const conn: Connection = {
       id: nextConnId++, send, close,
       playerId: null, spectator: false, room: null, nonce: null,
-      sync: DEFAULT_SYNC, encoder: createEncoder(DEFAULT_SYNC),
+      sync: DEFAULT_SYNC, encoder: createEncoder(DEFAULT_SYNC), lockstep: null,
       lastMsg: t, msgCount: 0, msgCountWindow: t,
     };
     this.connections.add(conn);
@@ -149,7 +158,7 @@ export class GameServer {
           reply({ t: 'error', code: 'ROOM_FULL', msg: 'Room is full' });
           return;
         }
-        if (msg.sync) this.setSync(conn, msg.sync);
+        if (msg.sync) this.setSync(conn, msg.sync, room);
         conn.playerId = room.addPlayer(msg.name);
         conn.room = room;
         conn.nonce = msg.nonce;
@@ -160,16 +169,21 @@ export class GameServer {
 
       case 'input':
         if (conn.playerId === null || !conn.room) return;
-        if (msg.sa !== undefined) conn.encoder.onAck(msg.sa);
+        if (msg.sa !== undefined) { conn.encoder.onAck(msg.sa); conn.lockstep?.onAck(msg.sa); }
         conn.room.receiveInput(conn.playerId, (msg as MsgInput).inputs);
         break;
 
       case 'snapAck':
         conn.encoder.onAck(msg.tick);
+        conn.lockstep?.onAck(msg.tick);
+        break;
+
+      case 'lsNack':
+        conn.lockstep?.onNack(msg.from, msg.to, msg.key === true);
         break;
 
       case 'sync':
-        if (!conn.spectator) this.setSync(conn, msg);
+        if (!conn.spectator && conn.room) this.setSync(conn, msg, conn.room);
         break;
 
       case 'ping': {
@@ -205,12 +219,38 @@ export class GameServer {
     }
   }
 
-  /** Switch a connection's sync model; the same spec keeps the encoder (and its delta base). */
-  private setSync(conn: Connection, spec: SyncSpec): void {
-    const next = normalizeSync({ model: spec.model, ...(spec.hz ? { hz: spec.hz } : {}) });
+  /**
+   * Switch a connection's sync model; the same spec keeps the encoder (and its
+   * delta base). Lockstep only in a room that keeps a lockstep log (the lab),
+   * else `LOCKSTEP_LAB_ONLY` and the model stays. A lockstep connection that
+   * only changes `rd` keeps its encoder (docs/PHASE6_PLAN.md D1, D4).
+   */
+  private setSync(conn: Connection, spec: SyncSpec, room: Room): void {
+    const next = normalizeSync({ model: spec.model, ...(spec.hz ? { hz: spec.hz } : {}), ...(spec.rd ? { rd: true } : {}) });
     if (sameSync(next, conn.sync)) return;
+    if (next.model === 'lockstep') {
+      if (!room.lockstepLog) {
+        conn.send(encodeServer({ t: 'error', code: 'LOCKSTEP_LAB_ONLY', msg: 'Lockstep is available in the lab room only' }));
+        return;
+      }
+      if (conn.lockstep && sameSyncModel(next, conn.sync)) conn.lockstep.rd = next.rd === true;
+      else conn.lockstep = new LockstepEncoder(next.rd === true);
+    } else {
+      conn.lockstep = null;
+    }
     conn.sync = next;
     conn.encoder = createEncoder(next);
+  }
+
+  /** One lockstep message: the tick records this connection still needs (docs/PHASE6_PLAN.md D3). */
+  private sendLockstep(conn: Connection, room: Room, seqAck: number): void {
+    const log = room.lockstepLog;
+    if (!log || !conn.lockstep) return;
+    const out = conn.lockstep.encode(log, () => room.labKeyframe(), seqAck);
+    if (!out) return;
+    const text = encodeServer(out);
+    conn.send(text);
+    room.metrics.recordSync('lockstep', text.length);
   }
 
   /** One player's snapshot through its connection's sync encoder (docs/PHASE3_PLAN.md D2). */

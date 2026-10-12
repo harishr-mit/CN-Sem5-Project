@@ -201,3 +201,26 @@ describe('Spectators (GameServer, hello.spectate)', () => {
     expect(server.rooms.get('main')!.activeMovers).toEqual([]);
   });
 });
+
+describe('Deterministic trig for the movers (docs/PHASE6_PLAN.md §8 X1)', () => {
+  it('dsin / dcos match Math.sin / Math.cos to ~1e-15 over the angles the circle mover uses (and beyond)', async () => {
+    const { dsin, dcos } = await import('../shared/src/sim/dtrig.js');
+    let worst = 0;
+    for (let k = 0; k < 400000; k += 7) {
+      const a = (160 * (k / 60)) / 120;
+      worst = Math.max(worst, Math.abs(dsin(a) - Math.sin(a)), Math.abs(dcos(a) - Math.cos(a)));
+    }
+    for (const a of [0, Math.PI / 4, Math.PI / 2, Math.PI, -1, -100.5, 1e5]) {
+      worst = Math.max(worst, Math.abs(dsin(a) - Math.sin(a)), Math.abs(dcos(a) - Math.cos(a)));
+    }
+    expect(worst).toBeLessThan(1e-12);
+    expect(dsin(0)).toBe(0);
+    expect(dcos(0)).toBe(1);
+  });
+
+  it('the mover paths use no Math trig or hypot (bit-identical in every engine)', async () => {
+    const fs = await import('fs');
+    const src = fs.readFileSync(new URL('../shared/src/sim/movers.ts', import.meta.url), 'utf8').replace(/\/\*\*?[\s\S]*?\*\/|\/\/.*$/gm, '');
+    expect(src).not.toMatch(/Math\.(sin|cos|tan|atan2?|hypot|exp|log|pow)\b/);
+  });
+});

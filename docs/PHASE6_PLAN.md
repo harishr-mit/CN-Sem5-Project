@@ -1,7 +1,7 @@
 # Phase 6 Implementation Plan — Lockstep + final verification
 
 **Audience:** the project owner and the agent who implements Phase 6.
-**Status:** **drafted 2026-10-12** (`log.md` T98), waiting for owner approval. Owner answers already folded in:
+**Status:** drafted 2026-10-12 (`log.md` T98), approved by the owner the same day, **implemented 2026-10-12** (T99–T106; deviations in §8, exit checklist in §5). Owner answers folded in:
 - the pane's **Rd chip picks how lost bundles are recovered**: off = resend on request (NACK), on = a redundant window (D4);
 - the Compare preset is **Full / Lockstep / Lockstep + Rd** (D8);
 - **no prediction** of your own player in a lockstep pane (D5);
@@ -128,13 +128,13 @@ Checked on 2026-10-12, branch `phase6` at `d1ef4cd` (Phase 5 merged, clean tree)
 
 ## 5. Exit checklist
 
-- [ ] `npm test`, `npm run typecheck`, `npm run smoke` (8 steps), `npm run shots` pass.
-- [ ] **L3 demo:** the Snapshot vs Lockstep preset shows A carrying on, B freezing in bursts, C smooth with more input delay. The numbers are measured and written into `DEMO_SCRIPT.md`.
-- [ ] 0 desyncs in every test, the smoke test and the browser check.
-- [ ] Final docs (D10). `DEMO_SCRIPT.md` is the final talk track with timings.
-- [ ] Rehearsal (D12): the fresh-clone cold start passes here; timing sheet + presentation-laptop checklist in `docs/REHEARSAL.md`; nothing under 55 fps or stuttering left unexplained.
-- [ ] `PHASES.md` Definition of Done ticked as far as this machine can prove. The presentation-laptop rehearsal is the owner's last box.
-- [ ] No processes left; TCP 5173/8080/9000/9001 and UDP 8081/9100 free; the fresh-clone copy deleted; no new dependency. Suggested tag: `phase-6`.
+- [x] `npm test` (222), `npm run typecheck`, `npm run smoke` (8 steps), `npm run shots` (25 screens × 2) pass.
+- [x] **L3 demo:** the Snapshot vs Lockstep preset shows A carrying on, B freezing in bursts (stalled ≈ 15–30 %, freezes up to ≈ 300–650 ms), C smooth (≈ 3–5 %) with Input → Screen ≈ 200–215 ms. Numbers in `DEMO_SCRIPT.md` §14.
+- [x] 0 desyncs in every test, the smoke test and the browser checks (after X1).
+- [x] Final docs (D10). `DEMO_SCRIPT.md` opens with the final talk track and its timings.
+- [x] Rehearsal (D12): the fresh-copy cold start passed; timing sheet + presentation-laptop checklist in `docs/REHEARSAL.md`; every step at ≈ 60 fps, the two single long frames explained (a Compare pane created / removed at a step change).
+- [x] `PHASES.md` Definition of Done ticked as far as this machine can prove. The presentation-laptop rehearsal (`docs/REHEARSAL.md` §3–§4) is the owner's last box.
+- [x] No processes left; TCP 5173/8080/9000/9001 and UDP 8081/9100 free; the fresh copy deleted; no new dependency. Suggested tag: `phase-6`.
 
 ## 6. Risks
 
@@ -155,4 +155,13 @@ Checked on 2026-10-12, branch `phase6` at `d1ef4cd` (Phase 5 merged, clean tree)
 
 ## 8. Deviations from this plan
 
-*(Filled in during implementation.)*
+| # | Deviation | Why |
+|---|---|---|
+| X1 | **Deterministic sine / cosine for the movers** (`shared/src/sim/dtrig.ts`), and `Math.sqrt` instead of `Math.hypot` in their paths. Not in the plan. | The first browser check showed 1 desync per lockstep pane: Chrome and Node 26 differ in the last bit of `Math.cos` / `Math.sin` for ≈ 3.4 % of the circle drone's angles (risk 1 in §6, which assumed "no trig on the path" — true for players, not for movers). The hash check did exactly its job. After the fix: 0 of 400 000 values differ between the engines, 0 desyncs. |
+| X2 | **The hash rides on the record** (`h` on every 30th tick's record), not on the message (`ls.h: [tick, hash]`). The message field `t` is called `tick` (`t` is the message type). | A hash on the record is recovered with it (NACK or window); one on the message would be lost with it. |
+| X3 | **The base keyframe repeats until acknowledged in both modes**, and a key request resets the server's ack (stale acks from before it don't count). | Simpler and safer than NACKing a lost start: a lost base costs one send interval. |
+| X4 | **Lockstep bytes ≈ 35–40 kbps (Rd off) and ≈ 90–120 kbps (Rd on)**, not the planned 5–10 kbps. | JSON records + 28 B per message at 30 Hz; still ≈ 1/10 of full snapshots. A binary encoding was not needed for the demo (`docs/ASSUMPTIONS.md` #105). |
+| X5 | **Stalls at 5 % loss are larger than planned** (≈ 15–30 % of frames, freezes up to ≈ 400 ms, vs the planned 5–15 % and 100–200 ms). The 75 ms fallback (risk 4) was not needed. | One loss costs a full NACK round trip (send interval + RTT + resend interval); bursts of two losses chain. Clearly visible, which is the point. |
+| X6 | **Rehearsal: `npm run shots` ran in the working tree, not in the fresh copy.** The fresh copy ran install, tests, typecheck, smoke and the timed Presenter run-through in Chrome (which starts the demo from that copy). | The run-through already exercised the cold demo in a browser; shots (≈ 12 min for both viewports) then ran once, in the tree being committed. |
+| X7 | **Talk order: network players start at Q13** (`npm run swarm -- --n 3` in a second terminal), no longer with the demo. | Found by the rehearsal: started with the demo they grow the match (full ≈ 816 vs ≈ 475 kbps), and under Nightmare Delta then stays at the cap (Q11 ack ≈ 720 instead of ≈ 330 ms). The Q13 hint, README and DEMO_SCRIPT say so (`docs/REHEARSAL.md` §1.2). |
+| X8 | **Compare pane toggles go through `NetClient.setToggles`** (they were assigned directly). | Needed so the Rd chip also switches a lockstep pane's recovery on the server; found while wiring D4. |

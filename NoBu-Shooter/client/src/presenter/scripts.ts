@@ -107,6 +107,7 @@ const COMPARE_EXPECT: Record<string, string> = {
   sync: 'After ≈ 15 s: ack ≈ 740 / 310 / 360 ms · ↓ ≈ 400 / 60 / 160 kbps · off-path ≈ 0 / 0 / 33 %',
   bandwidth: 'Ack ≈ 560 vs 140 ms · lag ≈ 570 vs 150 ms · ↓ ≈ 300 vs 65 kbps',
   staterate: 'Off-path ≈ 30 % vs 10 % · ↓ ≈ 105 vs 320 kbps',
+  lockstep: 'Stalled – / ≈ 15–30 % / ≈ 3–5 % · In→Screen ≈ 18 / 220–350 / 210 ms · ↓ ≈ 400 / 40 / 110 kbps · desync 0',
 };
 
 export const COMPARE_SCRIPT: PresenterScript = {

@@ -1,7 +1,7 @@
 # NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
-**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). Phase 4 (Presenter mode + polish) done 2026-10-11 (plan, decisions D1–D11 and deviations in `docs/PHASE4_PLAN.md`). Phase 5 (realistic transport + standalone emulator) done 2026-10-12 (plan, decisions D1–D15 and deviations in `docs/PHASE5_PLAN.md`). **Next: Phase 6** (lockstep + final verification) — plan drafted 2026-10-12 in `docs/PHASE6_PLAN.md`, waiting for approval.
+**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). Phase 4 (Presenter mode + polish) done 2026-10-11 (plan, decisions D1–D11 and deviations in `docs/PHASE4_PLAN.md`). Phase 5 (realistic transport + standalone emulator) done 2026-10-12 (plan, decisions D1–D15 and deviations in `docs/PHASE5_PLAN.md`). Phase 6 (lockstep + final verification) done 2026-10-12 (plan, decisions D1–D12 and deviations X1–X8 in `docs/PHASE6_PLAN.md`). **All six phases are complete.** What remains is the owner's rehearsal on the presentation laptop (`docs/REHEARSAL.md`); Phase 7 is a candidate.
 **Replaces:** `ROADMAP.md` (draft of 2026-10-09). The v1 build spec is archived at `docs/archive/SPEC-v1.md`. `GAMERULES.md` remains the source of truth for gameplay.
 
 The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10-10 (and a candidate Phase 7, multiplayer readiness, added on 2026-10-12 and not scheduled). Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
@@ -28,7 +28,7 @@ The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10
 | 3 | **Sync models: snapshot vs state** | Full snapshots vs delta snapshots vs state sync with extrapolation, side by side, with a live bandwidth chart | G1 | **done 2026-10-10** |
 | 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena and UI | G4 | **done 2026-10-11** |
 | 5 | **Realistic transport + standalone emulator** | Real UDP between Node "network players", emulator and server. The emulator dashboard works with no game running | G3 | **done 2026-10-12** |
-| 6 | **Lockstep + final verification** | Deterministic lockstep freezing under 2–5 % loss beside snapshot sync. Full rehearsal and docs | G1, all | **next** |
+| 6 | **Lockstep + final verification** | Deterministic lockstep freezing under 2–5 % loss beside snapshot sync. Full rehearsal and docs | G1, all | **done 2026-10-12** |
 | 7 | **Multiplayer readiness** (candidate, owner 2026-10-12) | Players on other machines join a match; operator tools stay with the operator | — | candidate, not scheduled |
 
 Each phase builds on the previous one. Phases 4 and 5 are independent of each other and can be swapped if the presentation date requires it.
@@ -275,11 +275,11 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 
 ---
 
-## Phase 6 — Lockstep + final verification
+## Phase 6 — Lockstep + final verification ✅ (2026-10-12)
 
 **Goal:** complete the set of sync models and make the whole demo rehearsal-proof.
 
-**Implementation plan:** `docs/PHASE6_PLAN.md` (decisions D1–D12, drafted 2026-10-12, waiting for approval). Owner answers of 2026-10-12:
+**Implementation plan:** `docs/PHASE6_PLAN.md` (decisions D1–D12, approved and implemented 2026-10-12; deviations X1–X8). Owner answers of 2026-10-12:
 - the pane's **Rd chip** chooses how a lost tick is recovered: off = resend on request (a freeze of about one round trip), on = a redundant window;
 - the preset has **three panes**: Full / Lockstep / Lockstep + Rd;
 - your own player is **not predicted** in a lockstep pane;
@@ -294,6 +294,35 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 | L5 | Full rehearsal: the presentation laptop is another machine (owner). The agent does a dress rehearsal on the dev laptop: a cold start from a fresh copy (`npm install`, test, typecheck, smoke, shots), a timed headless run-through of both Presenter scripts, and a fix for anything that stutters. It writes `docs/REHEARSAL.md` (timing sheet + checklist) for the owner to repeat on the presentation laptop. |
 
 **Demo checkpoint (final):** the complete Presenter run. It covers prediction and reconciliation, the four sync models side by side, the impairments shown live in the packet strip and dashboard, and the emulator used on its own.
+
+### Result (2026-10-12)
+
+- **L1 Lockstep** in the lab room:
+  - Records of consumed keys per tick, with keyframes inside the stream, a 256-tick ring and a hash every 30 ticks (`shared/src/sync/lockstep.ts`, `server/src/game/room.ts`, `server/src/core.ts`).
+  - On the client, `LockstepClient` handles playout 2 ticks behind, stalls, catch-up of up to 3 ticks per frame, NACK and the hash check (`client/src/net/lockstep.ts`). `NetClient` routes `ls` to it.
+  - The Rd chip picks the recovery.
+  - `LOCKSTEP_LAB_ONLY` elsewhere.
+- **L2 Tests:**
+  - `applyRecord` reproduces `Room.tick()` bit for bit over 2 000 ticks with backlogs, nudges, joins, leaves, movers, a map switch and a restart.
+  - The encoder (both modes, window cap, ring, key requests) and the server keyframe triggers are covered.
+  - Two lockstep clients through the emulator pipeline stay identical to the server at 50 ms + 5 % random loss, then 10 % burst loss with duplication and reordering: 0 desyncs (Rd off stalled 21 %, Rd on 1.8 %).
+  - Also covered: a 2 s outage → resync; a clean link → no stalls; Input → Screen ≈ RTT + buffer.
+  - Smoke step 8 runs the same check over real sockets.
+  - 222 tests.
+- **L3** The Compare preset **Snapshot vs Lockstep** is also Presenter step C7.
+  - Measured in the browser: stalled – / ≈ 15–30 % / ≈ 3–5 %, freezes up to ≈ 300–650 ms vs 40–70 ms, Input → Screen 18 / ≈ 220–350 / ≈ 205 ms, ↓ ≈ 430 / 40 / 110 kbps, 0 desyncs.
+  - On lockstep panes P / C / I / G are greyed out; the bar and the dock show STALLED, LONGEST, BEHIND, NACKED and DESYNC.
+- **Found by the hash check (X1):** Chrome and Node disagree on the last bit of `Math.cos` / `Math.sin` for ≈ 3 % of angles. The movers now use a deterministic sine / cosine built from + − × ÷ only.
+- **L4** Final docs:
+  - `DEMO_SCRIPT.md` opens with the final talk track and its timings; §14 covers Lockstep.
+  - `PROTOCOL.md` has `ls`, `lsNack` and the lockstep sync spec.
+  - Also updated: `README.md`, `ASSUMPTIONS.md` #97–#109, `GAMERULES.md` §14 and `VISUAL_CHECKLIST.md` (25 screens).
+- **L5** Dress rehearsal on the development laptop:
+  - From a fresh copy: install 15 s, tests, typecheck, smoke 47 s.
+  - A timed run-through of all 20 Presenter steps: ≈ 60 fps, 0 console errors.
+  - It found that network players started with the demo spoil the Nightmare steps, so they now start at Q13 (X7).
+  - `docs/REHEARSAL.md` holds the timing sheet and the presentation-laptop checklist.
+- Details: `log.md` T99–T106.
 
 ---
 
@@ -316,11 +345,12 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 
 ### Definition of Done (all phases)
 
-- [ ] G1: four sync models are selectable and comparable side by side with measured bandwidth, latency and error. *(Three done in Phase 3 — full, delta, state; lockstep is Phase 6.)*
-- [ ] G2: 0 corrections on a clean network; corrections under loss that converge; redundancy removes them (covered by tests and visible in the UI).
+- [x] G1: four sync models are selectable and comparable side by side with measured bandwidth, latency and error. *(Full, delta, state in Phase 3; lockstep in Phase 6 — Compare only, the lab room.)*
+- [x] G2: 0 corrections on a clean network; corrections under loss that converge; redundancy removes them (covered by tests and visible in the UI). *(Phase 1; re-measured in the Phase 6 rehearsal: Q1 0/s, Q4 ≈ 7 px corrections, Q5 0/s.)*
 - [x] G3: the emulator runs standalone (WS + UDP) with its own dashboard and README, and the game is just one client of it. *(Phase 5: `npm run emulator`, runtime routes, no game dependency.)*
-- [ ] G4: Presenter mode runs the whole talk; screenshots pass the visual checklist; textures and sounds drop in through the manifest (Phase 2.5). *(Done for the talk as of Phase 4; Phase 5 added step Q13; Phase 6 adds lockstep.)*
-- [ ] `npm run demo`, `npm test`, `npm run typecheck`, `npm run smoke` and `npm run shots` pass from a fresh clone.
+- [x] G4: Presenter mode runs the whole talk; screenshots pass the visual checklist; textures and sounds drop in through the manifest (Phase 2.5). *(Q1–Q13 and C1–C7; timed run-through at ≈ 60 fps, `docs/REHEARSAL.md`.)*
+- [x] `npm run demo`, `npm test`, `npm run typecheck`, `npm run smoke` and `npm run shots` pass from a fresh clone. *(Fresh copy on the development laptop, 2026-10-12: install, test, typecheck, smoke and the demo in Chrome; shots in the working tree — `docs/PHASE6_PLAN.md` X6.)*
+- [ ] The owner's rehearsal on the presentation laptop (`docs/REHEARSAL.md` §3–§4).
 
 ---
 

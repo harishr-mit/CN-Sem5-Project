@@ -41,9 +41,11 @@ class FakeStage implements PresenterStage {
 }
 
 describe('Presenter scripts (plan test 1)', () => {
-  it('Quick Match has 13 steps and Compare 6, with unique ids', () => {
+  it('Quick Match has 13 steps and Compare 7, with unique ids', () => {
     expect(QUICK_SCRIPT.steps.map((s) => s.id)).toEqual(['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9', 'Q10', 'Q11', 'Q12', 'Q13']);
-    expect(COMPARE_SCRIPT.steps.map((s) => s.id)).toEqual(['C1', 'C2', 'C3', 'C4', 'C5', 'C6']);
+    expect(COMPARE_SCRIPT.steps.map((s) => s.id)).toEqual(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']);
+    // C7 = Snapshot vs Lockstep (docs/PHASE6_PLAN.md D8)
+    expect(COMPARE_SCRIPT.steps[6].compare?.preset).toBe('lockstep');
     for (const script of Object.values(PRESENTER_SCRIPTS)) {
       const ids = script.steps.map((s) => s.id);
       expect(new Set(ids).size).toBe(ids.length);

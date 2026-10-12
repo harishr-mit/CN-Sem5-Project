@@ -433,3 +433,18 @@ describe('GameServer sync models', () => {
     expect(server.getRoom('lab').playerCount).toBe(1);
   });
 });
+
+describe('Lockstep in the sync cycles (docs/PHASE6_PLAN.md D1)', () => {
+  it('Compare cycles through Lockstep, Quick Match does not; rd is a recovery mode, not a cycle step', async () => {
+    const { COMPARE_SYNC_CYCLE, sameSync } = await import('../shared/src/sync/types.js');
+    expect(COMPARE_SYNC_CYCLE.map(syncLabel)).toEqual(['FULL', 'DELTA', 'STATE 10', 'STATE 30', 'LOCKSTEP']);
+    expect(SYNC_CYCLE.some((s) => s.model === 'lockstep')).toBe(false);
+    expect(nextSync({ model: 'state', hz: 30 }, COMPARE_SYNC_CYCLE)).toEqual({ model: 'lockstep' });
+    expect(nextSync({ model: 'lockstep', rd: true }, COMPARE_SYNC_CYCLE)).toEqual({ model: 'full' });
+    expect(syncLabel({ model: 'lockstep', rd: true })).toBe('LOCKSTEP+RD');
+    expect(normalizeSync({ model: 'lockstep', rd: false, hz: 10 })).toEqual({ model: 'lockstep' });
+    expect(normalizeSync({ model: 'full', rd: true })).toEqual({ model: 'full' });
+    expect(sameSync({ model: 'lockstep' }, { model: 'lockstep', rd: true })).toBe(false);
+    expect(createEncoder({ model: "lockstep" }).encode(new World(mulberry32(1)).snapshot(), new Map())).toBeNull();
+  });
+});

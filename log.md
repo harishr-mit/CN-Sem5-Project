@@ -21,7 +21,14 @@ Shared context for every agent working in this directory. Read this file **befor
 
 ## Current Status
 
-* **Last updated:** 2026-10-12 (Claude Opus 5.5) — **Phases 1, 2, 2.5, 3 and 4 of `PHASES.md` complete.** Phase 4 (T33 = T69–T75, done 2026-10-11): **Presenter mode** — landing buttons PRESENTER — QUICK MATCH (12 steps, Invincible on) and PRESENTER — COMPARE (the 6 Compare presets), keys `N` / `B` / `H` + END, caption bar with expected numbers and a step timer; arena polish (remote aim chevrons, death ✕, respawn pulse for all, camera bloom at quality high with fps auto-off); Lab sections fold and are remembered, UI Scale 100/115/130 %; emulator `queueMs` + `reordered`, packet strip with queue bar, real-timeline overtakes and a legend; `npm run shots` (local Chrome via `playwright-core` 1.48.2 devDependency, output `NoBu-Shooter/artifacts/shots/`, git-ignored) + `docs/VISUAL_CHECKLIST.md`. 162 tests, typecheck, smoke (6 steps), shots (40/40, 0 console errors) and both presenter scripts pass. Keys: `R` reload, `Space` dash, `C` reconciliation, `M` mute, `Y` sync model, `N`/`B`/`H` presenter. Owner revision after Phase 4 (T76–T82, 2026-10-11): SYNC MODEL in two groups, developer Give power-up, Presenter ∞ match clock, ⟲ RESTART and map switching (both presenters), countdown teleport fix; then (T83–T85) one power-up per player refilled every 7 s, 2-minute matches, and the camera glow removed entirely (T86; it caused the arena haze); 163 tests. **Phase 5 done 2026-10-12 (T34 = T88–T94; plan `docs/PHASE5_PLAN.md`, D1–D15, deviations X1–X8):** server UDP adapter `:8081` beside WS `:8080` (same core; `--host` / `NOBU_HOST`, default all interfaces); app-level fragments ≤ 1200 B (`shared/src/net/fragment.ts`); emulator rebuilt around **routes** (`ws:9000`, `udp:9100`, or any ports, from `--route` or added at runtime), byte payloads, no game dependency, per-route per-direction defaults, 64 sessions/route, UDP idle 30 s; **dashboard** at `http://127.0.0.1:9001/` (self-contained page; control port 127.0.0.1 only + Origin allowlist); `npm run emulator` (dashboard only), `udp-echo` / `udp-send` tools, `emulator/README.md`; **network players** `npm run swarm` / `npm run demo -- --swarm N` (bot brain in `shared/src/sim/botBrain.ts`, names UDP-n); the game impairs only `ws:9000`; Presenter Quick Match **Q13** (13 steps). Owner extras: purple piercing rounds (T96), README quickstart + Command Reference (T97). **196 tests**, typecheck, smoke (7 steps incl. a UDP network player under Nightmare), `npm run shots` (23 screens × 2, 0 console errors). Ports: TCP 5173/8080/9000/9001, UDP 8081/9100. Candidate **Phase 7** (multiplayer readiness, not scheduled) in `PHASES.md`. **Next: Phase 6 (T35)** — plan drafted 2026-10-12 in `docs/PHASE6_PLAN.md` (T98, decisions D1–D12, build steps T99–T106), **waiting for owner approval**. Owner answers: Rd chip picks lockstep recovery (off = NACK resend → freezes ≈ one RTT per loss, on = redundant window); preset Full / Lockstep / Lockstep + Rd at 50 ms + 5 % loss (Presenter C7); no prediction of the own player in lockstep; the presentation laptop is another machine (dress rehearsal here + `docs/REHEARSAL.md` checklist). Baseline: typecheck clean, 196/196 tests, smoke PASSED. Branch `phase6` (Phase 5 merged as `d1ef4cd`); nothing committed by the agent.
+* **Last updated:** 2026-10-12 (Claude Opus 5.5) — **Phases 1, 2, 2.5, 3 and 4 of `PHASES.md` complete.** Phase 4 (T33 = T69–T75, done 2026-10-11): **Presenter mode** — landing buttons PRESENTER — QUICK MATCH (12 steps, Invincible on) and PRESENTER — COMPARE (the 6 Compare presets), keys `N` / `B` / `H` + END, caption bar with expected numbers and a step timer; arena polish (remote aim chevrons, death ✕, respawn pulse for all, camera bloom at quality high with fps auto-off); Lab sections fold and are remembered, UI Scale 100/115/130 %; emulator `queueMs` + `reordered`, packet strip with queue bar, real-timeline overtakes and a legend; `npm run shots` (local Chrome via `playwright-core` 1.48.2 devDependency, output `NoBu-Shooter/artifacts/shots/`, git-ignored) + `docs/VISUAL_CHECKLIST.md`. 162 tests, typecheck, smoke (6 steps), shots (40/40, 0 console errors) and both presenter scripts pass. Keys: `R` reload, `Space` dash, `C` reconciliation, `M` mute, `Y` sync model, `N`/`B`/`H` presenter. Owner revision after Phase 4 (T76–T82, 2026-10-11): SYNC MODEL in two groups, developer Give power-up, Presenter ∞ match clock, ⟲ RESTART and map switching (both presenters), countdown teleport fix; then (T83–T85) one power-up per player refilled every 7 s, 2-minute matches, and the camera glow removed entirely (T86; it caused the arena haze); 163 tests. **Phase 5 done 2026-10-12 (T34 = T88–T94; plan `docs/PHASE5_PLAN.md`, D1–D15, deviations X1–X8):** server UDP adapter `:8081` beside WS `:8080` (same core; `--host` / `NOBU_HOST`, default all interfaces); app-level fragments ≤ 1200 B (`shared/src/net/fragment.ts`); emulator rebuilt around **routes** (`ws:9000`, `udp:9100`, or any ports, from `--route` or added at runtime), byte payloads, no game dependency, per-route per-direction defaults, 64 sessions/route, UDP idle 30 s; **dashboard** at `http://127.0.0.1:9001/` (self-contained page; control port 127.0.0.1 only + Origin allowlist); `npm run emulator` (dashboard only), `udp-echo` / `udp-send` tools, `emulator/README.md`; **network players** `npm run swarm` / `npm run demo -- --swarm N` (bot brain in `shared/src/sim/botBrain.ts`, names UDP-n); the game impairs only `ws:9000`; Presenter Quick Match **Q13** (13 steps). Owner extras: purple piercing rounds (T96), README quickstart + Command Reference (T97). **196 tests**, typecheck, smoke (7 steps incl. a UDP network player under Nightmare), `npm run shots` (23 screens × 2, 0 console errors). Ports: TCP 5173/8080/9000/9001, UDP 8081/9100. Candidate **Phase 7** (multiplayer readiness, not scheduled) in `PHASES.md`. **Phase 6 done 2026-10-12 (T35 = T99–T106; plan `docs/PHASE6_PLAN.md`, D1–D12, deviations X1–X8): all six phases complete.**
+  - **Lockstep** (lab room / Compare only): the server relays the keys it consumed per tick (`ls` records, keyframes in the stream, 256-tick ring, hash every 30 ticks). `LockstepClient` plays out 2 ticks behind, stalls, catches up ≤ 3 ticks per frame, NACKs (Rd off) or uses a redundant window (Rd on). `LOCKSTEP_LAB_ONLY` elsewhere.
+  - Compare preset **Snapshot vs Lockstep** = Presenter **C7**; greyed P/C/I/G; STALLED / LONGEST / BEHIND / NACKED / DESYNC metrics.
+  - The hash check found Chrome vs Node `Math.cos` / `Math.sin` 1-bit differences → movers use a deterministic `dsin` / `dcos` (`shared/src/sim/dtrig.ts`).
+  - Dress rehearsal (fresh copy + timed run-through, ≈ 60 fps) → `docs/REHEARSAL.md`. Talk order changed: network players start at **Q13** (`npm run swarm -- --n 3`).
+  - **222 tests**, typecheck, smoke (**8 steps**, step 8 = lockstep over real sockets), `npm run shots` (**25 screens × 2**, 0 console errors).
+  - **Remaining:** the owner's rehearsal on the presentation laptop (`docs/REHEARSAL.md` §3–§4); Phase 7 is a candidate.
+  - Branch `phase6`; nothing committed by the agent.
 * **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot-vs-state sync models, and a standalone network emulator (latency, jitter, loss, bandwidth, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (`main` holds everything as of T49; earlier work branches: `game`, `game-phase2plus`).
 * **Plan:** `PHASES.md` — six phases, each with a demo checkpoint and exit criteria. `GAMERULES.md` = gameplay rules. v1 spec archived at `docs/archive/SPEC-v1.md`.
 * **Architecture:** Browser (Phaser + React) ⇄ Emulator (:9000 data, :9001 control) ⇄ Authoritative server (:8080). Server core is transport-agnostic (`server/src/core.ts`); `NetClient` is headless (injectable transport/clock).
@@ -66,7 +73,7 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T32: **Phase 3** — Sync models: full / delta / state+extrapolation, bandwidth chart (PHASES.md S0–S5) — done 2026-10-10 as T61–T67
 * [x] T33: **Phase 4** — Presenter mode, arena/lab/strip polish, texture manifest, `npm run shots` (PHASES.md P1–P7)
 * [x] T34: **Phase 5** — UDP adapters, emulator UDP mode, network-player swarm, emulator dashboard + README (PHASES.md U1–U7)
-* [ ] T35: **Phase 6** — Lockstep (S4), final docs, rehearsal (PHASES.md L1–L5)
+* [x] T35: **Phase 6** — Lockstep (S4), final docs, rehearsal (PHASES.md L1–L5)
 * [x] T36: Docs: archive SPEC.md → `docs/archive/SPEC-v1.md`, ROADMAP.md → `PHASES.md`, remove duplicate `NoBu-Shooter/docs/` and stale root `tests/`, update README/PROTOCOL/DEMO_SCRIPT/ASSUMPTIONS
 * [x] T37: Quick Phase 1 verification + Phase 2 implementation plan (`docs/PHASE2_PLAN.md`)
 * [x] T38: Phase 2 docs — PHASES.md / PHASE2_PLAN.md reflect the approved decisions D1–D7
@@ -139,14 +146,14 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T97: Owner: README quickstart update + list of runnable commands (demo, swarm, emulator, ...)
 
 * [x] T98: Phase 6 implementation plan (`docs/PHASE6_PLAN.md`) + owner decisions; PHASES.md Phase 6 synced; baseline checks
-* [ ] T99: Phase 6 step 1 — shared: lockstep sync model types, `ls` / `lsNack` messages + validators, `hashWorld`, `applyRecord`, `LockstepEncoder`, `net.json` (plan tests 1–3)
-* [ ] T100: Phase 6 step 2 — server: lab input log, keyframes, record ring, lockstep connections, `LOCKSTEP_LAB_ONLY` (plan test 4)
-* [ ] T101: Phase 6 step 3 — client: `LockstepClient` (playout, stalls, catch-up, NACK, hash check), NetClient integration, metrics (plan tests 5–7)
-* [ ] T102: Phase 6 step 4 — Compare: preset "Snapshot vs Lockstep" (Full / Lockstep / Lockstep + Rd), SYNC cycle, greyed chips, metrics bar / dock; Presenter C7 (plan test 8)
-* [ ] T103: Phase 6 step 5 — smoke step 8, shots (`compare-lockstep`, `presenter-compare-7`), measured numbers
-* [ ] T104: Phase 6 step 6 — final docs (L4): DEMO_SCRIPT final talk track, README, PROTOCOL, ASSUMPTIONS, GAMERULES, VISUAL_CHECKLIST
-* [ ] T105: Phase 6 step 7 — rehearsal (L5): fresh-copy cold start, timed headless Presenter run-through, `docs/REHEARSAL.md` checklist for the presentation laptop; fix anything that stutters
-* [ ] T106: Phase 6 step 8 — phase exit + Definition of Done
+* [x] T99: Phase 6 step 1 — shared: lockstep sync model types, `ls` / `lsNack` messages + validators, `hashWorld`, `applyRecord`, `LockstepEncoder`, `net.json` (plan tests 1–3)
+* [x] T100: Phase 6 step 2 — server: lab input log, keyframes, record ring, lockstep connections, `LOCKSTEP_LAB_ONLY` (plan test 4)
+* [x] T101: Phase 6 step 3 — client: `LockstepClient` (playout, stalls, catch-up, NACK, hash check), NetClient integration, metrics (plan tests 5–7)
+* [x] T102: Phase 6 step 4 — Compare: preset "Snapshot vs Lockstep" (Full / Lockstep / Lockstep + Rd), SYNC cycle, greyed chips, metrics bar / dock; Presenter C7 (plan test 8)
+* [x] T103: Phase 6 step 5 — smoke step 8, shots (`compare-lockstep`, `presenter-compare-7`), measured numbers
+* [x] T104: Phase 6 step 6 — final docs (L4): DEMO_SCRIPT final talk track, README, PROTOCOL, ASSUMPTIONS, GAMERULES, VISUAL_CHECKLIST
+* [x] T105: Phase 6 step 7 — rehearsal (L5): fresh-copy cold start, timed headless Presenter run-through, `docs/REHEARSAL.md` checklist for the presentation laptop; fix anything that stutters
+* [x] T106: Phase 6 step 8 — phase exit + Definition of Done
 
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
@@ -154,6 +161,68 @@ Shared context for every agent working in this directory. Read this file **befor
 ## Change Log
 
 <!-- Newest first. Copy the template below for each entry. -->
+
+### 2026-10-12 — Claude (Opus 5.5) — Phase 6 implementation (T35, T99–T106)
+
+* **Task:** Owner approved `docs/PHASE6_PLAN.md` (committed as `b51bf23` on branch `phase6`): implement Phase 6; ask critical decisions mid-run; fix bugs found; add tests. No decision needed asking (the 75 ms fallback of risk 4 wasn't needed).
+* **T99 (step 1) — DONE:**
+  - `shared/src/sync/types.ts`: `lockstep` model, `rd`, `COMPARE_SYNC_CYCLE`, `sameSyncModel`, `nextSync(s, cycle)`, labels `LOCKSTEP` / `LOCKSTEP+RD`.
+  - New `shared/src/sync/lockstep.ts`: `LockstepLog` ring, `LockstepEncoder`, `applyRecord`, `worldFromKeyframe`, `worldHash`, `labMoveCfg`. Exported from `sync/index.ts`; `createEncoder` passes lockstep through.
+  - `shared/src/sim/hash.ts` `hashWorld`.
+  - `shared/src/protocol/messages.ts`: `MsgLs`, `MsgLsNack`, `LockstepRecord`, `Keyframe`, `validateLs`, `lsNack` / `sync.rd` validation, error code `LOCKSTEP_LAB_ONLY`.
+  - `shared/src/config/net.{json,ts}` `lockstep` block.
+* **T100 (step 2) — DONE:**
+  - `server/src/game/room.ts`: lab rooms log consumed keys per tick; `markKeyframe` on join / leave / perturb / restart / map / movers; hash every 30 ticks; `labKeyframe()`, `labHash()`, `tickNumber`, `lockstepLog`.
+  - `server/src/core.ts`: `Connection.lockstep`; `setSync(conn, spec, room)` with `LOCKSTEP_LAB_ONLY`; an rd-only change keeps the encoder; `sendLockstep`; `snapAck` / `input.sa` → `onAck`; `lsNack` → `onNack`.
+  - `server/src/metrics.ts` counts lockstep traffic.
+  - New `tests/lockstep.test.ts` (14: replay ≡ `Room.tick()` over 2 000 ticks, encoder modes, ring, server keyframe triggers, NACK / key request).
+  - `tests/protocol.test.ts` (+3), `tests/sync.test.ts` (+1).
+* **T101 (step 3) — DONE:**
+  - New `client/src/net/lockstep.ts` `LockstepClient`.
+  - `client/src/net/NetClient.ts`: lockstep path (`ls` → replay; synthetic snapshot per shown tick; no prediction; `lsNack`; Rd chip → `sync.rd`; `LOCKSTEP_LAB_ONLY` reverts locally; `ls*` metrics; `isLockstep` / `lockstepWorld`).
+  - `tests/netcode.test.ts`: harness exposes the emulator links, +5 lockstep tests (L2 under random then burst loss, outage → resync + RESTART / map keyframes, clean link, Quick Match refusal, live switch + Rd).
+  - Also: `client/src/ui/settings.ts` (no stored lockstep), `NetworkLab.tsx` hint.
+* **T102 (step 4) — DONE:**
+  - `client/src/compare/presets.ts`: preset `lockstep` (A Full, B Lockstep, C Lockstep + Rd; 50 ms + 5 %; all movers).
+  - `ui/compare/CompareView.tsx`: Compare cycle; toggles via `setToggles` (X8); `paneSync`.
+  - `ComparePane.tsx` greyed P / C / I / G with tooltips; `PaneMetricsBar.tsx` lockstep bar; `CompareDock.tsx` lockstep columns.
+  - `game/ArenaScene.ts`: no ghost in lockstep.
+  - `presenter/scripts.ts`: C7 expect.
+  - Tests: `tests/compare.test.ts` (+1), `tests/presenter.test.ts` (C1–C7).
+* **Bug found by the hash check (X1) — FIXED:**
+  - The first browser check showed 1 desync per lockstep pane in 30 s. Chrome and Node 26 compute `Math.cos` / `Math.sin` 1 bit apart for 13 631 of 400 000 of the circle drone's angles (scratch check).
+  - New `shared/src/sim/dtrig.ts` (`dsin` / `dcos`: fdlibm kernels + Cody-Waite reduction, only + − × ÷ / `Math.round`). `shared/src/sim/movers.ts` uses them and `Math.sqrt` instead of `Math.hypot`. `sim/index.ts` exports them.
+  - After the fix: 0 of 400 000 values differ between the engines; 0 desyncs in a 60 s browser run. `tests/movers.test.ts` +2.
+* **T103 (step 5) — DONE:**
+  - New `scripts/lockstep-clients.ts`; `scripts/smoke.mjs` step 8 (wrapped without top-level await: tsx compiles scripts to CJS).
+  - Smoke: Rd off stalled 28.8 % / Rd on 4.6 %, 0 desyncs.
+  - `scripts/shots.mjs`: screens `compare-lockstep`, `presenter-compare-7`.
+  - Browser (1600×900, 60 s): stalled 12–21 % vs 2–4 %, 440 / 38 / 107 kbps, 60 fps, 0 errors.
+* **T104 (step 6) — DONE:**
+  - `docs/DEMO_SCRIPT.md`: final talk track with timings at the top, controls, §12 C7, new §14 Lockstep.
+  - `docs/PROTOCOL.md`: `hello.sync`, `input.sa`, `sync.rd`, §2.10 `lsNack`, error codes, §3.5 row, §3.6 `ls`.
+  - `docs/ASSUMPTIONS.md` #2 updated, new #97–#109.
+  - `GAMERULES.md` §14 lockstep note.
+  - `README.md`: intro, status, Compare / Presenter / tests / smoke text, controls, tree, architecture bullet; Q13 run order.
+  - `NoBu-Shooter/README.md` smoke line; `docs/VISUAL_CHECKLIST.md` (25 screens, rows 16 and 23).
+  - `NoBu-Shooter/assets/README.md` unchanged (no asset changes).
+* **T105 (step 7) — DONE:** the dress rehearsal (`docs/REHEARSAL.md`).
+  - Fresh copy via `git ls-files -co --exclude-standard` in the scratchpad: `npm install` 15 s (npm cache; npm 11 warns about esbuild's install script — harmless), 222 tests 12 s, typecheck 7 s, smoke 47 s. The copy was deleted.
+  - Timed headless run-through of all 20 Presenter steps at 1920×1080: ≈ 60 fps everywhere, 0 console errors. Two single long frames (117 / 133 ms) at the C4 / C6 step changes (a pane created / removed).
+  - **Finding:** with `--swarm 3` from the start, Q11 (Nightmare + Delta) showed ack ≈ 720 ms / 386 kbps; without network players ≈ 320–350 ms / 60–120 kbps.
+  - So the talk starts the network players at Q13 (X7, ASSUMPTIONS #109): `client/src/ui/presenter/PresenterBar.tsx` hint now says `npm run swarm -- --n 3`. Verified: they appear in 0.9 s.
+* **T106 (step 8) — DONE:**
+  - `npm run shots`, full run: the first attempt was killed by my own 590 s `timeout` at screen 23 of the 1920 pass (the run is now ≈ 12 min). The missing screens were re-run with `--only`: all 25 × 2 captured, 0 console errors.
+  - 1280 screens read 56–57 fps in the long run vs 60 fps when re-run (machine load, not the code).
+  - Reviewed 16 / 23 against the checklist: OK. Dashboard OVERFLOW-Y as before.
+  - `PHASES.md`: Phase 6 done + result, overview, status, DoD G1 / G2 / G4 / fresh clone ticked, new owner box for the presentation-laptop rehearsal.
+  - `docs/PHASE6_PLAN.md`: implemented, exit checklist ticked, deviations X1–X8.
+  - Final: 222/222 tests, typecheck clean, smoke 8/8 PASSED; ports free; no processes left; no new dependency (`.gitignore` unchanged, nothing to add).
+* **Files:**
+  - **Created:** `shared/src/sync/lockstep.ts`, `shared/src/sim/dtrig.ts`, `client/src/net/lockstep.ts`, `scripts/lockstep-clients.ts`, `tests/lockstep.test.ts`, `docs/REHEARSAL.md`.
+  - **Edited (code):** `shared/src/sync/{types,index}.ts`, `shared/src/sim/{hash,movers,index}.ts`, `shared/src/protocol/messages.ts`, `shared/src/config/net.{json,ts}`, `server/src/{core,metrics}.ts`, `server/src/game/room.ts`, `client/src/net/NetClient.ts`, `client/src/compare/presets.ts`, `client/src/ui/compare/{CompareView,ComparePane,PaneMetricsBar,CompareDock}.tsx`, `client/src/ui/{NetworkLab.tsx,settings.ts}`, `client/src/ui/presenter/PresenterBar.tsx`, `client/src/presenter/scripts.ts`, `client/src/game/ArenaScene.ts`, `scripts/{smoke,shots}.mjs`.
+  - **Edited (tests):** `tests/{netcode,protocol,sync,compare,presenter,movers}.test.ts`.
+  - **Edited (docs):** `README.md`, `NoBu-Shooter/README.md`, `PHASES.md`, `GAMERULES.md`, `docs/{DEMO_SCRIPT,PROTOCOL,ASSUMPTIONS,VISUAL_CHECKLIST,PHASE6_PLAN}.md`, `log.md`.
 
 ### 2026-10-12 — Claude (Opus 5.5) — T98: Phase 6 implementation plan + preparation
 
