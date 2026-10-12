@@ -6,7 +6,7 @@
 
 export const GAME = {
   sim: { hz: 60 },
-  match: { durationMs: 120000, countdownMs: 3000, endedMs: 10000, minParticipants: 2, maxParticipants: 8, joinWindowMs: 10000 },
+  match: { durationMs: 120000, countdownMs: 3000, endedMs: 10000, minParticipants: 2, maxParticipants: 8 },
   arena: { width: 1280, height: 720 },
   player: { radius: 16, speed: 200, respawnDelayMs: 2000, spawnProtectionMs: 1000, maxNameLength: 12 },
   projectile: { radius: 4, speed: 600 },
@@ -153,8 +153,15 @@ export const GAME = {
     sightRange: 700,
     seed: 1337,
   },
-  /** Private rooms joined by code (docs/PHASE7_PLAN.md D9). */
-  privateRooms: { max: 32, emptyGraceMs: 60000 },
+  /** Private rooms joined by code (docs/PHASE7_PLAN.md D9) and their host's options (R2; shared/src/rooms/options.ts). */
+  privateRooms: {
+    max: 32,
+    emptyGraceMs: 60000,
+    defaults: { map: 'neon', maxPlayers: 4, bots: false, powerupEveryS: 7, powerupMax: 4 },
+    maxPlayersRange: [2, 8],
+    powerupIntervalsS: [0, 3, 5, 7, 10, 15],
+    powerupMaxRange: [1, 8],
+  },
   rooms: {
     main: { bots: true, firing: true, timed: true, movers: false, powerups: true },
     lab: {

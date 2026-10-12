@@ -25,8 +25,6 @@ export type ServerMode = 'demo' | 'game';
 
 export interface GameServerOptions {
   mode?: ServerMode;
-  /** `main`'s join window (default GAME.match.joinWindowMs / NOBU_JOIN_WINDOW_MS). */
-  joinWindowMs?: number;
   /** Most private rooms at once (default GAME.privateRooms.max). */
   maxPrivateRooms?: number;
   /** A private room without humans is removed after this long (default GAME.privateRooms.emptyGraceMs). */
@@ -100,7 +98,6 @@ export class GameServer {
           const text = encodeServer(snap);
           for (const conn of this.connections) if (conn.room === room && conn.spectator) conn.send(text);
         },
-        { ...(this.opts.joinWindowMs !== undefined ? { joinWindowMs: this.opts.joinWindowMs } : {}) },
       );
       this.rooms.set(name, room);
     }
@@ -245,11 +242,14 @@ export class GameServer {
         break;
 
       case 'start':
-        // On the game server only a private room's host may start early (never `main`)
-        if (this.mode === 'game' && conn.room?.kind !== 'private') break;
+        // A private room's host, in the lobby (Room.start checks)
         if (conn.room && conn.room.start(conn.playerId)) {
-          console.log(`[server] Match started early in ${conn.room.name} by player ${conn.playerId}`);
+          console.log(`[server] Match started in ${conn.room.name} by its host (player ${conn.playerId})`);
         }
+        break;
+
+      case 'roomOptions':
+        conn.room?.setOptions(conn.playerId, msg.options);
         break;
 
       case 'ping': {

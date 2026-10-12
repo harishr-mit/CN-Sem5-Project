@@ -46,7 +46,7 @@ describe('Server address (serverUrl.ts)', () => {
 /** A NetClient wired straight to an in-process GameServer. */
 function harness(models: boolean, sync?: { model: 'full' | 'delta' | 'state'; hz?: 10 | 30 }) {
   let t = 0;
-  const server = new GameServer(() => t, { joinWindowMs: 0 });
+  const server = new GameServer(() => t);
   const transport: TransportFactory = (_url, h) => {
     const conn = server.addConnection((text) => queueMicrotask(() => h.onMessage(text)), () => h.onClose());
     queueMicrotask(() => h.onOpen());

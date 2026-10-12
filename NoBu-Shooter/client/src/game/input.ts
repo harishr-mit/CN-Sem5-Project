@@ -75,6 +75,7 @@ function onKeyUp(e: KeyboardEvent): void {
 /** Keys released while the page had no focus never send keyup: forget them. */
 function releaseAll(): void {
   held.clear();
+  virtualKeys = 0;
 }
 
 function onVisibility(): void {
@@ -103,7 +104,36 @@ export function acquireKeyboard(): () => void {
   };
 }
 
-/** Current movement bitmask from the physical keyboard. */
+// ── Touch joystick (owner revision of Phase 7, R6) ────────────
+let virtualKeys = 0;
+
+/** The on-screen joystick's keys (0 when released); merged into movementKeys(). */
+export function setVirtualKeys(k: number): void {
+  virtualKeys = k;
+}
+
+/**
+ * Joystick offset → movement keys. `dx`, `dy` are the thumb's offset from the
+ * centre as a fraction of the radius (y down). Inside `deadzone` nothing is
+ * pressed; otherwise one of 8 directions (45° sectors), like WASD — so the
+ * server and the client's prediction see ordinary key bitmasks.
+ */
+export function joystickKeys(dx: number, dy: number, deadzone = 0.25): number {
+  if (Math.hypot(dx, dy) < deadzone) return 0;
+  const sector = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)); // −4 … 4, 0 = right
+  switch (((sector % 8) + 8) % 8) {
+    case 0: return KEY.RIGHT;
+    case 1: return KEY.RIGHT | KEY.DOWN;
+    case 2: return KEY.DOWN;
+    case 3: return KEY.LEFT | KEY.DOWN;
+    case 4: return KEY.LEFT;
+    case 5: return KEY.LEFT | KEY.UP;
+    case 6: return KEY.UP;
+    default: return KEY.RIGHT | KEY.UP;
+  }
+}
+
+/** Current movement bitmask: the physical keyboard and the touch joystick. */
 export function movementKeys(): number {
-  return keysFromCodes(held);
+  return keysFromCodes(held) | virtualKeys;
 }

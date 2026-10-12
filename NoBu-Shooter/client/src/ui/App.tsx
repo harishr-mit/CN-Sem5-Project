@@ -18,6 +18,7 @@ import { CompareView } from './compare/CompareView.js';
 import { loadSettings, applyUiScale, onSettingsChange, type UserSettings } from './settings.js';
 import { useGameStore } from './store.js';
 import { isTypingTarget } from '../game/input.js';
+import { isTouchUi } from './touch.js';
 import { DEV_TOOLS } from '../dev.js';
 import NET from '@nobu/shared/config/net';
 import { PresenterController } from '../presenter/controller.js';
@@ -34,7 +35,8 @@ const EMULATOR_CONTROL_URL = `ws://127.0.0.1:${NET.ports.emulatorControl}`;
 export const App: React.FC = () => {
   const [view, setView] = useState<'landing' | 'game' | 'compare'>('landing');
   const [playerName, setPlayerName] = useState('PILOT_01');
-  const [isLabOpen, setIsLabOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 900 : true));
+  // On touch devices the Lab is an overlay opened from the menu (owner revision R8)
+  const [isLabOpen, setIsLabOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 900 && !isTouchUi() : true));
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
 
   // Presenter mode (PHASES.md P1): which script runs, its controller, caption shown
@@ -123,10 +125,7 @@ export const App: React.FC = () => {
     c.onChange = () => setPresenterVersion((v) => v + 1);
     c.start();
     setPresenter(c);
-    // Presenter Quick Match never waits for the join window (D10; honoured under npm run demo)
-    const offWelcome = script.view === 'game' && netClient ? netClient.on('welcome', () => netClient.start()) : () => {};
     return () => {
-      offWelcome();
       c.stop();
       setPresenter(null);
     };
@@ -203,6 +202,11 @@ export const App: React.FC = () => {
       onLeave={handleLeaveMatch}
       edition="demo"
       extraControls={DEMO_CONTROLS}
+      touchMenuItems={[
+        { id: 'lab', label: '📶 NETWORK LAB', onClick: () => setIsLabOpen(true) },
+        { id: 'inspector', label: '▤ PACKET INSPECTOR', onClick: () => setIsInspectorOpen(true) },
+        ...(presenter ? [{ id: 'presenter', label: presenterHidden ? '▣ SHOW PRESENTER BAR' : '▣ HIDE PRESENTER BAR', onClick: () => setPresenterHidden((h) => !h) }] : []),
+      ]}
       onSettingsChange={handleSettingsChange}
       below={<>
         {/* Presenter caption (in the flow, so it never covers the arena) */}

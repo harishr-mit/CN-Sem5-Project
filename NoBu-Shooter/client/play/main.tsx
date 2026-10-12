@@ -9,6 +9,9 @@ import ReactDOM from 'react-dom/client';
 
 import '../src/styles/global.css';
 import { PlayApp } from '../src/play/PlayApp.js';
+import { applyTouchClass } from '../src/ui/touch.js';
+
+applyTouchClass();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

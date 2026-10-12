@@ -11,7 +11,7 @@
 
 import { encodeClient, decodeServer, validateLs } from '@nobu/shared/protocol';
 import {
-  stepPlayer, settlePosition, moverPath, initialCombat, copyCombat, sameCombat, stepCombat, speedMultiplier, WEAPONS,
+  stepPlayer, settlePosition, moverPath, initialCombat, copyCombat, sameCombat, stepCombat, speedMultiplier, isOn, PERMANENT, WEAPONS,
 } from '@nobu/shared/sim';
 import type { MoverCfg, MoveCfg, CombatState } from '@nobu/shared/sim';
 import type {
@@ -25,9 +25,13 @@ import {
 } from '@nobu/shared/sync';
 import GAME, { mapDef, type PowerupKind } from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
+import type { RoomOptions } from '@nobu/shared/rooms/options.js';
 import { RemoteErrorTracker, type DrawnEntity } from './remoteError.js';
 import type { Extrapolator, ExtrapolateCfg } from './extrapolate.js';
 import type { LockstepClient, LockstepClientOptions } from './lockstep.js';
+
+/** A power-up timer in ms for the HUD; a permanent (always-on) one is Infinity. */
+const msLeft = (ticks: number): number => (ticks === PERMANENT ? Infinity : ticks * TICK_MS);
 
 // ── Types ──────────────────────────────────────────────────────
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'timeout' | 'error';
@@ -933,7 +937,7 @@ export class NetClient {
     const reload = this.armed && (this.reloadRequested || this.combat.reloadTicks > 0);
     this.reloadRequested = false;
     // Dash: re-sent during the predicted burst, like reload (ignored while bursting/cooling down)
-    const dash = (this.dashRequested && this.combat.dashTicks > 0) || this.combat.dashBurstTicks > 0;
+    const dash = (this.dashRequested && isOn(this.combat.dashTicks)) || this.combat.dashBurstTicks > 0;
     this.dashRequested = false;
 
     const inp: InputEntry = {
@@ -1315,11 +1319,12 @@ export class NetClient {
       magazine: w.magazine,
       reserve: c.reserve < 0 ? null : c.reserve,
       reload: c.reloadTicks > 0 ? 1 - c.reloadTicks / w.reloadTicks : null,
-      weaponMsLeft: c.weaponTicks * TICK_MS,
-      speedMsLeft: c.speedTicks * TICK_MS,
-      pierceMsLeft: c.pierceTicks * TICK_MS,
-      dashMsLeft: c.dashTicks * TICK_MS,
-      dashReady: c.dashTicks > 0 && c.dashCooldownTicks === 0 && c.dashBurstTicks === 0,
+      // Always-on power-ups (a private room's options) never run out: Infinity
+      weaponMsLeft: msLeft(c.weaponTicks),
+      speedMsLeft: msLeft(c.speedTicks),
+      pierceMsLeft: msLeft(c.pierceTicks),
+      dashMsLeft: msLeft(c.dashTicks),
+      dashReady: isOn(c.dashTicks) && c.dashCooldownTicks === 0 && c.dashBurstTicks === 0,
       shield: me?.shield ?? false,
       invincible: me?.invincible ?? false,
       corrections: this.combatCorrections,
@@ -1342,11 +1347,16 @@ export class NetClient {
   get serverError(): { code: string; msg: string } | null { return this.fatalError; }
 
   /**
-   * START (docs/PHASE7_PLAN.md D9, D10): a private room's host starts the
-   * match; in `main` the demo's Presenter skips the join window.
+   * START (docs/PHASE7_PLAN.md D9): a private room's host starts the match
+   * from the lobby.
    */
   start(): void {
     if (this.connected) this.send({ t: 'start' });
+  }
+
+  /** A private room's host sets the match options (owner revision R2; the server ignores anyone else). */
+  setRoomOptions(options: RoomOptions): void {
+    if (this.connected) this.send({ t: 'roomOptions', options });
   }
 
   get isConnected(): boolean { return this.connected; }

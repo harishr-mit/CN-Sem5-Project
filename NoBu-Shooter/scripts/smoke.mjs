@@ -21,11 +21,12 @@
  *    stalls less (scripts/lockstep-clients.ts)
  * 9. The game edition (docs/PHASE7_PLAN.md §4): `npm run build`, then the game
  *    server as `npm start` runs it (--game --static dist/game) on 8090,
- *    127.0.0.1 only, with a 3 s join window: the page, compression and
- *    caching, operator messages refused, a quick match through the join
- *    window with the game's client (Delta, no optional models)
- * 10. A private room on that server: create, join by code, guest START
- *    ignored, host START with bots (scripts/game-clients.ts)
+ *    127.0.0.1 only: the page, compression and caching, operator messages
+ *    refused, a quick match (starts at once) with the game's client (Delta,
+ *    no optional models)
+ * 10. A private room on that server: create, join by code, no bots by
+ *    default, host options (map, bots on), guest START ignored, host START,
+ *    back to the lobby after the match (scripts/game-clients.ts)
  * All child processes are stopped (and ports freed) on every exit path.
  */
 
@@ -53,8 +54,6 @@ const children = [];
 const cleanup = cleanupOnExit(children);
 // The automated run binds this machine only (docs/PHASE5_PLAN.md D15)
 process.env.NOBU_HOST = '127.0.0.1';
-// The old instant start of `main` (Phase 7 join window); smoke checks netcode, not the lobby
-process.env.NOBU_JOIN_WINDOW_MS = '0';
 
 console.log('[smoke] 1/10 Launching game server (ws 8080, udp 8081)...');
 children.push(spawnTs('SERVER', 'server/src/main.ts', [], { cwd: rootDir, onLine: quiet('SERVER') }));
@@ -119,9 +118,7 @@ console.log('[smoke] 9/10 Game edition: npm run build, then the game server on 8
 code = await run(spawnNode('BUILD', ['scripts/build.mjs'], { cwd: rootDir, onLine: echo }));
 if (code !== 0) fail('npm run build failed', code);
 const GAME_PORT = 8090;
-process.env.NOBU_JOIN_WINDOW_MS = '3000'; // this server only: a short join window to walk through
 children.push(spawnTs('GAME', 'server/src/main.ts', ['--game', '--static', 'dist/game', '--port', String(GAME_PORT)], { cwd: rootDir, onLine: quiet('GAME') }));
-process.env.NOBU_JOIN_WINDOW_MS = '0';
 if (!(await waitForPort(GAME_PORT))) fail('The game server did not start', 1);
 const base = `http://127.0.0.1:${GAME_PORT}`;
 code = await run(spawnTs('GAME9', 'scripts/game-clients.ts', ['--base', base, '--step', '9'], { cwd: rootDir, onLine: echo }));

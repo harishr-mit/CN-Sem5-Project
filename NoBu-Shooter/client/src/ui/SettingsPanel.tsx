@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, UI_SCALES, type UserSettings } from './settings.js';
 import { TIERS } from '../game/tiers.js';
+import { isTouchUi, JOYSTICK_SIZES } from './touch.js';
 
 const TIER_LABEL = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as const;
 
@@ -167,6 +168,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             Lower uses smaller textures and sounds (less to download, less GPU memory).
           </div>
         </div>
+
+        {/* Touch devices only: the movement joystick's size (owner revision R6) */}
+        {isTouchUi() && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-xs)' }} id="settings-joystick">
+            <div style={{ fontSize: '0.9rem', color: 'var(--c-text)' }}>Joystick size</div>
+            <Choice options={JOYSTICK_SIZES} value={settings.joystickSize} label={(v) => v.toUpperCase()} onPick={(v) => updateSetting('joystickSize', v)} />
+          </div>
+        )}
 
         {/* Toggles */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-s)', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 'var(--sp-s)' }}>

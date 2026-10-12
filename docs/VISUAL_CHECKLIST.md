@@ -54,14 +54,23 @@ Before each screen the script resets every emulator route to Baseline (control A
 | 24 | dashboard | The emulator's own page: CONNECTED; routes `ws:9000` and `udp:9100` (all interfaces), REMOVE buttons visible (below 1400 px the panels stack, so no table scrolls sideways); sessions `UDP-1`, `UDP-2` with kbps; target = route udp:9100; charts drawing; packet log rows with fragment headers (`~id.i/n|…`). `pageOverflowY` true is expected (a scrolling page). |
 | 25 | dashboard-swarm-nightmare | After NIGHTMARE on `udp:9100`: preset button lit, sliders at 120 ms / 50 ms / 12 % burst / 400 kbps; loss and queue charts rising; packet log shows `lost` and `queue drop` with whole-ms delays. The shot resets the route to Baseline afterwards. |
 | 26 | game-landing | Phase 7, the game edition (`npm run build`, served on 8090). Only QUICK MATCH, the room row and CREDITS — no Compare, Presenter or dashboard; subtitle "Top-down arena shooter • …"; game-only controls hint. |
-| 27 | game-waiting | "WAITING FOR PLAYERS", "Match starts in N s · 1 player connected", "Bots fill the empty slots"; PING chip; no Lab, no packet strip. |
-| 28 | game-room-host | PRIVATE ROOM, the code in large letters (e.g. WARM RAM), the share link with COPY, "1 in the room: … (host)", **START MATCH** button. |
-| 29 | game-room-guest | The same lobby seen by the guest: 2 in the room, the host marked, **no START** — "Waiting for … to start · bots fill the empty slots". Its fps is ≈ half (the host page renders an arena too, in the same headless browser). |
-| 30 | game-match | A running match in a private room: timer, map name, leaderboard with 2 humans + 2 bots, PING chip; nothing of the demo's tools. |
-| 31 | game-settings | Graphics Quality row; **no ghost toggle** (demo only); Leave Match. |
-| 32 | game-controls | Only PILOT & COMBAT, POWER-UPS and SYSTEM SHORTCUTS — no Network Lab, netcode or Presenter keys. |
-| 33 | game-quality-low | Graphics Quality Low: players, crates, floor and shields the **same size** as in 30 (only softer); no missing textures (no procedural fallbacks). |
-| 34 | game-room-not-found | "CANNOT JOIN" with "No room JOLLY ZEBRA. Check the code, or create a new room." and BACK TO MENU. |
+| 27 | game-quick-match | The quick match **starts at once** (countdown or running, 3 bots); PING chip; no Lab, no packet strip. |
+| 28 | game-room-host | The lobby panel on the left, the map (Neon) visible on the right: PRIVATE ROOM, the code (e.g. WARM RAM), link + COPY, HIDE; PLAYERS 1 / 4 with the host ★ and 3 open slots; MATCH OPTIONS with the defaults lit (NEON, 4, bots off, 7 s, 4, NONE); **START MATCH disabled** with "Needs at least 2 players…"; ◄ LEAVE. Preview power-ups on the map. |
+| 29 | game-room-options | After the host's clicks: WAREHOUSE lit and the arena behind is Warehouse; bots on → 3 BOT chips and bots standing on the map; SPREAD SHOT + SHIELD lit → every player with the shotgun and a shield bubble; 3 s lit; START enabled. |
+| 30 | game-room-guest | The same lobby seen by the guest: 2 players, the host marked ★, the options **greyed (read-only, "set by …")**, **no START** — "Waiting for … to start", ◄ LEAVE. Its fps is ≈ half (the host page renders an arena too, in the same headless browser). |
+| 31 | game-match | A running match in a private room (bots turned on): timer, map name, leaderboard with 1 human + 3 bots, PING chip; nothing of the demo's tools. |
+| 32 | game-settings | Graphics Quality row; **no ghost toggle** (demo only); Leave Match. |
+| 33 | game-controls | Only PILOT & COMBAT, POWER-UPS and SYSTEM SHORTCUTS — no Network Lab, netcode or Presenter keys. |
+| 34 | game-quality-low | Graphics Quality Low: players, crates, floor and shields the **same size** as in 30 (only softer); no missing textures (no procedural fallbacks). |
+| 35 | game-room-not-found | "CANNOT JOIN" with "No room JOLLY ZEBRA. Check the code, or create a new room." and BACK TO MENU. |
+
+| 36 | touch-game-landing-portrait | Phone 390 × 844, once (not per viewport). Landing fits the width; the touch hint ("LEFT STICK: Move • TOUCH THE ARENA …") instead of keyboard keys. |
+| 37 | touch-game-match-landscape | Phone 844 × 390: arena fills the height; **joystick** bottom-left, **DASH** above it (Dash always on), **☰ MENU** and **RELOAD** on the right above the weapon panel; ping under the score; no LEAVE / CONTROLS / SETTINGS buttons; chips show ∞. |
+| 38 | touch-game-match-portrait | Phone 390 × 844: arena full width on top with the HUD; joystick bottom-left and RELOAD / MENU bottom-right in the space below; DASH above the joystick. |
+| 39 | touch-game-lobby-portrait | The lobby fills the space **below** the arena (the map stays visible above it); no joystick or buttons while waiting; options and START / LEAVE reachable (scrolls if needed). |
+| 40 | touch-game-menu-landscape | The menu sheet: ⚙ SETTINGS, 🔇 MUTE, ◄ LEAVE MATCH (red), RESUME. |
+| 41 | touch-demo-quick-landscape | The **demo** on a phone: no Lab panel, no packet strip; the same joystick / RELOAD / MENU. |
+| 42 | touch-demo-lab-landscape | Menu → NETWORK LAB: the Lab as a **full-screen overlay**; the ► button in its top-right corner closes it (it scrolls on a phone: expected). |
 
 The dashboard with **no routes** (`npm run emulator`) isn't in the shots (they run the demo). Check it by hand, or see the scratch check in `log.md` T92: empty-state text, the add-route form, an error for a duplicate route, no horizontal scroll at 420 px.
 

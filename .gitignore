@@ -147,3 +147,7 @@ Thumbs.db
 scratch/
 tempCodeRunnerFile*
 .ipynb_checkpoints/
+.claude/.atomic-index/
+
+# Generated wiki (atomic /refresh-wiki), not tracked
+docs/wiki/

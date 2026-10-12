@@ -8,6 +8,9 @@
 import React, { useState } from 'react';
 import { normalizeCode } from '@nobu/shared/rooms/codes.js';
 import { roomFromUrl } from '../net/serverUrl.js';
+import { isTouchUi } from './touch.js';
+
+const TOUCH_HINT = 'LEFT STICK: Move • TOUCH THE ARENA: Aim + fire • RELOAD / DASH buttons • ☰ MENU: settings, sound, leave';
 
 interface LandingFormProps {
   subtitle: string;
@@ -93,7 +96,7 @@ export const LandingForm: React.FC<LandingFormProps> = ({ subtitle, onPlay, quic
 
           {extras?.(cleanName(name))}
 
-          <p className="landing-controls-hint">{controlsHint}</p>
+          <p className="landing-controls-hint">{isTouchUi() ? TOUCH_HINT : controlsHint}</p>
 
           <button id="credits-btn" className="landing-credits-link" onClick={() => setShowCredits(true)}>
             CREDITS

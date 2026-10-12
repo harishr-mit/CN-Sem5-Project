@@ -173,6 +173,8 @@ export const NetworkLab: React.FC<NetworkLabProps> = ({
     >
       {/* Toggle button on the panel edge */}
       <button
+        className="lab-toggle-btn"
+        id="lab-toggle-btn"
         onClick={onToggleOpen}
         title="Toggle Network Lab (Tab)"
         style={{

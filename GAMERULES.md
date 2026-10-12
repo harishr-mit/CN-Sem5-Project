@@ -4,7 +4,7 @@
 
 **Revision 2026-10-10 (owner):** weapons, ammo + reloading, power-ups, several hand-made maps, a textured player avatar and sound effects were added (§3, §4, §6, §6a, §6b, §17, §18). They were implemented in **Phase 2.5** (`PHASES.md`, tasks T52–T56 in `log.md`, done 2026-10-10) before Phase 3; the owner then set the shotgun to 3 pellets with a decent spread. **Revision 2 (2026-10-10, T58–T60):** power-ups appear at random spots, at most one per two players, weighted (rifle rarest, Speed most common); power-up weapons hold 1 + 1 magazines; the pistol reloads forever; Ammo was replaced by **Piercing** and **Dash**; a developer invincibility toggle exists only under `npm run demo` (§19).
 
-**Revision 3 (2026-10-12, Phase 7, owner):** a 10 s **join window** before a quick match, **private rooms** joined by a two-word code and started by their host (§2, §12, §14, §15); **Graphics Quality** tiers and a **ping** readout (§17, §18). Implemented in Phase 7 (`docs/PHASE7_PLAN.md`); they apply to the demo and the game edition alike.
+**Revision 3 (2026-10-12, Phase 7, owner):** **private rooms** joined by a two-word code, started by their host from a lobby where the host sets the **room options** — map, max players, bots, power-up rate and max, always-on power-ups (§2, §6b, §12, §14, §14a, §15); a quick match starts at once (the 10 s join window tried first was removed the same day); **Graphics Quality** tiers, a **ping** readout and a **touch UI** for phones and tablets (§17, §18). Implemented in Phase 7 (`docs/PHASE7_PLAN.md`, owner revision R1–R9); they apply to the demo and the game edition alike.
 
 Constants live in one file, `shared/src/config/game.json` (§15), imported by client, server and tests. Never hard-code a number from this document in game logic.
 
@@ -43,15 +43,15 @@ WAITING ──(participants >= 2)──► COUNTDOWN ──(3 s)──► RUNNIN
 
 | State | Behavior |
 |---|---|
-| `WAITING` | No match yet: `main` before its first human, then during its **join window**; a private room until its host presses START (both below; rooms without bots: fewer than `minParticipants` participants). Players cannot move or fire. UI shows "WAITING FOR PLAYERS" (with the seconds left in `main`) or the private room's lobby. |
+| `WAITING` | No match yet: `main` until its first human (then it counts down at once); a private room in its **lobby**, until its host presses START (below; rooms without bots: fewer than `minParticipants` participants). Players cannot move or fire. UI shows "WAITING FOR PLAYERS" or the private room's lobby; both have **LEAVE**. |
 | `COUNTDOWN` | 3 s ("3, 2, 1, GO!"). All players are placed at spawn points (alive and visible, with a new `life` number so clients treat it as a respawn) and start the match from there. Movement and firing are ignored. |
 | `RUNNING` | Normal play for exactly 120 s (2 minutes; owner, 2026-10-11 — was 180 s). The server owns the timer. |
 | `ENDED` | Movement, firing and projectile spawning are ignored. Remaining projectiles are removed. Final scores are computed and broadcast. Lasts 10 s. |
 
 - A **participant** is a human player or a bot. Bots count toward the 2-participant minimum (§12), so one human alone can play against bots.
 - **Late join:** a human may join at any time. During `RUNNING` they spawn immediately with score 0. During `COUNTDOWN` or `ENDED` they join the next match flow normally.
-- **Join window (Phase 7; owner, 2026-10-12; every edition):** when the first human joins an empty `main` room, `WAITING` lasts a join window of 10 s (`match.joinWindowMs`) before the `COUNTDOWN`, so other humans who take a few seconds to connect start the match with everyone else. The HUD shows "WAITING FOR PLAYERS — Match starts in N s · H players connected" (snapshot field `match.waitMsLeft`). The window ends early once `bots.targetParticipants` humans are in. Bots are added only when the `COUNTDOWN` begins, as in §12. If every human leaves during the window it stops; the next human starts a new one. Between matches the 10 s of `ENDED` already serve as the window. Presenter Quick Match skips it (a `start` message, honoured in `main` only under `npm run demo`). Tests and the smoke test set `NOBU_JOIN_WINDOW_MS=0` for the old instant start.
-- **Private rooms (Phase 7; owner, 2026-10-12; every edition):** a player can **CREATE ROOM** and gets a short two-word code (an adjective and an animal, e.g. `BLUE FOX`) and a share link; others **JOIN ROOM** with the code (any case, with or without the space) or open the link. A private room has the `main` room's rules (bots, firing, power-ups, 2-minute clock, map rotation, its own rotation position). Its `WAITING` lasts until the **host** (the creator; if they leave, the longest-connected human) presses **START MATCH**; then `COUNTDOWN` with bots filling the slots, and afterwards the normal `ENDED` → `COUNTDOWN` cycle. When its last human leaves it returns to `WAITING` without bots; it is removed 60 s later (`privateRooms.emptyGraceMs`) unless someone joins again. At most 32 private rooms per server (`privateRooms.max`). Details: `docs/PHASE7_PLAN.md` D9, `docs/PROTOCOL.md` §2.1, §2.6a.
+- **Quick match starts at once (owner revision, 2026-10-12):** the first human in an empty `main` room starts the `COUNTDOWN` immediately, with bots in the empty slots (§12); humans who come later join mid-match (late join, below). A 10 s join window was tried first in Phase 7 and removed the same day: late join already covers a slow joiner.
+- **Private rooms (Phase 7; owner, 2026-10-12; every edition):** a player can **CREATE ROOM** and gets a short two-word code (an adjective and an animal, e.g. `BLUE FOX`) and a share link; others **JOIN ROOM** with the code (any case, with or without the space) or open the link. The creator is the **host** (if they leave, the longest-connected human). The room waits in its **lobby** (`WAITING`): it lists everyone who joined, and the host sets the **room options** (§14a), which show at once on the arena behind the lobby. The host presses **START MATCH** (at least 2 participants, counting bots); then `COUNTDOWN`, `RUNNING`, `ENDED` as usual, and **back to the lobby** after every match (scores reset, options kept). When its last human leaves it returns to `WAITING` without bots; it is removed 60 s later (`privateRooms.emptyGraceMs`) unless someone joins again. At most 32 private rooms per server (`privateRooms.max`). Details: `docs/PHASE7_PLAN.md` D9 and R2–R4, `docs/PROTOCOL.md` §2.1, §2.6a, §2.6b.
 - **Restart:** after `ENDED` the room automatically returns to `COUNTDOWN` with all scores reset to 0 and all players re-spawned. No lobby, no vote.
 - **Presenter (owner, 2026-10-11; `npm run demo` only, §19):** Presenter — Quick Match stops the match clock (the HUD shows ∞; a 2-minute match would end mid-talk) and starts it again on END. Its **RESTART** begins a new match on the same map through the countdown; choosing a **map** on the Presenter bar does the same on that map. Neither moves the normal rotation. Its 13th step, **Network players** (Phase 5), impairs only the UDP network players' emulator route (`udp:9100`); the presenter's own link stays clean.
 - **Demo shortcut:** `match.durationMs` is configuration. The default is 120 000. Setting it lower (for example 60 000 via a URL parameter `?match=60`) must work without code changes.
@@ -159,7 +159,7 @@ The client sends **inputs**, never state. The server decides all resulting state
 ### 6b. Power-ups
 
 - **Where:** power-ups appear at **random spots** (room's seeded PRNG): ≥ 40 px from the arena edge, ≥ 24 px from every obstacle, outside the HUD zones (`powerups.hudKeepOut`: score, timer, scoreboard, button bar, weapon panel), and — when possible — ≥ 160 px from other power-ups and ≥ 80 px from alive players. Every such spot is reachable (`tests/maps.test.ts`).
-- **How many:** at most **one per participant** at a time (`powerups.perPlayers` = 1; bots count; 4 players → 4, 8 → 8; owner, 2026-10-11 — was ⌊participants / 2⌋). At the start of `RUNNING` the map is filled to that cap at once. Whenever there are fewer, the next one appears **7 s** (`powerups.respawnMs`; was 10 s) later, one at a time. If players leave and the cap drops, the oldest extra power-ups disappear. None during `COUNTDOWN`/`ENDED` and never in the `lab` room.
+- **How many:** at most **one per participant** at a time (`powerups.perPlayers` = 1; bots count; 4 players → 4, 8 → 8; owner, 2026-10-11 — was ⌊participants / 2⌋). At the start of `RUNNING` the map is filled to that cap at once. Whenever there are fewer, the next one appears **7 s** (`powerups.respawnMs`; was 10 s) later, one at a time. If players leave and the cap drops, the oldest extra power-ups disappear. None during `COUNTDOWN`/`ENDED` and never in the `lab` room. **Private rooms** use their host's interval, max and allowed kinds instead (§14a), and show preview power-ups in the lobby.
 - **Which:** a weighted draw (`powerups.weights`): Speed 4, Dash 3, Spread Shot 2, Shield 2, Piercing 2, **Rapid Fire 1** (the rifle is the strongest, so the rarest).
 - A pickup is a circle of radius 14 px. An alive player whose circle overlaps it collects it. The **server** decides; if several players overlap in the same tick, the lowest player id wins. Clients never predict a pickup (they show it only when the server confirms it), so under lag a player can run over a pickup and see it go to someone else — intended.
 - Bots collect pickups they touch but do not seek them (and never dash).
@@ -263,7 +263,8 @@ A reconnecting client is treated as a **new player**.
 
 Bots exist so that a single viewer sees a living arena and so that the 2-participant minimum is met.
 
-- (`main` and private rooms alike.) When a `COUNTDOWN` begins, the room adds bots until `participants == bots.targetParticipants` (default 4). Humans who join mid-match are added on top (up to 8) without removing bots. At the next `COUNTDOWN` the bot count is recomputed as `max(0, targetParticipants − humans)`.
+- **Private rooms** have **no bots** unless the host turns on *Fill empty slots with bots* (§14a); then bots fill the room to its max players — already in the lobby, so they show — and make way when a human joins. The rest of this section is about `main`.
+- When a `COUNTDOWN` begins, the room adds bots until `participants == bots.targetParticipants` (default 4). Humans who join mid-match are added on top (up to 8) without removing bots. At the next `COUNTDOWN` the bot count is recomputed as `max(0, targetParticipants − humans)`.
 - Bots are real participants in the simulation. They produce **inputs** (same format as humans) and are processed by the same code path. They are labelled `BOT` in the UI and use names from `bots.names`.
 - **Behavior (simple, deterministic given a seed):**
   - Wander: every ~1.5 s choose a random spawn point or arena point as target and move toward it. If position changes by less than 20 px in 1 s, choose a new target.
@@ -292,13 +293,31 @@ How the authoritative state reaches a client — full snapshots, delta snapshots
 
 | Room | Purpose | Bots | Firing | Timer / scoring |
 |---|---|---|---|---|
-| `main` | The game (quick match): map rotation, power-ups, weapons; join window before the first countdown (§2) | per §12 | on | per §2 |
-| private (code, e.g. `blue-fox`; Phase 7) | The same game for friends: created by a player, joined by code, started by its host (§2) | per §12 | on | per §2 |
+| `main` | The game (quick match): map rotation, power-ups, weapons; starts as soon as a human is in (§2) | per §12 | on | per §2 |
+| private (code, e.g. `blue-fox`; Phase 7) | The same game for friends: created by a player, joined by code, shaped by its host's options (§14a) and started by its host (§2) | per §12 | on | per §2 |
 | `lab` (demo only; the game server has none) | Movement-only sandbox used by the Compare view (`PHASES.md` Phase 2). Also holds the **scripted movers** (circle, zigzag, reversal, stop–go; selected with the `lab` message, not players, no player cap) and accepts **spectators** (snapshots only, no player) | off | rejected | state is always `RUNNING`; no timer, no deaths. Always the `neon` map, no power-ups |
 
 In `lab`, §9 does not apply: every player spawns at `rooms.lab.spawn` (880, 360), clear of the mover lanes. The Compare panes' players are driven by the same input, so they must start from the same place (players don't collide with each other).
 
 **Lockstep** (Phase 6, `docs/PHASE6_PLAN.md`): because the lab world changes only through movement inputs and the movers' fixed paths, a `lab` player may choose the **lockstep** sync model. The server then sends, per tick, the movement keys it consumed for each player; the client replays them and gets the server's positions bit for bit (checked by a hash every 30 ticks). Nothing about the rules changes: movement, collision, spawn and the movers are exactly as above. Anything inputs don't explain (join, leave, nudge, RESTART, map, movers) is sent as a keyframe. Lockstep is not offered in `main` (firing, bots, power-ups and the match clock aren't replayed). The mover paths use a deterministic sine / cosine (`shared/src/sim/dtrig.ts`) so browsers and the server agree on them to the last bit.
+
+### 14a. Room options (private rooms; owner revision of Phase 7, 2026-10-12)
+
+The host sets them in the lobby; everyone sees them there (read-only), and the arena behind the lobby shows them: the map, the bots, preview power-ups where they can appear, and the always-on effects on every player. They can change only in the lobby, i.e. between matches. Constants: `privateRooms` in §15; code: `shared/src/rooms/options.ts`.
+
+| Option | Choices | Default |
+|---|---|---|
+| Map | Neon, Warehouse, Plaza, Overgrown, or **Rotation** (one map per match, §3 order) | **Neon** |
+| Max players | 2–8 (humans, plus bots when filling) | **4** |
+| Bots | *Fill empty slots* on / off | **off** — only the players who joined |
+| Power-up every | Off, 3, 5, 7, 10, 15 s (one appears at a time, like §6b's 7 s) | 7 s |
+| Most power-ups on the map | 1–8 (the map starts full at GO, like §6b) | 4 |
+| Always on: weapon | None, Rapid Fire (rifle), Spread Shot (shotgun) — at most one | None |
+| Always on | Shield, Speed, Piercing, Dash (each on / off) | all off |
+
+- **Always on** means every player has that power-up for the whole match, from every spawn: the weapon with unlimited reloads, Speed / Piercing / Dash without a timer (the HUD shows ∞). **Shield** (owner choice): every life starts shielded; the shield breaks on a hit as usual and comes back at the next spawn — so nobody is unkillable.
+- An always-on power-up **never spawns** as a pickup; an always-on weapon stops **both** weapon pickups (a second weapon would replace the permanent one). With nothing left to spawn, no power-ups appear.
+- Quick match (`main`) has no options: the §3 rotation, bots to 4, §6b power-ups.
 
 ---
 
@@ -314,8 +333,7 @@ Save this block verbatim. Derived tick counts use `ticks = Math.round(ms × sim.
     "countdownMs": 3000,
     "endedMs": 10000,
     "minParticipants": 2,
-    "maxParticipants": 8,
-    "joinWindowMs": 10000
+    "maxParticipants": 8
   },
   "arena": { "width": 1280, "height": 720 },
   "player": {
@@ -469,7 +487,14 @@ Save this block verbatim. Derived tick counts use `ticks = Math.round(ms × sim.
     "sightRange": 700,
     "seed": 1337
   },
-  "privateRooms": { "max": 32, "emptyGraceMs": 60000 },
+  "privateRooms": {
+    "max": 32,
+    "emptyGraceMs": 60000,
+    "defaults": { "map": "neon", "maxPlayers": 4, "bots": false, "powerupEveryS": 7, "powerupMax": 4 },
+    "maxPlayersRange": [2, 8],
+    "powerupIntervalsS": [0, 3, 5, 7, 10, 15],
+    "powerupMaxRange": [1, 8]
+  },
   "rooms": {
     "main": { "bots": true,  "firing": true,  "timed": true,  "movers": false, "powerups": true },
     "lab":  { "bots": false, "firing": false, "timed": false, "movers": true,  "powerups": false, "map": "neon", "spawn": { "x": 880, "y": 360 } }
@@ -499,7 +524,8 @@ The game is: **move + shoot + reload + pick up + collide + die + respawn + score
 Rendering never changes the simulation. All art lives in `NoBu-Shooter/assets/` (inventory and licences: `assets/README.md`, `assets/CREDITS.md`); any missing file falls back to the procedural drawing.
 
 - **Graphics Quality (Phase 7):** Settings → **Low / Medium / High** (default High). The served art is generated from `assets/` as WebP in three tiers (`npm run assets`): the large images (player atlas, floors, crate, muzzle flash, shield) at full, half and quarter size; everything keeps its size on screen. A match starts on Low and upgrades to the chosen tier in the background; changing the setting swaps the art during the match. Compare panes use Medium.
-- **HUD (Phase 7):** a **ping** chip (round-trip time; green < 60 ms, amber < 150 ms, red above) next to the Settings button, in every edition.
+- **HUD (Phase 7):** a **ping** chip (round-trip time; green < 60 ms, amber < 150 ms, red above) next to the Settings button, in every edition (under the score on touch devices).
+- **Touch UI (owner revision of Phase 7; phones and tablets, every edition):** shown only on touch devices (a coarse pointer; `?touch=1` / `?touch=0` force it). Touching the arena aims and shoots, as before. A **joystick** in the bottom-left corner moves (8 directions, like WASD; Settings → **Joystick size** small / medium / large). A **DASH** button appears above the joystick only while the Dash power-up is on, with a pop-in animation when it's picked up. On the right: **RELOAD** and **☰ MENU** (Settings, mute, leave; in the demo also the Network Lab, the packet inspector and the Presenter bar). **Landscape:** the arena fills the screen with the controls over it. **Portrait:** the arena at full width on top, the controls (and a private room's lobby) in the space below. The demo's packet strip is hidden on touch devices and its Lab opens as a full-screen overlay from the menu.
 
 - **Players:** one avatar for everyone (Top-Down Survivor). The body animation follows the weapon (`handgun`, `rifle`, `shotgun`) and state (`idle`, `move`, `shoot`, `reload`); the feet follow the movement direction relative to the aim (`run`, `strafe_left`, `strafe_right`, `idle`). The frames are packed into one atlas (`assets/packed/`, `npm run pack-assets`), scaled so the body is about 54 px across, and rotated to the aim angle around the shoulders.
 - **Identity:** a ring under the feet and the name tag in the player's colour (cyan for the local player, eight hues for the rest, the same colour on the scoreboard). The **local player** also carries cyan pips on the shoulders, drawn in code. **Exceptions:** while the ghost (authoritative position, `G`) is shown, it replaces the local player's colour ring; the Compare view draws no colour rings at all (its ghost and truth rings already mark positions).

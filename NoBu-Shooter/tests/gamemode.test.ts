@@ -39,15 +39,13 @@ describe('Game mode (operator messages, fixed Delta)', () => {
   it('refuses dev, perturb and lab → NOT_ALLOWED, and nothing changes', () => {
     process.env.NOBU_DEV = '1'; // even if someone set it, the game server ignores operator messages
     try {
-      const s = new GameServer(() => 0, { mode: 'game', joinWindowMs: 10_000 });
+      const s = new GameServer(() => 0, { mode: 'game' });
       const a = join_(s, {});
       const room = s.getRoom('main');
       a.send({ t: 'dev', invincible: true });
       a.send({ t: 'perturb', dx: 40, dy: 0 });
       a.send({ t: 'lab', movers: ['circle'] });
-      a.send({ t: 'start' }); // main never starts early on the game server
       expect(a.errors().filter((c) => c === 'NOT_ALLOWED')).toHaveLength(3);
-      expect(room.matchState).toBe('WAITING');
       s.tick(); s.tick();
       const snap = [...a.inbox].reverse().find((m) => m.t === 'snapDelta' || m.t === 'snap') as Msg | undefined;
       expect(snap).toBeDefined();
@@ -147,6 +145,16 @@ describe('Game server port: static files + WebSocket (D6, D7)', () => {
     const plain = await get(port, '/assets/index-abc123.js');
     expect(plain.headers['content-encoding']).toBeUndefined();
     expect(plain.body.toString()).toBe(JS);
+  });
+
+  it('a rebuild while serving: the new file is served, not the cached old one', async () => {
+    const first = await get(port, '/', { 'Accept-Encoding': 'br' });
+    expect(brotliDecompressSync(first.body).toString()).toBe(INDEX);
+    const NEW = '<!doctype html><title>NoBu v2</title>' + 'y'.repeat(2100);
+    writeFileSync(join(dir, 'site', 'index.html'), NEW);
+    const second = await get(port, '/', { 'Accept-Encoding': 'br' });
+    expect(brotliDecompressSync(second.body).toString()).toBe(NEW);
+    writeFileSync(join(dir, 'site', 'index.html'), INDEX);
   });
 
   it('sends images as they are with their type; HEAD has no body', async () => {

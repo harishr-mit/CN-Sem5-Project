@@ -1203,3 +1203,163 @@ input[type="range"]:hover::-webkit-slider-thumb {
   color: var(--c-red);
   text-align: center;
 }
+
+/* ── Private room lobby (owner revision of Phase 7, R2–R4) ─────────
+   Translucent and on one side, so the arena behind it shows the options. */
+.lobby {
+  position: absolute;
+  top: 10px; left: 10px; bottom: 54px;
+  width: min(440px, calc(100% - 20px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  z-index: 30;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px;
+  background: rgba(8, 8, 22, 0.84);
+  border: 1px solid var(--c-border-glow);
+  border-radius: var(--panel-radius);
+  font-size: 0.82rem;
+}
+.lobby-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.lobby-kicker { font-size: 0.65rem; letter-spacing: 0.25em; color: var(--c-text-muted); }
+.lobby-code { font-family: var(--font-display); font-size: 1.9rem; font-weight: 900; letter-spacing: 0.12em; line-height: 1.1; }
+.lobby-hide, .lobby-copy { font-size: 0.65rem; padding: 2px 8px; }
+.lobby-link { color: var(--c-text-muted); font-size: 0.75rem; word-break: break-all; }
+.lobby-link .font-mono { color: var(--c-cyan); }
+.lobby-section { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px; }
+.lobby-label { font-size: 0.68rem; letter-spacing: 0.18em; color: var(--c-text-muted); }
+.lobby-ro { letter-spacing: 0.05em; text-transform: none; }
+.lobby-players { display: flex; flex-wrap: wrap; gap: 5px; }
+.lobby-player { border: 1px solid; border-radius: 3px; padding: 2px 8px; font-family: var(--font-mono); font-size: 0.75rem; }
+.lobby-player.bot { color: var(--c-text-muted); border-color: var(--c-border); }
+.lobby-player.free { color: var(--c-text-dim); border-style: dashed; border-color: var(--c-border); }
+.lobby-grid { display: grid; grid-template-columns: minmax(96px, auto) 1fr; gap: 6px 10px; align-items: center; }
+.lobby-grid > span { color: var(--c-text); font-size: 0.76rem; }
+.lobby-pick, .lobby-toggles { display: flex; flex-wrap: wrap; gap: 4px; }
+.lobby-pick button, .lobby-toggle, .lobby-stepper button {
+  font-family: var(--font-display); font-size: 0.62rem; letter-spacing: 0.06em;
+  padding: 4px 7px; border-radius: 3px; cursor: pointer;
+  background: rgba(255,255,255,0.05); color: var(--c-text-muted); border: 1px solid var(--c-border);
+}
+.lobby-pick button.on, .lobby-toggle.on { background: var(--c-violet); color: #fff; border-color: var(--c-cyan); }
+.lobby-pick button:disabled, .lobby-toggle:disabled, .lobby-stepper button:disabled { cursor: default; opacity: 0.45; }
+.lobby-pick button.on:disabled, .lobby-toggle.on:disabled { opacity: 0.85; }
+.lobby-toggle { display: inline-flex; align-items: center; gap: 5px; }
+.lobby-toggle .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.5; }
+.lobby-toggle.on .dot { opacity: 1; box-shadow: 0 0 6px #fff; }
+.lobby-stepper { display: inline-flex; align-items: center; gap: 8px; }
+.lobby-stepper span { font-family: var(--font-display); min-width: 1.4em; text-align: center; font-size: 0.95rem; }
+.lobby-stepper button { width: 28px; padding: 2px 0; font-size: 0.9rem; }
+.lobby-note { font-size: 0.68rem; color: var(--c-text-dim); line-height: 1.4; }
+.lobby-actions { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 6px; }
+.lobby-actions .btn-primary { flex: 1; }
+.lobby-actions .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.lobby-wait { flex: 1; color: var(--c-text-muted); font-size: 0.85rem; }
+.lobby-leave { color: var(--c-red); border-color: var(--c-red); }
+.lobby-peek { position: absolute; top: 10px; left: 10px; z-index: 30; pointer-events: auto; }
+.lobby-peek .btn-ghost { font-size: 0.7rem; padding: 4px 10px; background: rgba(8, 8, 22, 0.84); }
+
+/* ── Touch UI (owner revision of Phase 7, R5–R8; html.touch-ui from ui/touch.ts) ── */
+html.touch-ui { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+html.touch-ui input[type="text"] { -webkit-user-select: text; user-select: text; }
+.touch-ui .arena-canvas-container, .touch-ui .touch-pad { touch-action: none; }
+.touch-ui .packet-strip { display: none; }
+/* The demo's Lab: a full-screen overlay opened from the menu */
+.touch-ui .lab-panel { position: fixed; inset: 0; width: 100%; min-width: 0; z-index: 950; border-left: none; }
+.touch-ui .lab-panel.collapsed { display: none; }
+.touch-ui .lab-panel-inner { width: 100%; }
+/* Smaller HUD text on phones */
+@media (max-height: 520px), (max-width: 560px) {
+  html.touch-ui { font-size: calc(11px * var(--ui-scale)); }
+  .touch-ui .hud-score { font-size: 1.8rem; }
+  .touch-ui .hud-killfeed { top: 104px; }
+}
+
+.touch-pad { position: absolute; inset: 0; pointer-events: none; z-index: 40; }
+.touch-pad > * { pointer-events: none; }
+.touch-left { position: absolute; left: max(16px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom)); }
+.touch-right {
+  position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: 92px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+}
+.touch-left > *, .touch-right > * { pointer-events: auto; }
+.touch-joystick {
+  position: relative; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle, rgba(0, 229, 255, 0.10), rgba(10, 8, 26, 0.45) 70%);
+  border: 2px solid rgba(0, 229, 255, 0.45);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.15) inset;
+  touch-action: none;
+}
+.touch-joystick.active { border-color: var(--c-cyan); }
+.touch-joystick-thumb {
+  border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.9), var(--c-cyan) 45%, rgba(0, 229, 255, 0.4));
+  box-shadow: 0 0 14px var(--c-cyan);
+  transition: transform 60ms linear;
+}
+.touch-joystick.active .touch-joystick-thumb { transition: none; }
+.touch-btn {
+  font-family: var(--font-display); font-weight: 700; letter-spacing: 0.1em; font-size: 0.72rem;
+  color: #fff; border-radius: 999px; padding: 10px 16px; touch-action: none;
+  background: rgba(10, 8, 26, 0.7); border: 1px solid var(--c-border-glow);
+}
+.touch-btn:active { background: var(--c-violet); }
+.touch-reload { min-width: 96px; height: 54px; border-color: var(--c-amber); color: var(--c-amber); }
+.touch-menu { min-width: 96px; }
+.touch-dash {
+  position: absolute; padding: 0; border-radius: 50%;
+  border: 2px solid #2fd6ff; color: #2fd6ff; background: rgba(47, 214, 255, 0.12);
+  animation: dash-reveal 520ms cubic-bezier(.2, 1.6, .4, 1) both;
+}
+.touch-dash.ready { box-shadow: 0 0 16px rgba(47, 214, 255, 0.7); }
+.touch-dash.cooling { opacity: 0.55; }
+@keyframes dash-reveal {
+  0% { transform: scale(0.1) translateY(30px); opacity: 0; box-shadow: 0 0 0 0 rgba(47, 214, 255, 0.9); }
+  60% { transform: scale(1.18) translateY(-4px); opacity: 1; box-shadow: 0 0 0 14px rgba(47, 214, 255, 0); }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+.touch-menu-overlay {
+  position: fixed; inset: 0; z-index: 960; background: rgba(5, 5, 15, 0.7);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.touch-menu-sheet {
+  width: min(360px, 100%); max-height: 100%; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px; padding: 16px;
+  background: var(--c-bg-panel); border: 1px solid var(--c-border-glow); border-radius: var(--panel-radius);
+}
+.touch-menu-title { letter-spacing: 0.2em; color: var(--c-cyan); text-align: center; margin-bottom: 4px; }
+.touch-menu-item {
+  font-family: var(--font-display); font-size: 0.8rem; letter-spacing: 0.08em; text-align: left;
+  padding: 12px 14px; border-radius: 6px; color: var(--c-text);
+  background: rgba(255,255,255,0.05); border: 1px solid var(--c-border);
+}
+.touch-menu-item#touch-menu-leave { color: var(--c-red); border-color: var(--c-red); }
+.touch-menu-item.resume { text-align: center; background: var(--c-violet); color: #fff; border-color: var(--c-cyan); }
+
+/* Portrait: the arena at full width on top, the controls in the space below */
+@media (orientation: portrait) {
+  .touch-ui .arena-wrapper { flex-direction: column; }
+  .touch-ui .arena-canvas-container { flex: 0 0 auto; width: 100%; aspect-ratio: 16 / 9; }
+  .touch-ui .touch-pad { position: relative; inset: auto; flex: 1; min-height: 190px; }
+  .touch-ui .touch-left { bottom: max(28px, env(safe-area-inset-bottom)); }
+  .touch-ui .touch-right { bottom: max(28px, env(safe-area-inset-bottom)); flex-direction: column-reverse; }
+  /* The lobby uses the space below the arena, so the map stays in view above it */
+  .touch-ui .lobby { position: fixed; top: calc(100vw * 9 / 16 + 6px); left: 6px; right: 6px; bottom: 6px; width: auto; }
+  .touch-ui .lobby-peek { position: fixed; top: calc(100vw * 9 / 16 + 6px); }
+}
+/* Landscape phones: the lobby a bit narrower, the map visible on the right */
+@media (orientation: landscape) and (max-height: 520px) {
+  .touch-ui .lobby { width: min(400px, 55%); bottom: 10px; }
+}
+/* Touch: the ping chip under the score (the joystick has the bottom-left corner) */
+.touch-ui .hud-quickbar { top: 64px; bottom: auto !important; }
+/* Touch: the Lab overlay closes with a button in its top-right corner (its edge tab is off-screen) */
+.touch-ui .lab-panel { position: fixed !important; }
+.touch-ui .lab-toggle-btn {
+  left: auto !important; right: 10px; top: 10px !important;
+  width: 44px !important; height: 44px !important;
+  border-right: 1px solid var(--c-border) !important; border-radius: 6px;
+}
+.touch-ui .lab-panel-inner { padding-right: 64px; }

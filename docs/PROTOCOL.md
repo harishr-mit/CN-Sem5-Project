@@ -60,7 +60,7 @@ Resent every 250 ms until an authoritative `welcome` message is received.
 - `v`: Protocol version (`number`, must be 1).
 - `name`: Callsign string (truncated to 12 chars by the server, GAMERULES.md §4).
 - `room`: one of
-  - `"main"`: the quick match (bots, a join window before the first countdown, `GAMERULES.md` §2);
+  - `"main"`: the quick match (bots fill it; it starts as soon as a human is in, `GAMERULES.md` §2);
   - `"lab"`: the movement-only sandbox used by the Compare view (demo only; every lab player spawns at the same point, `rooms.lab.spawn`, so all panes' players start together);
   - `"new"` (Phase 7): create a **private room**; the welcome carries its `code`;
   - a **room code** (Phase 7), e.g. `"blue-fox"`: join that private room. Codes are an adjective and an animal from fixed lists (`shared/src/rooms/codes.ts`, 1 600 codes); the server accepts any case and a space, a dash or nothing between the words (`"Blue Fox"`, `"BLUEFOX"`) and uses the canonical `blue-fox`. No such room → `error ROOM_NOT_FOUND`; too many rooms → `ROOM_LIMIT` (32).
@@ -146,8 +146,16 @@ Room commands may also come from a spectator (the Compare reference pane); playe
 ```json
 { "t": "start" }
 ```
-- In a **private room** that is `WAITING`: honoured from the room's **host** only (the creator; when the host leaves, the longest-connected human). The countdown begins and bots fill the empty slots. Ignored from anyone else and in any other state.
-- In `main`: honoured only under `npm run demo` (`NOBU_DEV=1`) — Presenter Quick Match sends it after the welcome to skip the join window. Never on the game server.
+- In a **private room** that is `WAITING` (its lobby): honoured from the room's **host** only (the creator; when the host leaves, the longest-connected human), and only with at least 2 participants counting the bots its options add. The countdown begins; bots fill the empty slots only if the host turned bots on. Ignored from anyone else, in any other state and in `main` (which starts by itself).
+
+### 2.6b `roomOptions` (Room Options, owner revision of Phase 7)
+```json
+{ "t": "roomOptions", "options": {
+  "map": "plaza", "maxPlayers": 4, "bots": false, "powerupEveryS": 7, "powerupMax": 4,
+  "alwaysOn": { "weapon": "rapid_fire", "shield": false, "speed": true, "piercing": false, "dash": false } } }
+```
+- The **complete** set of a private room's match options (`GAMERULES.md` §14a, `shared/src/rooms/options.ts`): `map` = a map id or `"rotation"`; `maxPlayers` 2–8; `bots` = fill empty slots; `powerupEveryS` ∈ {0, 3, 5, 7, 10, 15} (0 = none); `powerupMax` 1–8; `alwaysOn.weapon` ∈ `none` / `rapid_fire` / `spread_shot`, plus the `shield`, `speed`, `piercing`, `dash` flags. Anything else invalid → `BAD_MESSAGE`.
+- Honoured from the host, while the room is in its lobby; ignored otherwise (no error). Applied at once: the next map is set, players move to spawn points, bots are added / removed, preview power-ups are placed, and everyone's combat state gets the always-on power-ups. Snapshots carry the options in `match.options`.
 
 ### 2.7 `lab` (Scripted Movers)
 Selects the active scripted movers (PHASES.md C3). Accepted only in rooms with `movers: true` in `game.json` (only `lab`); ignored elsewhere. Any connection in the room may send it, spectators included.
@@ -283,8 +291,9 @@ While a Presenter has stopped the match clock (`dev.endless`, §2.6), `match` al
 - `tick`: Monotonic simulation tick. Snapshots with `tick <= lastAppliedTick` are dropped.
 - `ack`: Highest input sequence processed for the recipient client (`0` in spectator snapshots).
 - `players[].mover` (optional): set only on scripted lab movers (`"circle"`, `"zigzag"`, `"reversal"`, `"stopgo"`). Movers look like remote players (`bot: true`, `alive: true`, `life: 1`, `score: 0`) so interpolation treats them like any other remote entity. Their position is exactly `moverPath(pattern, tick / 60)` from `shared/src/sim/movers.ts`, so clients can compute the true position at any server time.
-- `match.waitMsLeft` (Phase 7, `main` only, while `WAITING` with a human in it): the join window's time left (`match.joinWindowMs`, 10 s; it ends early once `bots.targetParticipants` humans are in). Absent otherwise.
-- `match.code`, `match.hostId` (Phase 7, private rooms only): the room code and the host's player id (who may `start`).
+- (A Phase 7 `match.waitMsLeft` — a quick-match join window — was removed with that window the same day.)
+- `match.code`, `match.hostId`, `match.options` (Phase 7, private rooms only): the room code, the host's player id (who may `start` and send `roomOptions`) and the current room options (§2.6b). In a private room's lobby `pickups` also carries preview power-ups (where they can appear) and players are `alive` on spawn points (they can't move until the match).
+- Always-on power-ups (room options) appear in the receiver's combat state (`me`) as timers of **−1** (permanent): `weaponTicks`, `speedTicks`, `pierceTicks`, `dashTicks`; a permanent weapon has `reserve` −1 (unlimited reloads).
 - `match.map`: the map being played (`neon`, `warehouse`, `plaza`, `overgrown`; `GAMERULES.md` §3). It changes only at `COUNTDOWN`; the client switches its art and its prediction geometry when it does.
 - `players[]`: `aim` (radians, sprite rotation), `weapon` (`handgun` | `rifle` | `shotgun`), `reloading`, `shield` (Shield power-up), `fast` (Speed power-up), `invincible: true` (developer toggle; omitted when off). Movers send `aim: 0`, `weapon: "handgun"` and `false` flags.
 - `projectiles[].pierce: true` (omitted when false): fired under the Piercing power-up, passes through obstacles.
@@ -473,7 +482,7 @@ Link config fields (defaults): `latencyMs` 0, `jitterMs` 0, `jitterDist` `"norma
 | Rooms | `main`, `lab`, private rooms | `main`, private rooms (`lab` → `NOT_ALLOWED`) |
 | Sync models | any, per connection (`hello.sync`, `sync`) | `delta` for everyone (`sync` → `SYNC_FIXED`) |
 | `dev`, `perturb`, `lab`, spectators | yes (`dev` only with `NOBU_DEV=1`) | `NOT_ALLOWED`; refuses to start at all with `NOBU_DEV=1` |
-| `start` | private-room hosts; `main` with `NOBU_DEV=1` | private-room hosts only |
+| `start`, `roomOptions` | private-room hosts | private-room hosts |
 | UDP `:8081` | yes | only with `--udp` |
 | HTTP | 426 (WebSocket only) | with `--static <dir>`: the built game (below) |
 

@@ -2,13 +2,15 @@
  * room.ts — the authoritative game room.
  * One Room instance per room: 'main' (quick match), 'lab' (demo sandbox) and
  * private rooms named by their code (docs/PHASE7_PLAN.md D9), which play by
- * the 'main' rules but wait for their host's START.
+ * the 'main' rules as their host's options shape them (R2: map, max players,
+ * bots, power-ups, always-on power-ups) and wait in a lobby for the host's
+ * START, before every match.
  * SPEC.md §9, GAMERULES.md §2–§14.
  */
 
 import {
   stepPlayer, settlePosition, mulberry32, sweptCircleRect, sweptCircleCircle, segmentIntersectsRect, moverPath, MOVER_PATTERNS,
-  initialCombat, copyCombat, stepCombat, speedMultiplier, pelletAngles, applyPowerup, WEAPONS,
+  initialCombat, copyCombat, stepCombat, speedMultiplier, pelletAngles, applyPowerup, makePermanent, isOn, WEAPONS,
   powerupCap, pickPowerupKind, randomPowerupSpot, hashWorld,
 } from '@nobu/shared/sim';
 import type { Rect, Vec2, MoverPattern, MoverCfg, MoveCfg } from '@nobu/shared/sim';
@@ -16,6 +18,7 @@ import type {
   InputEntry, MsgSnap, PlayerSnap, ProjectileSnap, PickupSnap,
   MatchState, GameEvent, MatchResults, ScoreEntry, WeaponId, MsgDev,
 } from '@nobu/shared/protocol';
+import { defaultRoomOptions, spawnableKinds, alwaysOnKinds, botsFor, canStartWith, type RoomOptions } from '@nobu/shared/rooms/options.js';
 import { LockstepLog, type Velocity, type VelocityTable, type Keyframe, type LockstepRecord } from '@nobu/shared/sync';
 import GAME, { mapDef, isMapId, type MapDef, type MapId, type PowerupKind } from '@nobu/shared/config/game.js';
 import NET from '@nobu/shared/config/net.js';
@@ -52,16 +55,6 @@ const PICKUP_RESPAWN_TICKS = Math.round(GAME.powerups.respawnMs * SIM_HZ / 1000)
 /** A move longer than this in one tick is a teleport (respawn, perturb), not velocity. */
 const MAX_STEP_PX = 30;
 const HASH_EVERY_TICKS = NET.lockstep.hashEveryTicks;
-/**
- * Join window of `main` (GAMERULES.md §2, docs/PHASE7_PLAN.md D10).
- * NOBU_JOIN_WINDOW_MS overrides it (tests and smoke use 0: the old instant start).
- */
-function defaultJoinWindowMs(): number {
-  const env = typeof process !== 'undefined' ? process.env.NOBU_JOIN_WINDOW_MS : undefined;
-  const n = env !== undefined && env !== '' ? Number(env) : NaN;
-  return Number.isFinite(n) && n >= 0 ? n : GAME.match.joinWindowMs;
-}
-
 /** Developer switches (dev message) are honoured only under `npm run demo` (read per call, so tests can set it). */
 const devMode = (): boolean => typeof process !== 'undefined' && process.env.NOBU_DEV === '1';
 
@@ -122,23 +115,19 @@ interface RoomCfg {
 
 export type RoomKind = 'main' | 'lab' | 'private';
 
-export interface RoomOptions {
+export interface RoomInit {
   /** Default: the name's own config ('main', 'lab'); any other name is a private room. */
   kind?: RoomKind;
-  /** `main` only; default GAME.match.joinWindowMs (or NOBU_JOIN_WINDOW_MS). */
-  joinWindowMs?: number;
 }
 
 export class Room {
   readonly name: string;
   readonly kind: RoomKind;
   readonly roomCfg: RoomCfg;
-  /** WAITING ticks a `main` room waits for more humans once one is in (0 = start at once). */
-  private readonly joinWindowTicks: number;
-  /** Join window running: ticks left (null = not running). */
-  private waitTicksLeft: number | null = null;
   /** Private rooms: the human who may START (the creator, then the longest-connected human). */
   private host: number | null = null;
+  /** Private rooms: the host's match options (null elsewhere). */
+  private opts: RoomOptions | null = null;
 
   private state: RoomState;
   private botCtrl: BotController;
@@ -150,7 +139,7 @@ export class Room {
   /** Current map geometry (changes only at COUNTDOWN, GAMERULES.md §3). */
   private map: MapDef;
   private moveCfg: MoveCfg;
-  private readonly rotation: MapId[];
+  private rotation: MapId[];
   private matchesStarted = 0;
   /** Presenter mode (dev): the match clock is stopped. Cleared when the last human leaves. */
   private endless = false;
@@ -178,20 +167,19 @@ export class Room {
     name: string,
     sendFn: SendFn,
     spectatorFn: SpectatorFn,
-    opts: RoomOptions = {},
+    init: RoomInit = {},
   ) {
     this.name = name;
     const configs = GAME.rooms as Record<string, RoomCfg>;
-    this.kind = opts.kind ?? (name === 'main' || name === 'lab' ? name : 'private');
+    this.kind = init.kind ?? (name === 'main' || name === 'lab' ? name : 'private');
     this.roomCfg = configs[this.kind === 'private' ? 'main' : name] ?? {
       bots: false, firing: false, timed: false, movers: false, powerups: false,
     };
-    this.joinWindowTicks = this.kind === 'main'
-      ? Math.round((opts.joinWindowMs ?? defaultJoinWindowMs()) * SIM_HZ / 1000)
-      : 0;
+    if (this.kind === 'private') this.opts = defaultRoomOptions();
     this.sendFn = sendFn;
     this.spectatorFn = spectatorFn;
-    this.rotation = this.roomCfg.map && isMapId(this.roomCfg.map) ? [this.roomCfg.map] : mapRotation();
+    this.rotation = this.roomCfg.map && isMapId(this.roomCfg.map) ? [this.roomCfg.map]
+      : this.opts ? this.rotationFor(this.opts) : mapRotation();
     this.map = mapDef(this.rotation[0]);
     this.moveCfg = moveCfgFor(this.map);
     this.botCtrl = new BotController(this.map);
@@ -280,7 +268,12 @@ export class Room {
     return true;
   }
 
+  /** A private room: its options (a copy). */
+  get options(): RoomOptions | null { return this.opts ? structuredClone(this.opts) : null; }
+
+  /** No room for another human: a private room counts humans against its max players (bots make way). */
   isFull(): boolean {
+    if (this.opts) return this.humanCount >= this.opts.maxPlayers;
     return this.state.players.size >= MAX_PARTICIPANTS;
   }
 
@@ -290,13 +283,14 @@ export class Room {
     const p: PlayerState = {
       id, name: name.slice(0, GAME.player.maxNameLength), bot: isBot,
       x: spawnPos.x, y: spawnPos.y,
-      alive: this.state.matchState === 'RUNNING',
+      // In a private room's lobby players stand on the map (they can't move before the match)
+      alive: this.state.matchState === 'RUNNING' || this.inLobby,
       life: 0,
       respawnTicksLeft: 0,
       protectionTicksLeft: this.state.matchState === 'RUNNING' && this.roomCfg.firing ? PROTECT_TICKS : 0,
-      combat: initialCombat(),
+      combat: this.freshCombat(),
       aim: 0,
-      shield: false,
+      shield: this.spawnShield,
       invincible: false,
       score: 0,
       inputQueue: [],
@@ -307,8 +301,11 @@ export class Room {
     if (isBot) {
       this.botCtrl.addBot(id);
       this.botSeqMap.set(id, 0);
-    } else if (this.kind === 'private' && this.host === null) {
-      this.host = id;
+    } else if (this.kind === 'private') {
+      if (this.host === null) this.host = id;
+      this.fitBots();
+      // A new lobby previews where power-ups can appear
+      if (this.inLobby && this.state.pickups.length === 0) this.resetPickups(true);
     }
     this.emitEvent({ type: 'PLAYER_JOIN', playerId: id });
     this.markKeyframe();
@@ -347,7 +344,6 @@ export class Room {
         if (bp.bot) this.removePlayer(bid);
       }
       this.state.matchState = 'WAITING';
-      this.waitTicksLeft = null;
     }
     // A presenter who closed the tab must not leave the room without a clock
     if (!hasHumans) this.endless = false;
@@ -403,8 +399,7 @@ export class Room {
         : 0,
       results: matchState === 'ENDED' ? this._matchResults : null,
       ...(this.endless && this.roomCfg.timed ? { endless: true as const } : {}),
-      ...(matchState === 'WAITING' && this.waitTicksLeft !== null ? { waitMsLeft: this.waitTicksLeft * 1000 / SIM_HZ } : {}),
-      ...(this.kind === 'private' ? { code: this.name, ...(this.host !== null ? { hostId: this.host } : {}) } : {}),
+      ...(this.opts ? { code: this.name, options: this.opts, ...(this.host !== null ? { hostId: this.host } : {}) } : {}),
     };
     const projSnaps: ProjectileSnap[] = [...projectiles.values()].map(proj => ({
       id: proj.id,
@@ -427,7 +422,7 @@ export class Room {
       weapon: p.combat.weapon,
       reloading: p.combat.reloadTicks > 0,
       shield: p.shield,
-      fast: p.combat.speedTicks > 0,
+      fast: isOn(p.combat.speedTicks),
       ...(p.invincible ? { invincible: true as const } : {}),
     }));
     // Movers look like remote players to clients, so interpolation (and later
@@ -442,7 +437,8 @@ export class Room {
       });
     }
     const pickups: PickupSnap[] = [];
-    if (matchState === 'RUNNING') for (const pk of this.state.pickups) pickups.push({ ...pk });
+    // Running matches; and a private room's lobby, which previews where power-ups can appear
+    if (matchState === 'RUNNING' || this.inLobby) for (const pk of this.state.pickups) pickups.push({ ...pk });
     const c = player?.combat;
     return {
       t: 'snap',
@@ -662,10 +658,10 @@ export class Room {
       return false;
     });
 
-    const cap = powerupCap(st.players.size);
+    const cap = this.pickupCap;
     if (st.pickups.length > cap) st.pickups.splice(0, st.pickups.length - cap); // players left: drop the oldest
     if (st.pickups.length < cap) {
-      if (st.pickupRespawnTicks <= 0) st.pickupRespawnTicks = PICKUP_RESPAWN_TICKS;
+      if (st.pickupRespawnTicks <= 0) st.pickupRespawnTicks = this.pickupEveryTicks;
       else if (--st.pickupRespawnTicks === 0) this.spawnPickup();
     } else {
       st.pickupRespawnTicks = 0;
@@ -676,7 +672,20 @@ export class Room {
     const others = [...this.state.players.values()].filter((p) => p.alive);
     const spot = randomPowerupSpot(this.pickupRng, this.map, this.state.pickups, others);
     if (!spot) return;
-    this.state.pickups.push({ id: this.state.nextPickupId++, x: spot.x, y: spot.y, kind: pickPowerupKind(this.pickupRng) });
+    const kind = pickPowerupKind(this.pickupRng, this.opts ? spawnableKinds(this.opts) : undefined);
+    if (!kind) return;
+    this.state.pickups.push({ id: this.state.nextPickupId++, x: spot.x, y: spot.y, kind });
+  }
+
+  /** Most power-ups on the map: one per participant in `main`; the host's choice in a private room (0 when spawning is off). */
+  private get pickupCap(): number {
+    if (!this.opts) return powerupCap(this.state.players.size);
+    return this.opts.powerupEveryS === 0 || spawnableKinds(this.opts).length === 0 ? 0 : this.opts.powerupMax;
+  }
+
+  /** Ticks between spawns: 7 s in `main`; the host's choice in a private room. */
+  private get pickupEveryTicks(): number {
+    return this.opts ? Math.round(this.opts.powerupEveryS * SIM_HZ) : PICKUP_RESPAWN_TICKS;
   }
 
   /** Match start: fill up to the cap at once; otherwise clear. */
@@ -684,7 +693,7 @@ export class Room {
     this.state.pickups = [];
     this.state.pickupRespawnTicks = 0;
     if (!this.roomCfg.powerups || !fill) return;
-    const cap = powerupCap(this.state.players.size);
+    const cap = this.pickupCap;
     for (let i = 0; i < cap; i++) this.spawnPickup();
   }
 
@@ -836,8 +845,9 @@ export class Room {
     victim.alive = false;
     victim.respawnTicksLeft = RESPAWN_TICKS;
     victim.protectionTicksLeft = 0;
-    // Death removes every power-up effect (GAMERULES.md §6b) and refills the handgun
-    victim.combat = initialCombat();
+    // Death removes every power-up effect (GAMERULES.md §6b) and refills the handgun —
+    // except a private room's always-on ones, which the next life has again
+    victim.combat = this.freshCombat();
     victim.shield = false;
 
     const killer = this.state.players.get(killerId);
@@ -866,48 +876,131 @@ export class Room {
     p.life++;
     p.protectionTicksLeft = PROTECT_TICKS;
     p.respawnTicksLeft = 0;
+    if (this.spawnShield) p.shield = true;
     this.emitEvent({ type: 'PLAYER_RESPAWN', playerId: p.id, x: pos.x, y: pos.y });
     this.metrics.counters.respawns++;
   }
 
   /**
    * WAITING → COUNTDOWN (GAMERULES.md §2). Rooms without bots need
-   * `minParticipants`. `main` waits a join window once a human is in, ending
-   * early with `bots.targetParticipants` humans; a private room waits for its
-   * host's START (docs/PHASE7_PLAN.md D9, D10).
+   * `minParticipants`; `main` starts as soon as a human is in (bots fill
+   * the rest); a private room waits in its lobby for its host's START.
    */
   private checkMatchTransition(): void {
-    if (this.state.matchState !== 'WAITING') return;
+    if (this.state.matchState !== 'WAITING' || this.kind === 'private') return;
     if (!this.roomCfg.bots) {
       if (this.state.players.size >= MIN_PARTICIPANTS) this.startCountdown();
       return;
     }
-    const humans = this.humanCount;
-    if (humans === 0 || this.kind === 'private') return;
-    if (this.joinWindowTicks <= 0 || humans >= TARGET_BOTS) {
-      this.startCountdown();
-      return;
-    }
-    this.waitTicksLeft ??= this.joinWindowTicks;
+    if (this.humanCount > 0) this.startCountdown();
+  }
+
+  /** The bots a private room has during its match: the empty slots, if its host turned bots on. */
+  private botTarget(): number {
+    if (!this.opts) return Math.max(0, TARGET_BOTS - this.humanCount);
+    return botsFor(this.humanCount, this.opts);
+  }
+
+  /** Whether a private room can start: at least `minParticipants`, counting the bots it will add. */
+  get canStart(): boolean {
+    return this.opts !== null && canStartWith(this.humanCount, this.opts);
   }
 
   /**
-   * START (`start` message): a private room's host while it waits, or — only
-   * under `npm run demo` — anyone in `main` (Presenter Quick Match skips the
-   * join window). Returns whether the countdown began.
+   * START (`start` message): a private room's host, in the lobby, when there
+   * are enough participants. Returns whether the countdown began.
    */
   start(playerId: number | null): boolean {
-    if (this.state.matchState !== 'WAITING' || !this.roomCfg.timed || this.humanCount === 0) return false;
-    const allowed = this.kind === 'private' ? playerId !== null && playerId === this.host : devMode();
-    if (!allowed) return false;
+    if (this.kind !== 'private' || this.state.matchState !== 'WAITING') return false;
+    if (playerId === null || playerId !== this.host || !this.canStart) return false;
     this.startCountdown();
     return true;
+  }
+
+  /**
+   * The host's options (`roomOptions` message), in the lobby only. They show
+   * at once: the map, the bots, preview power-ups and the always-on effects.
+   * Returns whether they were applied.
+   */
+  setOptions(playerId: number | null, options: RoomOptions): boolean {
+    if (!this.opts || this.state.matchState !== 'WAITING' || playerId === null || playerId !== this.host) return false;
+    const mapChanged = options.map !== this.opts.map;
+    this.opts = structuredClone(options);
+    if (mapChanged) {
+      this.rotation = this.rotationFor(this.opts);
+      this.matchesStarted = 0;
+    }
+    this.refreshLobby();
+    return true;
+  }
+
+  private rotationFor(o: RoomOptions): MapId[] {
+    return o.map === 'rotation' ? mapRotation() : [o.map];
+  }
+
+  private get inLobby(): boolean {
+    return this.kind === 'private' && this.state.matchState === 'WAITING';
+  }
+
+  /** A new life's combat state, with the room's always-on power-ups. */
+  private freshCombat() {
+    const c = initialCombat();
+    return this.opts ? makePermanent(c, alwaysOnKinds(this.opts.alwaysOn)) : c;
+  }
+
+  /** Every life starts shielded when the Shield is always on. */
+  private get spawnShield(): boolean {
+    return this.opts?.alwaysOn.shield === true;
+  }
+
+  /** Add or remove bots to match `botTarget` (lobby and countdown). */
+  private fitBots(): void {
+    let bots = [...this.state.players.values()].filter((p) => p.bot);
+    const target = this.botTarget();
+    while (bots.length > target) {
+      this.removePlayer(bots[bots.length - 1].id);
+      bots = bots.slice(0, -1);
+    }
+    for (let i = bots.length; i < target; i++) {
+      this.addPlayer(BOT_NAMES[this.state.players.size % BOT_NAMES.length], true);
+    }
+  }
+
+  /**
+   * A private room's lobby shows what the options do: the next map with
+   * everyone on a spawn point, the bots, preview power-ups (where they could
+   * appear) and the always-on effects. Nobody can move until the match.
+   */
+  private refreshLobby(): void {
+    if (!this.inLobby) return;
+    const next = this.rotation[this.matchesStarted % this.rotation.length];
+    if (next !== this.map.id) this.setMap(next);
+    this.state.projectiles.clear();
+    this.fitBots();
+    for (const p of this.state.players.values()) {
+      const pos = this.spawnFor(p.id);
+      p.x = pos.x; p.y = pos.y;
+      p.alive = true;
+      p.respawnTicksLeft = 0;
+      p.protectionTicksLeft = 0;
+      p.combat = this.freshCombat();
+      p.shield = this.spawnShield;
+    }
+    this.resetPickups(true);
+  }
+
+  /** After a private room's match: back to its lobby (the host may change the options, then START). */
+  private enterLobby(): void {
+    this.state.matchState = 'WAITING';
+    this._matchResults = null;
+    for (const p of this.state.players.values()) { p.score = 0; p.life++; }
+    this.state.leftPlayers = [];
+    this.refreshLobby();
   }
 
   /** `map` (Presenter) replaces the next rotation map without advancing the rotation. */
   private startCountdown(map?: MapId): void {
     this.state.matchState = 'COUNTDOWN';
-    this.waitTicksLeft = null;
     this.state.countdownTicksLeft = COUNTDOWN_TICKS;
 
     // Next map in the rotation (GAMERULES.md §3); the first match plays rotation[0]
@@ -929,16 +1022,16 @@ export class Room {
       p.respawnTicksLeft = 0;
       p.protectionTicksLeft = 0;
       p.score = 0;
-      p.combat = initialCombat();
-      p.shield = false;
+      p.combat = this.freshCombat();
+      p.shield = this.spawnShield;
     }
 
-    // Add bots if room supports them
-    if (this.roomCfg.bots) {
-      const humans = [...this.state.players.values()].filter(p => !p.bot).length;
-      const needed = Math.max(0, TARGET_BOTS - humans);
+    // Bots: `main` fills to bots.targetParticipants (never removing any); a
+    // private room fills its empty slots only if its host turned bots on
+    if (this.opts) this.fitBots();
+    else if (this.roomCfg.bots) {
       const existing = [...this.state.players.values()].filter(p => p.bot).length;
-      const toAdd = needed - existing;
+      const toAdd = this.botTarget() - existing;
       for (let i = 0; i < toAdd; i++) {
         const name = BOT_NAMES[
           (this.state.players.size) % BOT_NAMES.length
@@ -957,8 +1050,8 @@ export class Room {
     for (const p of this.state.players.values()) {
       p.alive = true;
       p.protectionTicksLeft = PROTECT_TICKS;
-      p.combat = initialCombat();
-      p.shield = false;
+      p.combat = this.freshCombat();
+      p.shield = this.spawnShield;
     }
     this.resetPickups(true);
     this.emitEvent({ type: 'MATCH_START' });
@@ -997,9 +1090,7 @@ export class Room {
 
   private stepMatchState(): void {
     switch (this.state.matchState) {
-      case 'WAITING':
-        if (this.waitTicksLeft !== null && --this.waitTicksLeft <= 0) this.startCountdown();
-        break;
+      case 'WAITING': break;
 
       case 'COUNTDOWN':
         this.state.countdownTicksLeft--;
@@ -1019,7 +1110,9 @@ export class Room {
           // Auto-restart
           this._matchResults = null;
           const hasHumans = [...this.state.players.values()].some(p => !p.bot);
-          if (hasHumans) {
+          if (hasHumans && this.kind === 'private') {
+            this.enterLobby();
+          } else if (hasHumans) {
             this.startCountdown();
           } else {
             this.state.matchState = 'WAITING';

@@ -51,11 +51,19 @@ export const PIERCING_POWERUP_TICKS = ticks(GAME.powerups.piercingMs);
 export const DASH_POWERUP_TICKS = ticks(GAME.powerups.dashMs);
 export const DASH_BURST_TICKS = ticks(GAME.powerups.dash.burstMs);
 export const DASH_COOLDOWN_TICKS = ticks(GAME.powerups.dash.cooldownMs);
+/**
+ * A power-up timer that never runs out: a private room's always-on power-ups
+ * (owner revision of Phase 7, shared/src/rooms/options.ts). A permanent
+ * weapon also has unlimited reloads. Lives in the combat state itself, so the
+ * client's prediction (which adopts the server's state) agrees without
+ * knowing the room's options.
+ */
+export const PERMANENT = -1;
 
 /** The predicted part of a player's state (everything here is per-input). */
 export interface CombatState {
   weapon: WeaponId;
-  /** Remaining inputs of a power-up weapon; 0 for the default weapon. */
+  /** Remaining inputs of a power-up weapon; 0 for the default weapon; PERMANENT (−1) for an always-on one. */
   weaponTicks: number;
   ammo: number;
   /** Spare rounds outside the magazine; INFINITE_RESERVE (-1) for the default weapon. */
@@ -63,11 +71,11 @@ export interface CombatState {
   /** > 0 while reloading. */
   reloadTicks: number;
   cooldownTicks: number;
-  /** > 0 while the Speed power-up is active. */
+  /** > 0 while the Speed power-up is active (PERMANENT: always). */
   speedTicks: number;
-  /** > 0 while the Piercing power-up is active: shots pass through obstacles. */
+  /** > 0 while the Piercing power-up is active: shots pass through obstacles (PERMANENT: always). */
   pierceTicks: number;
-  /** > 0 while the Dash power-up is active (dashes allowed). */
+  /** > 0 while the Dash power-up is active, dashes allowed (PERMANENT: always). */
   dashTicks: number;
   /** > 0 during a dash burst. */
   dashBurstTicks: number;
@@ -100,8 +108,11 @@ export function sameCombat(a: CombatState, b: CombatState): boolean {
   return KEYS.every((k) => a[k] === b[k]);
 }
 
+/** A power-up timer that is running (or permanent). */
+export const isOn = (ticks: number): boolean => ticks !== 0;
+
 export function speedMultiplier(s: CombatState): number {
-  return (s.speedTicks > 0 ? GAME.powerups.speedMultiplier : 1) *
+  return (isOn(s.speedTicks) ? GAME.powerups.speedMultiplier : 1) *
     (s.dashBurstTicks > 0 ? GAME.powerups.dash.multiplier : 1);
 }
 
@@ -135,8 +146,8 @@ function equip(s: CombatState, weapon: WeaponId, weaponTicks: number): void {
   s.weapon = weapon;
   s.weaponTicks = weaponTicks;
   s.ammo = WEAPONS[weapon].magazine;
-  // Power-up weapons: one spare magazine ("1 + 1"); the default weapon: unlimited
-  s.reserve = weapon === DEFAULT_WEAPON ? INFINITE_RESERVE : WEAPONS[weapon].magazine;
+  // Power-up weapons: one spare magazine ("1 + 1"); the default weapon and a permanent one: unlimited
+  s.reserve = weapon === DEFAULT_WEAPON || weaponTicks === PERMANENT ? INFINITE_RESERVE : WEAPONS[weapon].magazine;
   s.reloadTicks = 0;
   s.cooldownTicks = 0;
 }
@@ -185,7 +196,7 @@ export function stepCombat(s: CombatState, fire: boolean, reload: boolean, dash 
       s.ammo--;
       s.cooldownTicks = w.cooldownTicks;
       res.fired = s.weapon;
-      res.pierce = s.pierceTicks > 0;
+      res.pierce = isOn(s.pierceTicks);
       if (s.ammo === 0) {
         if (s.reserve === 0) {
           // Power-up weapon out of rounds: back to the default weapon
@@ -201,7 +212,7 @@ export function stepCombat(s: CombatState, fire: boolean, reload: boolean, dash 
   if (s.cooldownTicks > 0) s.cooldownTicks--;
 
   // Dash (Dash power-up): a short burst, then a cooldown
-  if (dash && moving && s.dashTicks > 0 && s.dashCooldownTicks === 0 && s.dashBurstTicks === 0) {
+  if (dash && moving && isOn(s.dashTicks) && s.dashCooldownTicks === 0 && s.dashBurstTicks === 0) {
     s.dashBurstTicks = DASH_BURST_TICKS;
     s.dashCooldownTicks = DASH_COOLDOWN_TICKS;
     res.dashed = true;
@@ -209,14 +220,36 @@ export function stepCombat(s: CombatState, fire: boolean, reload: boolean, dash 
   return res;
 }
 
-/** Apply a collected power-up (server side; the client sees it in the next snapshot). */
+/**
+ * Apply a collected power-up (server side; the client sees it in the next
+ * snapshot). A permanent power-up stays permanent, and a permanent weapon is
+ * never replaced.
+ */
 export function applyPowerup(s: CombatState, kind: PowerupKind): { shield: boolean } {
+  const keep = (t: number, fresh: number) => (t === PERMANENT ? PERMANENT : fresh);
   switch (kind) {
-    case 'rapid_fire': equip(s, 'rifle', WEAPON_POWERUP_TICKS); return { shield: false };
-    case 'spread_shot': equip(s, 'shotgun', WEAPON_POWERUP_TICKS); return { shield: false };
-    case 'speed': s.speedTicks = SPEED_POWERUP_TICKS; return { shield: false };
-    case 'piercing': s.pierceTicks = PIERCING_POWERUP_TICKS; return { shield: false };
-    case 'dash': s.dashTicks = DASH_POWERUP_TICKS; s.dashCooldownTicks = 0; return { shield: false };
+    case 'rapid_fire': if (s.weaponTicks !== PERMANENT) equip(s, 'rifle', WEAPON_POWERUP_TICKS); return { shield: false };
+    case 'spread_shot': if (s.weaponTicks !== PERMANENT) equip(s, 'shotgun', WEAPON_POWERUP_TICKS); return { shield: false };
+    case 'speed': s.speedTicks = keep(s.speedTicks, SPEED_POWERUP_TICKS); return { shield: false };
+    case 'piercing': s.pierceTicks = keep(s.pierceTicks, PIERCING_POWERUP_TICKS); return { shield: false };
+    case 'dash': s.dashTicks = keep(s.dashTicks, DASH_POWERUP_TICKS); s.dashCooldownTicks = 0; return { shield: false };
     case 'shield': return { shield: true };
   }
+}
+
+/**
+ * Make power-ups permanent for a whole life (a private room's always-on
+ * options): the weapon with unlimited reloads, Speed / Piercing / Dash never
+ * expire. The Shield is the player's flag, not combat state (the room sets it
+ * at every spawn). Mutates `s`.
+ */
+export function makePermanent(s: CombatState, kinds: readonly PowerupKind[]): CombatState {
+  for (const k of kinds) {
+    if (k === 'rapid_fire') equip(s, 'rifle', PERMANENT);
+    else if (k === 'spread_shot') equip(s, 'shotgun', PERMANENT);
+    else if (k === 'speed') s.speedTicks = PERMANENT;
+    else if (k === 'piercing') s.pierceTicks = PERMANENT;
+    else if (k === 'dash') s.dashTicks = PERMANENT;
+  }
+  return s;
 }

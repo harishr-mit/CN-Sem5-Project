@@ -74,7 +74,7 @@ This single command checks that the ports are free and starts:
 Once started, open your browser to:
 👉 **[http://localhost:5173](http://localhost:5173)**
 
-Click **Quick Match (vs bots)** to play (a quick match waits up to 10 s for other humans before its countdown — the *join window* — then bots fill the empty slots; **CREATE ROOM** / **JOIN ROOM** open a private room, as in the game edition, §4), or **Network Lab — Compare** to compare netcode settings side by side: 2–4 panes driven by one keyboard, an optional reference pane connected straight to the server, scripted moving targets, and one-click comparisons (prediction, interpolation, redundancy, sync models, bandwidth, state rate, snapshot vs lockstep).
+Click **Quick Match (vs bots)** to play (it starts at once, bots fill the empty slots; **CREATE ROOM** / **JOIN ROOM** open a private room with its own options, as in the game edition, §4), or **Network Lab — Compare** to compare netcode settings side by side: 2–4 panes driven by one keyboard, an optional reference pane connected straight to the server, scripted moving targets, and one-click comparisons (prediction, interpolation, redundancy, sync models, bandwidth, state rate, snapshot vs lockstep).
 
 **Presenter mode** (for giving the talk): **Presenter — Quick Match** runs 13 scripted steps in a match (baseline → server delay → prediction → loss → redundancy → reconciliation off → jitter → interpolation → nudge → Nightmare with full / delta / state sync → network players over UDP); **Presenter — Compare** steps through the seven Compare presets (C7 = Snapshot vs Lockstep). Each step sets the network, every netcode toggle and the sync model at once and shows a caption bar with what to watch, the expected numbers and a step timer. `N` next, `B` back (exactly the same state again), `H` hides the caption, **END** leaves. Every normal key still works in between. The bar also has **⟲ RESTART** (the game back to its starting case and the talk back to step 1) and **map** buttons (restart the game on that map; the talk stays on its step). In Quick Match the presenter stops the match clock (HUD ∞) and turns on the developer **Invincible** switch so bots can't interrupt; these, RESTART and the map buttons need `npm run demo`. The steps are listed in `docs/DEMO_SCRIPT.md` §12. Step 13 impairs only the network players' route, so it needs network players: start them **when you reach step 13**, with `npm run swarm -- --n 3` in a second terminal (the bar says when none are connected). Started from the beginning (`npm run demo -- --swarm 3`) they make the match bigger — full snapshots ≈ 800 instead of ≈ 475 kbps — and under Nightmare (steps 10–12) even Delta then stays above the 400 kbps cap (`docs/REHEARSAL.md`).
 
@@ -102,11 +102,13 @@ npm run build     # once (and after changes): the bundle in NoBu-Shooter/dist/ga
 npm start         # serves it: page + game on one port, 8080
 ```
 
-`npm start` prints the addresses, e.g. `http://192.168.0.9:8080`. **Players on the same network open that address** — laptops and PCs, Chrome / Edge / Firefox; nothing to install. On the landing page:
-- **QUICK MATCH** joins the public match: it waits up to 10 s for other humans (ends early with 4), then bots fill the empty slots.
-- **CREATE ROOM** opens a private room with a two-word code, e.g. **BLUE FOX**, and a share link (`…/?room=blue-fox`). Friends type the code in **JOIN ROOM** (any case, with or without the space) or open the link. The creator is the host and presses **START MATCH** when everyone is in; bots fill the empty slots. If the host leaves, the next player in line becomes host; an empty room closes after 60 s.
+`npm start` prints the addresses, e.g. `http://192.168.0.9:8080`. **Players on the same network open that address** — laptops, PCs, phones and tablets (Chrome / Edge / Firefox; Safari on iPhone / iPad); nothing to install. On the landing page:
+- **QUICK MATCH** joins the public match: it starts at once, with bots in the empty slots; friends who come later join mid-match.
+- **CREATE ROOM** opens a private room with a two-word code, e.g. **BLUE FOX**, and a share link (`…/?room=blue-fox`). Friends type the code in **JOIN ROOM** (any case, with or without the space) or open the link. The room's **lobby** lists everyone who joined, and the creator (the host) sets the **room options** — map (default Neon), max players (default 4), *fill empty slots with bots* (default off: only the players who joined), how often power-ups appear and how many, and **always-on** power-ups (e.g. Rapid Fire for the whole match; those never spawn as pickups). The arena behind the lobby shows the choices live. The host presses **START MATCH**; after each match the room returns to its lobby. Everyone can **LEAVE** from the waiting page. If the host leaves, the next player in line becomes host; an empty room closes after 60 s.
 
 The HUD shows your **ping**; **Settings** (`Esc`) has **Graphics Quality** (Low / Medium / High): a match starts on small textures and upgrades to the chosen ones in the background.
+
+**On a phone or tablet** the game (and the demo) switches to a touch UI: touch the arena to aim and shoot, a **joystick** bottom-left to move (its size in Settings), a **DASH** button that pops up above it while you have the Dash power-up, and **RELOAD** and **☰ MENU** (settings, sound, leave) on the right. Landscape puts the controls over the arena; portrait puts the arena on top and the controls below. Add `?touch=1` to the address to try it on a desktop.
 
 **While developing:** `npm run dev` runs the game server and a Vite dev server on `http://<host>:5173` (also reachable from the LAN) with hot reload: client edits appear at once.
 
@@ -142,7 +144,7 @@ npm run udp-send -- --to 9100          # numbered messages through the emulator
 Ensure your environment passes all test suites and the headless end-to-end simulation:
 
 ```bash
-# Run unit and integration tests (267 tests: sim, protocol, emulator pipeline incl. queue
+# Run unit and integration tests (284 tests: sim, protocol, emulator pipeline incl. queue
 # depth and reorder marks, emulator routes (WS + UDP over real sockets, runtime routes,
 # route-scoped presets, control-port safety, "imports nothing from the game"), UDP fragments,
 # the server's UDP adapter, game rules, weapons/ammo/reload, power-ups, map layouts, sync models
@@ -153,7 +155,7 @@ Ensure your environment passes all test suites and the headless end-to-end simul
 # full vs delta vs state under Nightmare, NetClient over real UDP through the emulator, and
 # lockstep: replay ≡ the server bit for bit over 2 000 ticks, the encoder, and two lockstep
 # clients that stay identical to the server under random and burst loss with 0 desyncs;
-# Phase 7: room codes, private rooms, the join window, the game server's refusals, the
+# Phase 7: room codes, private rooms + options, always-on power-ups, the game server's refusals, the
 # static file server + WebSocket on one port, server addresses, art tiers and budgets)
 npm test
 
@@ -166,7 +168,7 @@ npm run typecheck
 # one UDP network player through udp:9100 whose fragmented snapshots must reassemble;
 # two lockstep lab players at 50 ms + 5 % loss that must replay the server exactly;
 # then the game edition: npm run build, the game server on 8090 (page, compression, refusals,
-# a quick match through the join window) and a private room created, joined and started)
+# a quick match that starts at once) and a private room created, joined, its options set and started)
 npm run smoke
 
 # Screenshot every screen at 1280×720 and 1920×1080 with local Chrome (builds the game, starts
@@ -255,7 +257,8 @@ Run these from the repository root; from `NoBu-Shooter/` the same `npm run …` 
 | **Controls / Settings** | `F1` / `Esc` |
 | **Projector** | Settings → **UI Scale** 100 / 115 / 130 % (all panels and text, not the arena; remembered) |
 | **Graphics Quality** | Settings → **Low / Medium / High** (default High; remembered): smaller textures and sounds at Low. A match starts on Low and upgrades in the background; changing it swaps the art live |
-| **Private rooms** | Landing page **CREATE ROOM** (you get a code like **BLUE FOX** and a link) / **JOIN ROOM** with a code. The host presses **START MATCH**; bots fill the empty slots. Quick Match instead waits up to 10 s for humans (the Presenter skips that wait) |
+| **Private rooms** | Landing page **CREATE ROOM** (you get a code like **BLUE FOX** and a link) / **JOIN ROOM** with a code. In the lobby the host sets map, max players, bots, power-up rate + max and always-on power-ups, then presses **START MATCH**; **◄ LEAVE** on every waiting page. Quick Match starts at once |
+| **Touch devices** | Joystick (bottom-left) = move, touch the arena = aim + fire, **DASH** (only with the Dash power-up), **RELOAD**, **☰ MENU** (Settings incl. **Joystick size**, mute, leave; demo: Network Lab, packet inspector, Presenter bar). `?touch=1` / `?touch=0` force it on / off |
 | **Ping** | Bottom-left of the HUD, next to Settings: round-trip time to the server (green / amber / red) |
 | **Network Lab sections** | Click a section title to fold it; the Lab remembers. Defaults fit 1920 × 1080 and 1280 × 720 without scrolling |
 | **Presenter mode** | Landing page **Presenter — Quick Match** (13 steps) / **Presenter — Compare** (7): `N` next step, `B` previous step, `H` hide the caption; bar buttons **⟲ RESTART**, **map** (Neon / Warehouse / Plaza / Overgrown — restarts the game there) and **END**; step 13 adds **OPEN DASHBOARD ↗** |

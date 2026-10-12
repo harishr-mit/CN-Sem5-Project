@@ -1,5 +1,6 @@
 import { DEFAULT_SYNC, isSyncSpec, normalizeSync, type SyncSpec } from '@nobu/shared/sync';
 import { DEFAULT_TIER, isTier, type Tier } from '../game/tiers.js';
+import { isJoystickSize, type JoystickSize } from './touch.js';
 
 export interface UserSettings {
   mouseSensitivity: number;
@@ -16,6 +17,8 @@ export interface UserSettings {
   labSections: Record<string, boolean>;
   /** Graphics Quality: art and sound tier (docs/PHASE7_PLAN.md D13). */
   graphicsQuality: Tier;
+  /** Touch devices: the movement joystick's size (owner revision R6). */
+  joystickSize: JoystickSize;
 }
 
 export type UiScale = 100 | 115 | 130;
@@ -43,6 +46,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   uiScale: 100,
   labSections: { ...DEFAULT_LAB_SECTIONS },
   graphicsQuality: DEFAULT_TIER,
+  joystickSize: 'medium',
 };
 
 export function loadSettings(): UserSettings {
@@ -57,6 +61,7 @@ export function loadSettings(): UserSettings {
       ? normalizeSync(merged.syncModel) : DEFAULT_SYNC;
     if (!UI_SCALES.includes(merged.uiScale)) merged.uiScale = 100;
     if (!isTier(merged.graphicsQuality)) merged.graphicsQuality = DEFAULT_TIER;
+    if (!isJoystickSize(merged.joystickSize)) merged.joystickSize = 'medium';
     const sections = typeof merged.labSections === 'object' && merged.labSections !== null ? merged.labSections : {};
     merged.labSections = { ...DEFAULT_LAB_SECTIONS };
     for (const [k, v] of Object.entries(sections)) if (typeof v === 'boolean') merged.labSections[k] = v;
