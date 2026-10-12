@@ -13,6 +13,7 @@ import { DEFAULT_LINK_CONFIG, type PacketEvent } from '../emulator/src/pipeline.
 import { GameServer } from '../server/src/core.js';
 import { startUdpServer, type UdpServerHandle } from '../server/src/udp.js';
 import { NetClient } from '../client/src/net/NetClient.js';
+import { ALL_MODELS } from '../client/src/net/allModels.js';
 import { udpTransport, type UdpTransportHandle } from '../scripts/lib/udp-transport.js';
 
 const LOCAL = '127.0.0.1';
@@ -190,7 +191,7 @@ describe('NetClient over UDP through the emulator (PHASE5_PLAN test 4)', () => {
   }
 
   function client(port: number, sync: 'full' | 'delta', handles: UdpTransportHandle[]) {
-    const c = new NetClient({
+    const c = new NetClient({ models: ALL_MODELS,
       url: `udp://${LOCAL}:${port}`, name: `UDP-${sync}`, room: 'main', labelPrefix: 'udp',
       transport: udpTransport({ onCreate: (h) => handles.push(h) }), now: () => performance.now(),
       sync: { model: sync },

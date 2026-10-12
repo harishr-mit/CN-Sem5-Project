@@ -4,7 +4,7 @@ A real-time multiplayer arena shooter demonstrating client-side prediction, serv
 
 > The game is the demo application; the networking is the point.
 
-**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases (plus the owner's Phase 2.5), each ending with a demoable checkpoint, and **all six are complete**: 1 (correct core netcode), 2 (Compare view), 2.5 (gameplay + textures), 3 (sync models: full vs delta snapshots vs state sync with extrapolation), 4 (Presenter mode + polish), 5 (UDP transport, network players, standalone emulator with its dashboard) and 6 (deterministic lockstep in the Compare view, final talk track, rehearsal — `docs/REHEARSAL.md`). Phase 7 (multiplayer readiness: LAN play in the browser, private rooms with short codes, a game-only edition with `npm run dev` / `npm run build` / `npm start`) is planned in `docs/PHASE7_PLAN.md`; nothing of it is implemented yet.
+**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases (plus the owner's Phase 2.5), each ending with a demoable checkpoint, and **all six are complete**: 1 (correct core netcode), 2 (Compare view), 2.5 (gameplay + textures), 3 (sync models: full vs delta snapshots vs state sync with extrapolation), 4 (Presenter mode + polish), 5 (UDP transport, network players, standalone emulator with its dashboard) and 6 (deterministic lockstep in the Compare view, final talk track, rehearsal — `docs/REHEARSAL.md`). **Phase 7 (multiplayer readiness) is done too:** friends on the same network play in their browser with nothing to install — a quick match or a private room joined with a two-word code — from a game-only edition (`npm run dev` / `npm run build` / `npm start`, §4 below) that ships none of the demo's tools (`docs/PHASE7_PLAN.md`).
 
 ---
 
@@ -74,7 +74,7 @@ This single command checks that the ports are free and starts:
 Once started, open your browser to:
 👉 **[http://localhost:5173](http://localhost:5173)**
 
-Click **Quick Match (vs bots)** to play, or **Network Lab — Compare** to compare netcode settings side by side: 2–4 panes driven by one keyboard, an optional reference pane connected straight to the server, scripted moving targets, and one-click comparisons (prediction, interpolation, redundancy, sync models, bandwidth, state rate, snapshot vs lockstep).
+Click **Quick Match (vs bots)** to play (a quick match waits up to 10 s for other humans before its countdown — the *join window* — then bots fill the empty slots; **CREATE ROOM** / **JOIN ROOM** open a private room, as in the game edition, §4), or **Network Lab — Compare** to compare netcode settings side by side: 2–4 panes driven by one keyboard, an optional reference pane connected straight to the server, scripted moving targets, and one-click comparisons (prediction, interpolation, redundancy, sync models, bandwidth, state rate, snapshot vs lockstep).
 
 **Presenter mode** (for giving the talk): **Presenter — Quick Match** runs 13 scripted steps in a match (baseline → server delay → prediction → loss → redundancy → reconciliation off → jitter → interpolation → nudge → Nightmare with full / delta / state sync → network players over UDP); **Presenter — Compare** steps through the seven Compare presets (C7 = Snapshot vs Lockstep). Each step sets the network, every netcode toggle and the sync model at once and shows a caption bar with what to watch, the expected numbers and a step timer. `N` next, `B` back (exactly the same state again), `H` hides the caption, **END** leaves. Every normal key still works in between. The bar also has **⟲ RESTART** (the game back to its starting case and the talk back to step 1) and **map** buttons (restart the game on that map; the talk stays on its step). In Quick Match the presenter stops the match clock (HUD ∞) and turns on the developer **Invincible** switch so bots can't interrupt; these, RESTART and the map buttons need `npm run demo`. The steps are listed in `docs/DEMO_SCRIPT.md` §12. Step 13 impairs only the network players' route, so it needs network players: start them **when you reach step 13**, with `npm run swarm -- --n 3` in a second terminal (the bar says when none are connected). Started from the beginning (`npm run demo -- --swarm 3`) they make the match bigger — full snapshots ≈ 800 instead of ≈ 475 kbps — and under Nightmare (steps 10–12) even Delta then stays above the 400 kbps cap (`docs/REHEARSAL.md`).
 
@@ -89,9 +89,38 @@ Quick Match rotates through four maps (`neon → warehouse → plaza → overgro
 
 Stop everything with `Ctrl+C`, which releases all six ports (TCP 5173, 8080, 9000, 9001; UDP 8081, 9100). If the launcher is killed some other way, its child processes notice within ~1 s and exit by themselves.
 
+Art and sound are generated from `NoBu-Shooter/assets` into `NoBu-Shooter/assets-build/` (WebP / OGG, three quality tiers) by `npm run assets`; `demo`, `dev` and `build` run it for you and it only rebuilds what changed.
+
 ---
 
-### 4. Try the emulator on its own (no game)
+### 4. Play with friends on your network (the game)
+
+The **game edition** is NoBu Shooter as players see it: the same arena, rules, art and netcode as the demo, but no emulator, Network Lab, Compare or Presenter, and one fixed set of the best netcode settings from the demo's measurements (Delta snapshots, prediction + reconciliation + interpolation on, input redundancy off — over TCP it would only add bytes). It runs on one machine (the host); everyone else just opens a browser.
+
+```bash
+npm run build     # once (and after changes): the bundle in NoBu-Shooter/dist/game
+npm start         # serves it: page + game on one port, 8080
+```
+
+`npm start` prints the addresses, e.g. `http://192.168.0.9:8080`. **Players on the same network open that address** — laptops and PCs, Chrome / Edge / Firefox; nothing to install. On the landing page:
+- **QUICK MATCH** joins the public match: it waits up to 10 s for other humans (ends early with 4), then bots fill the empty slots.
+- **CREATE ROOM** opens a private room with a two-word code, e.g. **BLUE FOX**, and a share link (`…/?room=blue-fox`). Friends type the code in **JOIN ROOM** (any case, with or without the space) or open the link. The creator is the host and presses **START MATCH** when everyone is in; bots fill the empty slots. If the host leaves, the next player in line becomes host; an empty room closes after 60 s.
+
+The HUD shows your **ping**; **Settings** (`Esc`) has **Graphics Quality** (Low / Medium / High): a match starts on small textures and upgrades to the chosen ones in the background.
+
+**While developing:** `npm run dev` runs the game server and a Vite dev server on `http://<host>:5173` (also reachable from the LAN) with hot reload: client edits appear at once.
+
+**Hosting checklist**
+- **Firewall:** the first time Node.js listens on the network, Windows asks; allow **Private networks** (or allow TCP 8080 — and 5173 for `npm run dev` — in Windows Defender Firewall).
+- **Same network:** players must be on the host's Wi-Fi / LAN. Campus and public Wi-Fi often isolate devices from each other ("client isolation"); a phone hotspot or a small router avoids it.
+- **The emulator, optionally:** it is game-agnostic, so you can still put it in front of the game: `npm run emulator -- --route ws:9000=ws://127.0.0.1:8080`, then share `http://<host>:8080/?server=<host>:9000` (the page from 8080, the game connection through the emulator) and impair everyone from its dashboard.
+- **Not for the internet (yet):** no TLS, no per-IP limits. Internet play is future work ("option B" in `PHASES.md`).
+
+`npm start -- --port 8000` uses another port; `npm start -- --udp` also opens UDP 8081 so `npm run swarm -- --direct` network players can join.
+
+---
+
+### 5. Try the emulator on its own (no game)
 
 The emulator is a separate tool, and the game is just one of its clients. In three terminals:
 
@@ -108,12 +137,12 @@ npm run udp-send -- --to 9100          # numbered messages through the emulator
 
 ---
 
-### 5. Running Tests & Smoke Verification
+### 6. Running Tests & Smoke Verification
 
 Ensure your environment passes all test suites and the headless end-to-end simulation:
 
 ```bash
-# Run unit and integration tests (222 tests: sim, protocol, emulator pipeline incl. queue
+# Run unit and integration tests (267 tests: sim, protocol, emulator pipeline incl. queue
 # depth and reorder marks, emulator routes (WS + UDP over real sockets, runtime routes,
 # route-scoped presets, control-port safety, "imports nothing from the game"), UDP fragments,
 # the server's UDP adapter, game rules, weapons/ammo/reload, power-ups, map layouts, sync models
@@ -123,7 +152,9 @@ Ensure your environment passes all test suites and the headless end-to-end simul
 # real server + client + emulator pipeline on fake timers, incl. the twin-pane check and
 # full vs delta vs state under Nightmare, NetClient over real UDP through the emulator, and
 # lockstep: replay ≡ the server bit for bit over 2 000 ticks, the encoder, and two lockstep
-# clients that stay identical to the server under random and burst loss with 0 desyncs)
+# clients that stay identical to the server under random and burst loss with 0 desyncs;
+# Phase 7: room codes, private rooms, the join window, the game server's refusals, the
+# static file server + WebSocket on one port, server addresses, art tiers and budgets)
 npm test
 
 # Type-check server, emulator, shared code, tests and client
@@ -133,16 +164,18 @@ npm run typecheck
 # (8 steps: a WS bot incl. ammo, reload, bot shots, power-ups and the map id; the lab movers;
 # a delta-sync client that must decode the server's world exactly with far fewer bytes;
 # one UDP network player through udp:9100 whose fragmented snapshots must reassemble;
-# and two lockstep lab players at 50 ms + 5 % loss that must replay the server exactly)
+# two lockstep lab players at 50 ms + 5 % loss that must replay the server exactly;
+# then the game edition: npm run build, the game server on 8090 (page, compression, refusals,
+# a quick match through the join window) and a private room created, joined and started)
 npm run smoke
 
-# Screenshot every screen at 1280×720 and 1920×1080 with local Chrome (starts and stops the
-# demo itself; ≈ 5 min, `-- --fast` ≈ 3 min). Output: NoBu-Shooter/artifacts/shots/ (git-ignored),
+# Screenshot every screen at 1280×720 and 1920×1080 with local Chrome (builds the game, starts
+# and stops the demo and a game server itself; ≈ 8 min, `-- --fast` ≈ 5 min). Output: NoBu-Shooter/artifacts/shots/ (git-ignored),
 # with fps and console errors per shot in index.json; fails on any console error.
 # Review against docs/VISUAL_CHECKLIST.md
 npm run shots
 
-# Re-pack the player animation atlas after changing frames in assets/sprites/player
+# Re-pack the player animation atlas after changing frames in NoBu-Shooter/assets-src/player
 npm run pack-assets
 ```
 
@@ -160,6 +193,16 @@ Run these from the repository root; from `NoBu-Shooter/` the same `npm run …` 
 | `npm run demo -- --swarm 3` | The same, plus 3 network players over UDP (`UDP-1…3`). For the Presenter talk, start them only at step 13 instead (`npm run swarm -- --n 3`, below) |
 | `NOBU_MAPS=plaza npm run demo` | Start the rotation on a given map (`neon`, `warehouse`, `plaza`, `overgrown`) |
 | `NOBU_HOST=127.0.0.1 npm run demo` | Bind the game server to this machine only (default: all interfaces, so others on the LAN can join) |
+
+**Run the game edition** (§4)
+
+| Command | What it does |
+|---|---|
+| `npm run build` | Build the game into `NoBu-Shooter/dist/game` (fails if any demo code got into it); prints what a player downloads |
+| `npm start` | Serve it: page + game WebSocket on port 8080, all interfaces; prints the LAN addresses |
+| `npm start -- --port 8000` | Another port (`--udp` also opens UDP 8081 for network players, `--host <ip>` binds one address) |
+| `npm run dev` | Game server (8080) + Vite dev server with hot reload on 5173, reachable from the LAN |
+| `npm run assets` | Regenerate the art / sound tiers in `NoBu-Shooter/assets-build` (`-- --force`: all of them); run automatically by `demo`, `dev`, `build` |
 
 **Network players**
 
@@ -190,7 +233,7 @@ Run these from the repository root; from `NoBu-Shooter/` the same `npm run …` 
 | `npm run typecheck` | TypeScript check of server, emulator, shared code, scripts, tests and client |
 | `npm run smoke` | Headless end-to-end smoke test under Nightmare (starts and stops its own server + emulator) |
 | `npm run shots` | Screenshots of every screen at 1280×720 and 1920×1080 (`-- --fast`, `-- --only=dashboard,presenter`) |
-| `npm run pack-assets` | Re-pack the player animation atlas |
+| `npm run pack-assets` | Re-pack the player animation atlas (from `NoBu-Shooter/assets-src/player`) |
 | `npm install` | Install everything (root `postinstall` installs the `NoBu-Shooter` workspace) |
 
 ---
@@ -211,6 +254,9 @@ Run these from the repository root; from `NoBu-Shooter/` the same `npm run …` 
 | **Sync model** | `Y` cycles Full → Delta → State 10 Hz → State 30 Hz, live (Network Lab → **SYNC MODEL**; remembered; default Full; Compare panes add **Lockstep**). Exactly one is active, shown in two groups: **Snapshots** (interpolated) — Full = whole world every snapshot, Delta = only changes since the last acknowledged snapshot — and **State sync** (extrapolated) — records + velocity at 10 or 30 Hz |
 | **Controls / Settings** | `F1` / `Esc` |
 | **Projector** | Settings → **UI Scale** 100 / 115 / 130 % (all panels and text, not the arena; remembered) |
+| **Graphics Quality** | Settings → **Low / Medium / High** (default High; remembered): smaller textures and sounds at Low. A match starts on Low and upgrades in the background; changing it swaps the art live |
+| **Private rooms** | Landing page **CREATE ROOM** (you get a code like **BLUE FOX** and a link) / **JOIN ROOM** with a code. The host presses **START MATCH**; bots fill the empty slots. Quick Match instead waits up to 10 s for humans (the Presenter skips that wait) |
+| **Ping** | Bottom-left of the HUD, next to Settings: round-trip time to the server (green / amber / red) |
 | **Network Lab sections** | Click a section title to fold it; the Lab remembers. Defaults fit 1920 × 1080 and 1280 × 720 without scrolling |
 | **Presenter mode** | Landing page **Presenter — Quick Match** (13 steps) / **Presenter — Compare** (7): `N` next step, `B` previous step, `H` hide the caption; bar buttons **⟲ RESTART**, **map** (Neon / Warehouse / Plaza / Overgrown — restarts the game there) and **END**; step 13 adds **OPEN DASHBOARD ↗** |
 | **Emulator dashboard** | Landing page **EMULATOR DASHBOARD ↗**, Network Lab **DASHBOARD ↗**, or `http://127.0.0.1:9001/` (new tab). The Lab's presets change only the game's route; the dashboard reaches every route and session |
@@ -238,7 +284,7 @@ CN-Sem5-Project/
 ├── package.json            # Root workspace scripts & postinstall hook
 ├── log.md                  # Development & task tracking log (agents)
 ├── docs/
-│   ├── PROTOCOL.md         # Wire protocol (JSON messages) and emulator control API
+│   ├── PROTOCOL.md         # Wire protocol (JSON messages, rooms, game server) and emulator control API
 │   ├── DEMO_SCRIPT.md      # Step-by-step walkthrough with expected numbers
 │   ├── ASSUMPTIONS.md      # Design decisions and their reasons
 │   ├── PHASE2_PLAN.md      # Phase 2 implementation plan (Compare view, movers)
@@ -246,17 +292,22 @@ CN-Sem5-Project/
 │   ├── PHASE4_PLAN.md      # Phase 4 implementation plan (Presenter mode, polish, shots)
 │   ├── PHASE5_PLAN.md      # Phase 5 implementation plan (UDP, network players, emulator routes + dashboard)
 │   ├── PHASE6_PLAN.md      # Phase 6 implementation plan (lockstep, final docs, rehearsal)
+│   ├── PHASE7_PLAN.md      # Phase 7 implementation plan (LAN play, game edition, rooms, asset tiers)
 │   ├── REHEARSAL.md        # Timing sheet + checklist for the presentation laptop
 │   ├── VISUAL_CHECKLIST.md # What to check on the `npm run shots` screenshots
 │   └── archive/SPEC-v1.md  # Original v1 build spec (archived)
 └── NoBu-Shooter/           # Primary application workspace
-    ├── assets/             # Textures, sprites, FX and sound effects (inventory: assets/README.md, licences: assets/CREDITS.md)
+    ├── assets/             # Textures, sprites, FX and sound effects — the masters (inventory: assets/README.md, licences: assets/CREDITS.md)
+    ├── assets-src/         # Raw player animation frames (input of `npm run pack-assets`; not served)
+    ├── assets-build/       # Generated by `npm run assets`: WebP / OGG in low/medium/high tiers (git-ignored, served)
     ├── artifacts/          # Generated by `npm run shots` (git-ignored)
-    ├── client/             # Phaser 3 + React HUD & Network Lab UI (Vite); presenter/ = Presenter scripts + controller
+    ├── dist/game/          # Generated by `npm run build`: the game edition (git-ignored, served by `npm start`)
+    ├── client/             # Phaser 3 + React (Vite). src/ = shared code; ui/App.tsx = demo (Network Lab, Compare, presenter/);
+    │                       #   play/ + src/play/PlayApp.tsx = the game edition (vite.play.config.ts)
     ├── emulator/           # Standalone WS + UDP impairment proxy: routes, dashboard/, tools/, README.md (no game dependency)
-    ├── server/             # Authoritative 60 Hz headless game server (WebSocket + UDP adapters)
+    ├── server/             # Authoritative 60 Hz headless game server (WebSocket + UDP adapters; --game: the game server, static files)
     ├── shared/             # Deterministic simulation, bot brain, protocol codec, sync models, UDP fragments
-    ├── scripts/            # Demo launcher, smoke test, network players (swarm.ts), headless bot, screenshots
+    ├── scripts/            # Launchers (demo, dev, build, start), assets, smoke test, network players (swarm.ts), headless bot, screenshots
     └── tests/              # Vitest suites incl. the end-to-end netcode harness
 ```
 
@@ -272,11 +323,16 @@ Network players (Node)   ──UDP─►  Emulator route udp:9100 ──UDP─�
 
 Network Lab (in the game) ─┐
 Emulator dashboard ────────┴──►  control API http/ws 127.0.0.1:9001 (never impaired)
+
+The game edition (npm start):
+Browsers on the LAN ──HTTP (page, art)──►  Game server :8080 (--game --static dist/game)
+                    ──WS /ws (the game)──►       same port, Delta only, no operator messages
 ```
 
 - **One server core, two transports:** the server's game logic doesn't know about transports. The WS and UDP adapters feed the same `GameServer`.
 - **The 1200-byte rule:** UDP datagrams stay at or under 1200 bytes, so larger messages (full snapshots, ≈ 2–4.5 kB in a fight) travel as fragments. The emulator impairs each fragment on its own, and one lost fragment loses the whole snapshot. That is a second reason why delta snapshots win on lossy links.
-- **Browsers stay on WebSocket**, because they can't open UDP sockets. The emulator treats each WS frame as a datagram.
+- **Browsers stay on WebSocket**, because they can't open UDP sockets. The emulator treats each WS frame as a datagram. (A browser datagram transport — WebRTC DataChannel or WebTransport — is future work for internet play, `PHASES.md` Phase 7 option B.)
+- **Two editions, one code base:** the demo (`client/src/ui/App.tsx`) and the game (`client/src/play/PlayApp.tsx`) share the arena, HUD, landing form, match view, netcode and assets; each adds only its shell. The game's NetClient gets no State / Lockstep code, so its bundle carries neither.
 - **Four ways to keep a client in sync** (chosen per connection, live): **full** snapshots (interpolated), **delta** snapshots (changes against the last acknowledged one), **state** sync (records + velocity, extrapolated), and — lab room / Compare only — **lockstep**: the server relays the inputs it consumed per tick and the client replays them with the same movement code, bit for bit (checked by a world hash every 30 ticks). Lockstep sends ≈ 1/10 of the bytes but must wait for every tick: a lost one freezes the world until it is resent (Rd off) or covered by the next message (Rd on).
 
 ---
@@ -296,7 +352,9 @@ Emulator dashboard ────────┴──►  control API http/ws 127
 - **The dashboard says OFFLINE**:
   The emulator isn't running (start `npm run demo` or `npm run emulator`). The control API accepts browser pages only from `http://127.0.0.1:9001` / `localhost:9001` and the game (`localhost:5173`); add others with `npm run emulator -- --allow-origin <url>`.
 - **Friends on the LAN can't join / Windows asks about `node.exe`**:
-  The game server and the emulator's data routes listen on all interfaces, so the first run may show a Windows Defender Firewall prompt; local play works whatever you answer. The client still connects to `127.0.0.1` (playing from another machine is the planned Phase 7 in `PHASES.md`). Don't expose the UDP ports to the internet.
+  Use the game edition (`npm run build`, `npm start`, §4) and give them the address it prints (`http://<your IP>:8080`). The first run shows a Windows Defender Firewall prompt: allow **Private networks** (local play works whatever you answer, LAN play doesn't). Still no luck: check you are on the same network and that it doesn't isolate devices (campus Wi-Fi often does — use a hotspot). Don't expose the server to the internet.
+- **"CANNOT JOIN — No room …"**:
+  The code is wrong or the room closed (60 s after its last player left). Check the code with the host, or create a new room.
 - **Canvas render error or blank page**:
   Hard refresh the browser (`Ctrl + F5`) to clear Vite cache. Ensure your browser supports WebGL / HTML5 Canvas.
 

@@ -26,8 +26,8 @@ import {
 import GAME, { mapDef, type PowerupKind } from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
 import { RemoteErrorTracker, type DrawnEntity } from './remoteError.js';
-import { Extrapolator } from './extrapolate.js';
-import { LockstepClient } from './lockstep.js';
+import type { Extrapolator, ExtrapolateCfg } from './extrapolate.js';
+import type { LockstepClient, LockstepClientOptions } from './lockstep.js';
 
 // ── Types ──────────────────────────────────────────────────────
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'timeout' | 'error';
@@ -164,11 +164,25 @@ export const browserWebSocketTransport: TransportFactory = (url, h) => {
   };
 };
 
+/**
+ * The optional sync models (docs/PHASE7_PLAN.md D4): State (extrapolation)
+ * and Lockstep. The demo, Compare, tests and tools pass all of them
+ * (`allModels.ts`); the game passes none, so its bundle has neither, and
+ * offers Full and Delta only.
+ */
+export interface SyncModules {
+  extrapolator: (cfg: ExtrapolateCfg) => Extrapolator;
+  lockstep: (opts: LockstepClientOptions) => LockstepClient;
+}
+
 export interface NetClientOptions {
   /** Base URL of the emulator (or server), e.g. ws://127.0.0.1:9000 */
   url: string;
   name: string;
-  room?: 'main' | 'lab';
+  /** `main`, `lab`, `new` (create a private room) or a room code (docs/PHASE7_PLAN.md D9). */
+  room?: string;
+  /** State / Lockstep support; without it only Full and Delta work. */
+  models?: SyncModules;
   /** Prefix for the emulator session label; a random suffix keeps it unique. */
   labelPrefix?: string;
   transport?: TransportFactory;
@@ -241,7 +255,13 @@ export class NetClient {
   readonly label: string;
   private readonly url: string;
   private readonly playerName: string;
-  private readonly roomName: 'main' | 'lab';
+  /** The room asked for in hello; after the welcome, the room joined (a code for private rooms). */
+  private roomName: string;
+  private readonly models: SyncModules | null;
+  /** Private rooms: the code and whether this client is the host (welcome; the host can change later). */
+  private roomCode: string | null = null;
+  /** The server's last fatal error (e.g. ROOM_NOT_FOUND), for the UI; null if none. */
+  private fatalError: { code: string; msg: string } | null = null;
   private readonly spectating: boolean;
   private readonly nonce: string;
   private readonly transportFactory: TransportFactory;
@@ -296,7 +316,7 @@ export class NetClient {
   private syncSpec: SyncSpec;
   private deltaDecoder = new DeltaDecoder();
   private lastAckSent = -1;
-  private extrapolator: Extrapolator;
+  private extrapolator: Extrapolator | null = null;
   /** World messages of the last second: wire size, and whether it was a delta fallback. */
   private worldMsgs: { t: number; bytes: number; fallback: boolean }[] = [];
   private lostTimes: { t: number; n: number }[] = [];
@@ -385,33 +405,46 @@ export class NetClient {
     this.url = opts.url;
     this.playerName = opts.name;
     this.roomName = opts.room ?? 'main';
+    this.models = opts.models ?? null;
     this.spectating = opts.spectate ?? false;
     this.transportFactory = opts.transport ?? browserWebSocketTransport;
     this.now = opts.now ?? (() => performance.now());
     this.nonce = Math.random().toString(36).slice(2);
     this.label = `${opts.labelPrefix ?? opts.name}-${this.nonce.slice(0, 4)}`;
-    const roomCfg = GAME.rooms[this.roomName] as { firing: boolean; map?: string };
+    const roomCfg = GAME.rooms[this.roomName === 'lab' ? 'lab' : 'main'] as { firing: boolean; map?: string };
     this.armed = roomCfg.firing;
     this.map = mapDef(roomCfg.map ?? GAME.maps.rotation[0]).id;
     this.moveCfg = moveCfgFor(this.map);
     this.syncSpec = normalizeSync(opts.sync ?? DEFAULT_SYNC);
+    if (!this.supports(this.syncSpec)) this.syncSpec = DEFAULT_SYNC;
     if (this.syncSpec.model === 'lockstep') {
       if (this.roomName !== 'lab' || this.spectating) this.syncSpec = DEFAULT_SYNC;
       else {
         // The Rd chip picks the recovery (docs/PHASE6_PLAN.md D4)
         if (this.syncSpec.rd) this.toggles = { ...this.toggles, redundancy: true };
         this.syncSpec = { model: 'lockstep' };
-        this.lockstep = new LockstepClient({ rd: this.toggles.redundancy, onDesync: (t, a, b) => this.logDesync(t, a, b) });
+        this.lockstep = this.newLockstep();
       }
     }
-    this.extrapolator = new Extrapolator({
+    this.extrapolator = this.models?.extrapolator({
       maxMs: NET.state.extrapolateMaxMs,
       backMs: NET.state.extrapolateBackMs,
       blendHalfLifeMs: NET.state.blendHalfLifeMs,
       projectileSpeed: GAME.projectile.speed,
       snapPx: NET.reconcile.snapThresholdPx,
       settle: (pos) => settlePosition(pos, this.moveCfg),
-    });
+    }) ?? null;
+  }
+
+  /** Whether this client has the code for a sync model (State and Lockstep are optional, D4). */
+  supports(spec: SyncSpec): boolean {
+    if (spec.model === 'state') return this.models !== null;
+    if (spec.model === 'lockstep') return this.models !== null;
+    return true;
+  }
+
+  private newLockstep(): LockstepClient {
+    return this.models!.lockstep({ rd: this.toggles.redundancy, onDesync: (t, a, b) => this.logDesync(t, a, b) });
   }
 
   // ── Events ─────────────────────────────────────────────────
@@ -487,8 +520,8 @@ export class NetClient {
     this.remoteError.reset();
     this.deltaDecoder = new DeltaDecoder();
     this.lastAckSent = -1;
-    this.extrapolator.reset();
-    if (this.lockstep) this.lockstep = new LockstepClient({ rd: this.toggles.redundancy, onDesync: (t, a, b) => this.logDesync(t, a, b) });
+    this.extrapolator?.reset();
+    if (this.lockstep) this.lockstep = this.newLockstep();
     this.lsInputMarks = [];
     this.lsViewTick = -1;
   }
@@ -571,7 +604,19 @@ export class NetClient {
           this.emit('sync', this.sync);
           break;
         }
+        // Refusals of a single request on the game server keep the connection (docs/PHASE7_PLAN.md D3, D6)
+        if (this.connected && (msg['code'] === 'SYNC_FIXED' || msg['code'] === 'NOT_ALLOWED')) {
+          console.warn('[client] Refused by the server:', msg['code'], msg['msg']);
+          break;
+        }
         console.warn('[client] Server error:', msg['code'], msg['msg']);
+        this.fatalError = { code: String(msg['code']), msg: String(msg['msg'] ?? '') };
+        // A refused hello (no such room, room full…) won't change by asking again
+        if (!this.connected) {
+          if (this.helloTimer) clearInterval(this.helloTimer);
+          if (this.giveUpTimer) clearTimeout(this.giveUpTimer);
+          this.helloTimer = this.giveUpTimer = null;
+        }
         this.setStatus('error');
         break;
     }
@@ -584,6 +629,8 @@ export class NetClient {
     this.helloTimer = this.giveUpTimer = null;
     this.connected = true;
     this.playerId = msg.spectator ? null : msg.playerId;
+    this.roomName = msg.room;
+    this.roomCode = msg.code ?? null;
 
     this.pingTimer = setInterval(() => {
       const id = this.pingId++;
@@ -739,7 +786,7 @@ export class NetClient {
       st: snap.st, arrivedAt: now, players: snap.players, projectiles: snap.projectiles,
       ...(vel ? { vel, hz } : {}),
     });
-    if (vel) this.extrapolator.push({ st: snap.st, players: snap.players, projectiles: snap.projectiles, vel });
+    if (vel) this.extrapolator?.push({ st: snap.st, players: snap.players, projectiles: snap.projectiles, vel });
     if (this.snapBuffer.length > NET.snapshotBufferSize) this.snapBuffer.shift();
 
     // Events are cosmetic and repeated for eventRedundancyMs: de-duplicate by eid
@@ -1010,6 +1057,7 @@ export class NetClient {
    */
   setSync(spec: SyncSpec): void {
     const next = normalizeSync(spec);
+    if (!this.supports(next)) { console.warn(`[client] The ${next.model} sync model is not part of this build`); return; }
     if (next.model === 'lockstep') {
       // Lab players only (docs/PHASE6_PLAN.md D1); `rd` is the Rd chip
       if (this.roomName !== 'lab' || this.spectating) { console.warn('[client] Lockstep is available in the lab room only'); return; }
@@ -1018,14 +1066,14 @@ export class NetClient {
     if (sameSyncModel(next, this.syncSpec)) return;
     if (next.model === 'lockstep') {
       this.syncBeforeLockstep = this.syncSpec;
-      this.lockstep = new LockstepClient({ rd: this.toggles.redundancy, onDesync: (t, a, b) => this.logDesync(t, a, b) });
+      this.lockstep = this.newLockstep();
     } else if (this.lockstep) {
       this.leaveLockstep();
     }
     this.syncSpec = next.model === 'lockstep' ? { model: 'lockstep' } : next;
     this.lastAckSent = -1;
     this.snapBuffer = [];
-    this.extrapolator.reset();
+    this.extrapolator?.reset();
     this.remoteError.reset();
     if (this.connected && !this.spectating) this.send({ t: 'sync', ...this.wireSync() });
     this.emit('sync', this.sync);
@@ -1105,8 +1153,8 @@ export class NetClient {
     const latest = this.latestSnap;
     const buf = this.snapBuffer;
     // State sync: extrapolate from the newest state (no interpolation delay, docs/PHASE3_PLAN.md D6)
-    if (buf.length > 0 && buf[buf.length - 1].vel && this.extrapolator.current) {
-      return this.extrapolator.render(this.now() + this.clockOffset);
+    if (buf.length > 0 && buf[buf.length - 1].vel && this.extrapolator?.current) {
+      return this.extrapolator!.render(this.now() + this.clockOffset);
     }
     if (!this.toggles.interpolation || buf.length === 0) {
       return { players: latest?.players ?? [], projectiles: latest?.projectiles ?? [] };
@@ -1281,7 +1329,25 @@ export class NetClient {
   /** Predicted weapon state (tests). */
   get predictedCombat(): CombatState { return copyCombat(this.combat); }
   get mapId(): MapId { return this.map; }
-  get room(): 'main' | 'lab' { return this.roomName; }
+  /** The room: `main`, `lab`, or a private room's code once welcomed (`new` before that). */
+  get room(): string { return this.roomName; }
+  /** Private rooms: the code (`blue-fox`), null elsewhere. */
+  get code(): string | null { return this.roomCode; }
+  /** Private rooms: this player may START the match (the host changes when one leaves). */
+  get isHost(): boolean {
+    const host = this.latestSnap?.match.hostId;
+    return this.playerId !== null && host === this.playerId;
+  }
+  /** The server's fatal error, if the connection ended with one (e.g. `ROOM_NOT_FOUND`). */
+  get serverError(): { code: string; msg: string } | null { return this.fatalError; }
+
+  /**
+   * START (docs/PHASE7_PLAN.md D9, D10): a private room's host starts the
+   * match; in `main` the demo's Presenter skips the join window.
+   */
+  start(): void {
+    if (this.connected) this.send({ t: 'start' });
+  }
 
   get isConnected(): boolean { return this.connected; }
   get isSpectator(): boolean { return this.spectating; }

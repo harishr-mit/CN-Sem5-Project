@@ -17,7 +17,9 @@ import { moverPath, type MoverCfg } from '@nobu/shared/sim';
 import GAME from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
 import { acquireKeyboard, movementKeys, isTypingTarget } from './input.js';
-import { preloadAssets, setupAssets, has, PLAYER_ATLAS, TEX, SFX } from './assets.js';
+import { preloadAssets, setupAssets, has, invScale, loadTier, swapTier, currentTier, PLAYER_ATLAS, TEX, SFX } from './assets.js';
+import { START_TIER, isTier, type Tier } from './tiers.js';
+import { loadSettings, onSettingsChange } from '../ui/settings.js';
 import { MapView, DEPTH } from './MapView.js';
 import { PlayerView, bakePlayerTextures, type PlayerLook } from './PlayerView.js';
 import { Sfx } from './audio.js';
@@ -40,6 +42,12 @@ export interface ArenaSceneOptions {
   playerColors?: () => ReadonlyMap<number, number>;
   /** True server time in ms, for truth markers. */
   truthClock?: () => number | null;
+  /**
+   * A fixed Graphics Quality tier (Compare panes: medium). Without it the
+   * scene starts on the low tier and upgrades to the Settings choice in the
+   * background (docs/PHASE7_PLAN.md D13).
+   */
+  tier?: Tier;
   view?: {
     /** Draw other panes' players at 30 % alpha. */
     dimOthers: boolean;
@@ -163,8 +171,55 @@ export class ArenaScene extends Phaser.Scene {
     this.options = (config as { options?: ArenaSceneOptions }).options ?? {};
   }
 
-  init(data: { netClient: NetClient }): void {
+  /** Graphics Quality (docs/PHASE7_PLAN.md D13): the tier wanted, and the one being fetched. */
+  private wantedTier: Tier = START_TIER;
+  private tierLoading: Tier | null = null;
+
+  init(data: { netClient?: NetClient; swapTo?: Tier }): void {
     if (data.netClient) this.netClient = data.netClient;
+    // A restart for a tier swap: the old game objects are gone, so the old
+    // textures can be replaced and the per-run state starts empty.
+    if (data.swapTo) {
+      swapTier(this, this.assetOptions, data.swapTo);
+      this.resetRunState();
+    }
+  }
+
+  private get assetOptions(): { room: 'main' | 'lab'; audio: boolean } {
+    return { room: this.netClient.room === 'lab' ? 'lab' : 'main', audio: this.audible };
+  }
+
+  /** Everything that refers to game objects of the previous run. */
+  private resetRunState(): void {
+    this.particles = [];
+    this.correctionLines = [];
+    this.deathMarks = [];
+    this.pulses = [];
+    this.lifeSeen.clear();
+    this.playerViews.clear();
+    this.drawnAt.clear();
+    this.shotAt.clear();
+    this.projSprites = [];
+    this.pickupSprites.clear();
+    this.moverSprites.clear();
+    this.accumMs = 0;
+    this.inputSendAccum = 0;
+  }
+
+  /**
+   * Fetch the wanted tier in the background; when it is there, restart the
+   * scene to swap it in. The NetClient keeps running, so the match goes on.
+   */
+  private upgradeTier(): void {
+    const want = this.wantedTier;
+    if (want === currentTier(this) || this.tierLoading === want) return;
+    this.tierLoading = want;
+    const swap = () => {
+      if (this.tierLoading !== want) return; // superseded by a newer choice
+      this.tierLoading = null;
+      if (this.sys.isActive()) this.scene.restart({ swapTo: want });
+    };
+    if (!loadTier(this, this.assetOptions, want, swap)) swap();
   }
 
   /** Compare panes (shared input) have no sound: five games would play everything five times. */
@@ -178,7 +233,7 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   preload(): void {
-    preloadAssets(this, { room: this.netClient.room, audio: this.audible });
+    preloadAssets(this, { ...this.assetOptions, tier: this.options.tier ?? START_TIER });
   }
 
   create(): void {
@@ -272,6 +327,18 @@ export class ArenaScene extends Phaser.Scene {
       net.on('dryFire', () => this.sfx.play(SFX.dryFire)),
       net.on('event', (ev: GameEvent) => this.onGameEvent(ev)),
     );
+
+    // Graphics Quality: start small, then the chosen tier (D13)
+    this.wantedTier = this.options.tier ?? loadSettings().graphicsQuality;
+    if (!this.options.tier) {
+      this.unsubscribers.push(onSettingsChange((st) => {
+        if (isTier(st.graphicsQuality) && st.graphicsQuality !== this.wantedTier) {
+          this.wantedTier = st.graphicsQuality;
+          this.upgradeTier();
+        }
+      }));
+    }
+    this.upgradeTier();
   }
 
   private onGameEvent(ev: GameEvent): void {
@@ -626,7 +693,7 @@ export class ArenaScene extends Phaser.Scene {
     const my = y + Math.sin(aim) * m.fwd + Math.cos(aim) * m.side;
     if (has(this, TEX.muzzle)) {
       const img = this.add.image(mx, my, TEX.muzzle, Math.floor(Math.random() * 4))
-        .setScale(weapon === 'handgun' ? 0.2 : 0.26).setRotation(aim).setTint(C_MUZZLE)
+        .setScale((weapon === 'handgun' ? 0.2 : 0.26) * invScale(this, TEX.muzzle)).setRotation(aim).setTint(C_MUZZLE)
         .setBlendMode(Phaser.BlendModes.ADD).setDepth(DEPTH.fx);
       this.time.delayedCall(60, () => img.destroy());
     } else {

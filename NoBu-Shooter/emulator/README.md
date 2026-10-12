@@ -36,6 +36,8 @@ npm run emulator -- --route udp:9100=127.0.0.1:7000 --route ws:9200=ws://127.0.0
 
 `npm run demo` starts it with the game's two routes: `ws:9000 → ws://127.0.0.1:8080` and `udp:9100 → 127.0.0.1:8081`.
 
+In front of the **game edition** (`npm start`, Phase 7), add a route yourself: `npm run emulator -- --route ws:9000=ws://127.0.0.1:8080`, and give players `http://<host>:8080/?server=<host>:9000` — the page still comes from the game server, the game connection goes through the emulator, and the dashboard impairs every player. Behind the emulator every player reaches the server from 127.0.0.1, which is why the game server never treats "localhost" as the operator.
+
 ## Try it without the game (three terminals)
 
 ```bash
@@ -146,7 +148,7 @@ Events: `state`, `stats` (every 500 ms), `packets` (every 100 ms while subscribe
   - The reason: anyone who reaches it can open listeners and forward traffic to any host.
   - `--control-host` exposes it on purpose and prints a warning.
 - **Data routes are reachable from other machines by default**, as the game's ports are, so others on your LAN can play through the emulator. Tick *this machine only* (or use `--route udp:127.0.0.1:…`) to keep a route local.
-- **Don't expose UDP routes, or the game's UDP port, to the internet.** A UDP server that streams replies to any source address can be misused to flood a third party (reflection). See *Multiplayer readiness* in `PHASES.md`.
+- **Don't expose UDP routes, or the game's UDP port, to the internet.** A UDP server that streams replies to any source address can be misused to flood a third party (reflection). See *Multiplayer readiness* in `PHASES.md` (internet play is its future option B).
 - **Windows:** the first time a port is opened to other machines, Windows Defender Firewall may ask about `node.exe`. Local use works whatever you answer.
 
 ## Optional: watching it in Wireshark

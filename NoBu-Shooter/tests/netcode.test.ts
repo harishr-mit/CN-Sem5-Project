@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { GameServer } from '../server/src/core.js';
 import { NetClient, type TransportFactory } from '../client/src/net/NetClient.js';
+import { ALL_MODELS } from '../client/src/net/allModels.js';
 import { Pipeline, LinkState, DEFAULT_LINK_CONFIG, type LinkConfig, type Clock } from '../emulator/src/pipeline.js';
 import { KEY } from '../shared/src/sim/movement.js';
 import { MOVER_PATTERNS } from '../shared/src/sim/movers.js';
@@ -58,7 +59,7 @@ function makeHarness(
       setTimeout(() => h.onOpen(), 0);
       return { send: (text) => server.handleMessage(conn, text), close: () => server.removeConnection(conn) };
     };
-    spectator = new NetClient({ url: 'ws://direct', name: 'REF', room: 'lab', transport: direct, now: () => Date.now(), spectate: true });
+    spectator = new NetClient({ models: ALL_MODELS, url: 'ws://direct', name: 'REF', room: 'lab', transport: direct, now: () => Date.now(), spectate: true });
     spectator.connect();
   }
 
@@ -84,7 +85,7 @@ function makeHarness(
       };
     };
 
-    const client = new NetClient({
+    const client = new NetClient({ models: ALL_MODELS,
       url: 'ws://harness', name: `T${i}`, room: opts.room ?? 'lab', transport, now: () => Date.now(),
       ...(opts.syncs?.[i] ? { sync: opts.syncs[i] } : {}),
     });

@@ -1,0 +1,29 @@
+{
+  "_comment": "Graphics Quality tiers (docs/PHASE7_PLAN.md D11, D13). Read by scripts/build-assets.mjs and client/src/game/assets.ts. Paths are relative to NoBu-Shooter/assets (the masters). Files listed in `scaled` are stored at `scales[tier]` of their size; every other image is the same in every tier. Images in `lossy` are lossy WebP, the rest lossless WebP. Every sound becomes OGG Vorbis at `audio[tier]`.",
+  "tiers": ["low", "medium", "high"],
+  "scales": { "low": 0.25, "medium": 0.5, "high": 1 },
+  "scaled": [
+    "packed/player.png",
+    "fx/muzzle_flash_strip4.png",
+    "fx/shield_bubble.png",
+    "textures/floors/stone_beige.png",
+    "textures/floors/brick_herringbone.png",
+    "textures/props/crate_metal.png"
+  ],
+  "lossy": [
+    "packed/player.png",
+    "fx/shield_bubble.png",
+    "textures/floors/stone_beige.png",
+    "textures/floors/brick_herringbone.png",
+    "textures/props/crate_metal.png"
+  ],
+  "webpQuality": 85,
+  "audio": {
+    "high": { "q": 5 },
+    "medium": { "q": 3 },
+    "low": { "q": 1, "mono": true, "rate": 22050 }
+  },
+  "budgetBytes": 307200,
+  "budgets": { "high/textures/floors/stone_beige.webp": 163840 },
+  "notServed": ["README.md", "CREDITS.md"]
+}

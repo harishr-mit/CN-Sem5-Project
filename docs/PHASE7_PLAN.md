@@ -1,6 +1,6 @@
 # Phase 7 Implementation Plan — Multiplayer readiness (LAN)
 
-**Status:** plan, written 2026-10-12 (T108) from the owner's decisions in `PHASES.md` Phase 7 (option A). Option B (internet play) is not part of this plan.
+**Status:** **done 2026-10-12** (T109–T114; plan written in T108 from the owner's decisions in `PHASES.md` Phase 7, option A). Deviations X1–X10 in §8. Option B (internet play) is not part of this plan.
 
 **In one sentence:** after Phase 7, someone on the same network opens `http://<operator-ip>:8080`, types a name, and plays: a quick match, or a private room joined with a short code. The game has no install, no emulator, no operator tools and one fixed set of the best netcode settings. `npm run demo` keeps everything it has today.
 
@@ -152,14 +152,14 @@ The existing 222 tests stay green. Where they relied on the instant start, they 
 
 ## 5. Exit checklist
 
-- [ ] Every check passes: `npm test` (incl. the new tests), `npm run typecheck`, `npm run smoke` (10 steps), `npm run shots` (0 console errors).
-- [ ] `npm run build` → `npm start` serves the game on 8080. A second browser profile reaches it via the LAN address, plays a quick match and a private room, and sees ping on the HUD. No Lab, Presenter or emulator anywhere in it.
-- [ ] `npm run dev`: editing a HUD file hot-reloads in a browser opened via the LAN address.
-- [ ] `npm run demo` and the Presenter run as before; Presenter Quick Match starts without waiting.
-- [ ] The game bundle and assets measured and recorded (before / after) in `log.md` and this plan; `stone_beige` ≤ 160 kB; no raw frames served.
-- [ ] The UDP port is closed under `npm start` (`netstat`); `NOBU_DEV` is not set by `dev` / `start`.
-- [ ] `.gitignore` covers `assets-build/` and `dist/`; the new dependencies are listed in `log.md`.
-- [ ] Docs updated (§3 step 6); no processes or sockets left.
+- [x] Every check passes: `npm test` (**267 tests**, 222 before + 45 new), `npm run typecheck`, `npm run smoke` (**10/10 steps**), `npm run shots` (**34 screens × 2, 0 console errors**).
+- [x] `npm run build` → `npm start` serves the game on 8080. Fresh browser contexts reach it via the LAN address (192.168.0.9), play a quick match and a private room (create, join by typed code, host START), and see ping on the HUD. No Lab, Presenter or emulator anywhere in it.
+- [x] `npm run dev`: editing a client file (`PlayApp.tsx`) hot-reloads in place (page state kept) in a browser opened via the LAN address; the game connects through Vite's `/ws` proxy.
+- [x] `npm run demo` and the Presenter run as before (smoke 1–8, shots 1–25); with the real 10 s window a normal Quick Match waits 10 s then counts down, Presenter Quick Match starts at once (∞ clock).
+- [x] The game bundle and assets measured and recorded (before / after) in `log.md` and §8 X7; `stone_beige` 141 kB; no raw frames served (`tests/assets.test.ts`).
+- [x] The UDP port is closed under `npm start` (`netstat`: only TCP 8080); `dev` / `start` clear `NOBU_DEV`, and the server refuses `--game` with it.
+- [x] `.gitignore` covers `assets-build/` (added) and `dist/`; the asset build state is under `node_modules/`; the new dependencies (`sharp`, `ffmpeg-static`) are listed in `log.md`.
+- [x] Docs updated (§3 step 6); no processes or sockets left.
 - [ ] **Owner:** a real second machine on the same network (not possible from the development laptop alone).
 
 ---
@@ -185,4 +185,16 @@ The existing 222 tests stay green. Where they relied on the instant start, they 
 
 ## 8. Deviations from this plan
 
-*(filled in during implementation)*
+| ID | Deviation | Why |
+|---|---|---|
+| X1 | **The bundle guard runs in `npm run build`** (`scripts/build.mjs`; smoke step 9 and shots run the build), not as `tests/bundle.test.ts`. | A Vite build inside `npm test` would add ≈ 15 s to every test run; in the build it guards every artifact that can ship. |
+| X2 | **Smoke steps 9–10 bind 127.0.0.1** (port 8090), not the LAN address. The LAN path was checked by hand from this laptop's LAN address (192.168.0.9: `npm start` and `npm run dev`). | Tests and smoke never expose ports (Phase 5 D15); binding the LAN would also raise a firewall prompt in an unattended run. |
+| X3 | **The game's entry is `client/play/main.tsx`**, not `src/play/main.tsx` (the app is still `src/play/PlayApp.tsx`); `client/tsconfig.json` includes `play`. | Found in the dev check: the Vite dev server resolves `index.html`'s script against its root (`client/play`) and couldn't load `../src/...`, although `vite build` could. |
+| X4 | **Latin-only fonts are imported in `global.css`**, not in a separate fonts module. | Found in the first build: `global.css` already imported every `@fontsource` subset itself, so a separate Latin import changed nothing. |
+| X5 | **The demo's key groups moved to `ui/demoControls.ts`** (ControlsOverlay takes edition groups). | Found by the bundle guard: hidden at runtime, their text ("NETWORK LAB", "PRESENTER") was still in the game's JS. |
+| X6 | **The asset build's state lives in `node_modules/.cache/`**, not in `assets-build/`. | `assets-build/` is served as is; a dot-file there would have been copied into the build. |
+| X7 | **The JS saving is small**: 1 798 → 1 730 kB minified (gzip 443 → 410 kB; brotli as served: 332 kB). The big savings are elsewhere: build on disk 16 MB → 3.2 MB, art + sound loaded ≈ 4.7 MB → 191–645 kB, fonts ≈ 3 MB → 328 kB on disk (142 kB woff2). | Phaser (≈ 1.2 MB) and React are most of the JS; the demo's tools were ≈ 70 kB. A custom Phaser build stays out of Phase 7. |
+| X8 | **Both editions get an inline SVG favicon.** | The demo linked `/favicon.svg`, which never existed: a 404 on every page load (seen in the game check). |
+| X9 | **`start` in `main` is blocked in the core on the game server, and `main.ts` refuses `--game` with `NOBU_DEV=1`.** | Bug found while writing test 5: `Room.start` trusted `NOBU_DEV` alone, so a game server started with it would have let anyone skip the join window. |
+| X10 | **Smoke's game server uses a 3 s join window; the shots' one a 10-minute window** (`NOBU_JOIN_WINDOW_MS`), so the waiting screen stays up; the demo in smoke and shots keeps 0. | Walk through the window quickly in smoke; capture it reliably in shots. |
+

@@ -12,6 +12,19 @@ import { spawn, spawnSync } from 'child_process';
 import net from 'net';
 import dgram from 'dgram';
 
+/**
+ * Generate the served art and sound tiers (scripts/build-assets.mjs,
+ * docs/PHASE7_PLAN.md D11) before a client starts. Fast when nothing changed;
+ * exits the launcher if it fails (e.g. a file over its size budget).
+ */
+export function buildAssets(cwd) {
+  const r = spawnSync(process.execPath, ['scripts/build-assets.mjs'], { cwd, stdio: 'inherit' });
+  if (r.status !== 0) {
+    console.error('[31m✘ npm run assets failed (see above).[0m');
+    process.exit(r.status ?? 1);
+  }
+}
+
 /** Spawn `node --import tsx <script> ...args` (TypeScript entry points). */
 export function spawnTs(name, script, args, { cwd, color = '', onLine } = {}) {
   return spawnNode(name, ['--import', 'tsx', script, ...args], { cwd, color, onLine });

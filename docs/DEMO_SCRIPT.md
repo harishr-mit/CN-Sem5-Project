@@ -56,7 +56,7 @@ Total ≈ 20–25 min (≈ 3 min 45 s of dwell; the rest is talk). Why the netwo
 ### 1. Baseline Conditions
 1. Start the project: `npm run demo`
 2. Open `http://localhost:5173` in your browser.
-3. Click **QUICK MATCH (vs bots)**.
+3. Click **QUICK MATCH (vs bots)**. The match first waits up to 10 s for other humans (the *join window*, Phase 7: "WAITING FOR PLAYERS — Match starts in N s"), then counts down from 3 with bots in the empty slots. The Presenter skips that wait.
 4. Move with `WASD` and shoot with Left Mouse Button against bots.
 5. **Observation**: 0 corrections/s and 0.0 px error while moving — prediction matches the server exactly. RTT ≈ 15–20 ms even on loopback (Windows timer granularity + the 30 Hz input/snapshot cadence); Input → Screen ≈ 17 ms (one frame).
 
@@ -149,7 +149,7 @@ Open **NETWORK LAB — COMPARE**. Each pane's header shows its sync model (click
 4. Under heavy burst loss State 10 Hz can freeze briefly: it extrapolates at most 250 ms past the last state, then holds until the next one arrives.
 
 ### 12. Presenter Mode (Phase 4)
-Start from the landing page. Each step sets everything at once (network, all netcode toggles, sync model — or, in Compare, a whole preset), so `N` and `B` always show the same thing; between steps every normal key still works and lasts until the next step. The caption bar (between the arena and the packet strip, or under the Compare grid) shows the step counter, what to watch, the expected numbers and a step timer — some effects need ≈ 15 s. `H` hides it; **END** goes back to the landing page.
+Start from the landing page. Presenter — Quick Match starts the match at once (it skips the 10 s join window of a normal Quick Match, Phase 7). Each step sets everything at once (network, all netcode toggles, sync model — or, in Compare, a whole preset), so `N` and `B` always show the same thing; between steps every normal key still works and lasts until the next step. The caption bar (between the arena and the packet strip, or under the Compare grid) shows the step counter, what to watch, the expected numbers and a step timer — some effects need ≈ 15 s. `H` hides it; **END** goes back to the landing page.
 
 - **⟲ RESTART** puts the game back to its starting case and the talk back to step 1: Quick Match begins a new match on the same map (3 s countdown, scores 0); Compare puts every pane's player back on the spawn and clears the charts.
 - **Map** buttons (Neon, Warehouse, Plaza, Overgrown; the current one is lit) restart the game on that map; the talk stays on its step and the step timer restarts. In Compare the drones keep their paths, which were laid out for Neon — on the other maps they fly over some props.
@@ -226,3 +226,16 @@ Talking points:
 2. The price is **waiting**. It can't show tick n + 1 before it has it: loss becomes freezes (B), and without prediction your own input takes a round trip to appear (B, C).
 3. Redundancy turns loss back into a small, constant delay (C) — the same trade as input redundancy in Phase 1, paid in bytes (C ≈ 2.5 × B).
 4. Determinism must be **checked**: during Phase 6 the hash check caught Chrome and Node computing `Math.cos` / `Math.sin` one bit apart for ≈ 3 % of the drone's angles. The movers now use a sine / cosine built only from + − × ÷ (exactly defined by IEEE 754), and the desync counter stays at 0.
+
+### 15. Playing together on the LAN (Phase 7, optional)
+
+Not part of the timed talk; a closing demo if the room has a shared network.
+
+1. Stop the demo (`Ctrl+C`), then `npm run build` and `npm start`. The server prints the addresses, e.g. `http://192.168.0.9:8080` (the first run may show a Windows Firewall prompt: allow **Private networks**).
+2. The audience opens that address on their laptops: no install, no emulator, no Lab — the **game edition**, with the best settings measured in this talk fixed in (Delta snapshots, prediction + reconciliation + interpolation, no input redundancy over TCP). Point out the **ping** chip.
+3. **CREATE ROOM** on the projector: a code like **BLUE FOX** and a link appear. The audience types the code in **JOIN ROOM**; when they are in, press **START MATCH** (bots fill the empty slots).
+4. Talking points: the browser downloaded the whole client from the server that runs the match (≈ 0.3 MB of compressed JS and ≈ 0.2–0.6 MB of art, by Graphics Quality); the browser can only use WebSocket (TCP), which is fine on a LAN but is why internet play would want WebRTC / WebTransport datagrams ("option B" in `PHASES.md`); the server refuses every operator message, because anyone can edit a browser bundle.
+5. Optional: put the standalone emulator in front — `npm run emulator -- --route ws:9000=ws://127.0.0.1:8080` — and share `http://<host>:8080/?server=<host>:9000`; then the dashboard impairs the whole room at once.
+
+Campus Wi-Fi often isolates devices from each other: test the room's network beforehand, or bring a hotspot.
+

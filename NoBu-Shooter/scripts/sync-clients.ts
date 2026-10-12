@@ -12,6 +12,7 @@
 import { WebSocket } from 'ws';
 import { performance } from 'perf_hooks';
 import { NetClient, type TransportFactory } from '../client/src/net/NetClient.js';
+import { ALL_MODELS } from '../client/src/net/allModels.js';
 import NET from '../shared/src/config/net.js';
 import type { MsgSnap } from '../shared/src/protocol/messages.js';
 import type { SyncSpec } from '../shared/src/sync/types.js';
@@ -32,7 +33,7 @@ const wsTransport: TransportFactory = (url, h) => {
 
 function client(name: string, sync: SyncSpec | undefined, direct = false): NetClient {
   const port = direct ? NET.ports.server : NET.ports.emulatorData;
-  return new NetClient({
+  return new NetClient({ models: ALL_MODELS,
     url: `ws://127.0.0.1:${port}`, name, room: 'main', labelPrefix: name,
     transport: wsTransport, now: () => performance.now(),
     ...(direct ? { spectate: true } : {}), ...(sync ? { sync } : {}),

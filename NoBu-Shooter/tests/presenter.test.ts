@@ -10,6 +10,7 @@ import { PresenterController } from '../client/src/presenter/controller.js';
 import type { PresenterStage } from '../client/src/presenter/types.js';
 import { COMPARE_PRESETS, DEFAULT_TOGGLES } from '../client/src/compare/presets.js';
 import { NetClient, type PredictionToggle } from '../client/src/net/NetClient.js';
+import { ALL_MODELS } from '../client/src/net/allModels.js';
 import type { CompareNetwork } from '../client/src/compare/types.js';
 import type { SyncSpec } from '../shared/src/sync/index.js';
 import type { MapId } from '../shared/src/protocol/index.js';
@@ -208,7 +209,7 @@ describe('PresenterController (plan test 2)', () => {
 });
 
 describe('NetClient change events (plan test 3)', () => {
-  const make = () => new NetClient({
+  const make = () => new NetClient({ models: ALL_MODELS,
     url: 'ws://unused', name: 'T',
     transport: () => ({ send: () => {}, close: () => {} }),
   });

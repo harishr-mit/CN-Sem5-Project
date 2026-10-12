@@ -10,6 +10,9 @@
   ],
   "scripts": {
     "demo": "node scripts/demo.mjs",
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/start.mjs",
     "emulator": "node --import tsx emulator/src/main.ts",
     "swarm": "node --import tsx scripts/swarm.ts",
     "udp-echo": "node emulator/tools/udp-echo.mjs",
@@ -20,16 +23,19 @@
     "typecheck": "tsc -p tsconfig.node.json && tsc -p client/tsconfig.json --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
-    "pack-assets": "node scripts/pack-assets.mjs"
+    "pack-assets": "node scripts/pack-assets.mjs",
+    "assets": "node scripts/build-assets.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
     "eslint": "^8.57.0",
+    "ffmpeg-static": "^5.2.0",
     "playwright-core": "1.48.2",
     "pngjs": "^7.0.0",
     "prettier": "^3.3.2",
+    "sharp": "^0.33.5",
     "tsx": "4.19.2",
     "typescript": "^5.5.2",
     "vitest": "^1.6.0"

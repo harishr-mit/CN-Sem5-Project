@@ -1,7 +1,10 @@
 # NoBu Shooter — art and sound assets
 
-Textures, sprites, effects and sounds for the arena. Vite serves this folder
-from the site root (`publicDir` in `client/vite.config.ts`); the manifest is
+Textures, sprites, effects and sounds for the arena — **the masters**: edit and
+replace files here. They are not served as they are: `npm run assets`
+(`scripts/build-assets.mjs`, run by `npm run demo`, `dev` and `build`)
+generates the served copies into `NoBu-Shooter/assets-build/<tier>/`, Vite's
+`publicDir` for both editions (below). The manifest is
 `client/src/game/assets.ts`. Any file that is missing falls back to the
 procedural drawing (`// TEXTURE: <name>` markers in `client/src/game/`) or to
 silence, so files can be added or replaced without code changes. How each asset is used: `GAMERULES.md` §17 (look) and §18 (sound).
@@ -20,23 +23,34 @@ Owner-supplied 2026-10-10; pruned and renamed in T51 and T57, wired in by Phase 
   (`death.ogg` and `dry_fire.mp3` are as supplied).
 - Every new file needs a line in `CREDITS.md`; the repo is public.
 
-## Quality tiers (planned, Phase 7)
+## Served files and quality tiers (Phase 7)
 
-*Not implemented yet (owner, 2026-10-12; `PHASES.md` Phase 7 M9).* This folder stays the place
-where art and sound are edited (the masters). `npm run assets` will generate
-what every edition serves, in `NoBu-Shooter/assets-build/{high,medium,low}/`
-(git-ignored): textures as WebP and every sound as OGG, at full size in `high`,
-half in `medium` and a quarter in `low` (small and pixel-art images stay the
-same); no served file above 300 kB, and `stone_beige.png` (2.2 MB) at ≤ 160 kB.
-A **Graphics Quality** setting (low / medium / high) chooses the tier; a match
-starts on `low` and upgrades in the background. The raw frames under
-`sprites/player/**` (≈ 7.6 MB) only feed `npm run pack-assets`; they move to
-`NoBu-Shooter/assets-src/player/` and are served by no edition. Details:
-`docs/PHASE7_PLAN.md` D11–D13.
+`npm run assets` writes three tiers into `NoBu-Shooter/assets-build/` (git-ignored),
+one per **Graphics Quality** setting (Settings → Low / Medium / High; a match
+starts on Low and upgrades in the background):
+
+| | `high/` | `medium/` | `low/` |
+|---|---|---|---|
+| Large images (`client/src/game/assetTiers.json` → `scaled`: player atlas, muzzle strip, shield, `stone_beige`, `brick_herringbone`, `crate_metal`) | full size | half | quarter |
+| Other images (pixel art, icons, small effects) | same | same | same |
+| Image format | WebP: lossy q85 for the photographic ones (`lossy`), lossless for the rest | | |
+| Sounds | OGG Vorbis q5 | q3 | q1, mono, 22 kHz |
+| Total (2026-10-12) | 645 kB | 359 kB | 191 kB |
+
+- The draw code keeps every image's size on screen (`invScale` in `assets.ts`);
+  the player atlas is re-packed per tier frame by frame with fresh padding.
+- **Budgets** (the script fails above them): 300 kB per served file;
+  `high/textures/floors/stone_beige.webp` ≤ 160 kB (it is 141 kB; the 2.2 MB
+  PNG master stays here).
+- Only changed masters are rebuilt (`-- --force` rebuilds all). New files need
+  no code change for the tiers: images become WebP, sounds OGG; list a large
+  image in `assetTiers.json` → `scaled` to shrink it in lower tiers.
+- `README.md` and `CREDITS.md` are not served. The raw player frames live in
+  `NoBu-Shooter/assets-src/player/` and are served by no edition.
 
 ## Packed player atlas
 
-The game does **not** load `sprites/player/**` frame by frame: `npm run pack-assets`
+The game does **not** load the raw frames (`../assets-src/player/**`, moved out of this folder in Phase 7) frame by frame: `npm run pack-assets`
 (`scripts/pack-assets.mjs`) crops, downscales (0.4×) and packs all 245 frames
 into `packed/player.png` + `packed/player.json` (2048×1024, Phaser JSON hash)
 with a per-frame pivot at the shoulders. Re-run it after changing any frame and
@@ -48,8 +62,8 @@ commit both files.
 
 | Path | Used for | Size | Notes |
 |---|---|---|---|
-| `sprites/player/body/{handgun,rifle,shotgun}/{idle,move,shoot,reload}/` | All players (via `packed/`) | ~255 × 215 per frame | 20 / 20 / 3 / 15–20 frames. Handgun = default; rifle = Rapid Fire; shotgun = Spread Shot. Drawn ~54 px across. |
-| `sprites/player/feet/{idle,run,strafe_left,strafe_right}/` | Legs under the body | ~204 × 124 | Chosen by movement direction relative to aim. |
+| `../assets-src/player/body/{handgun,rifle,shotgun}/{idle,move,shoot,reload}/` | All players (via `packed/`) | ~255 × 215 per frame | 20 / 20 / 3 / 15–20 frames. Handgun = default; rifle = Rapid Fire; shotgun = Spread Shot. Drawn ~54 px across. |
+| `../assets-src/player/feet/{idle,run,strafe_left,strafe_right}/` | Legs under the body | ~204 × 124 | Chosen by movement direction relative to aim. |
 | `sprites/drone_target.png` | `mover_drone` (Compare-view targets) | 24 × 24 | |
 | `sprites/pickups/{rapid_fire,spread_shot,shield,speed,piercing,dash}.png` | Power-up icons (§6b) | 64 × 64 | Round badges; transparent corners. `piercing` and `dash` drawn for this project (T59); the Ammo icon was removed with the Ammo power-up. |
 

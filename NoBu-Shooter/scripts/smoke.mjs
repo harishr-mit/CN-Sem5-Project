@@ -19,6 +19,13 @@
  *    50 ms + 5 % loss, two lockstep lab players (Rd off / on) and a direct
  *    spectator; every shown world equals the server's, 0 desyncs, Rd on
  *    stalls less (scripts/lockstep-clients.ts)
+ * 9. The game edition (docs/PHASE7_PLAN.md §4): `npm run build`, then the game
+ *    server as `npm start` runs it (--game --static dist/game) on 8090,
+ *    127.0.0.1 only, with a 3 s join window: the page, compression and
+ *    caching, operator messages refused, a quick match through the join
+ *    window with the game's client (Delta, no optional models)
+ * 10. A private room on that server: create, join by code, guest START
+ *    ignored, host START with bots (scripts/game-clients.ts)
  * All child processes are stopped (and ports freed) on every exit path.
  */
 
@@ -35,7 +42,7 @@ console.log('\x1b[36m%s\x1b[0m', '═══════════════�
 console.log('\x1b[36m%s\x1b[0m', '  NOBU SHOOTER — SMOKE TEST (HEADLESS CLIENTS UNDER NIGHTMARE) ');
 console.log('\x1b[36m%s\x1b[0m', '═══════════════════════════════════════════════════════════════\n');
 
-await assertPortsFree([8080, 9000, 9001]);
+await assertPortsFree([8080, 8090, 9000, 9001]);
 await assertUdpPortsFree([8081, 9100]);
 
 const quiet = (name) => (l, isErr) => {
@@ -46,11 +53,13 @@ const children = [];
 const cleanup = cleanupOnExit(children);
 // The automated run binds this machine only (docs/PHASE5_PLAN.md D15)
 process.env.NOBU_HOST = '127.0.0.1';
+// The old instant start of `main` (Phase 7 join window); smoke checks netcode, not the lobby
+process.env.NOBU_JOIN_WINDOW_MS = '0';
 
-console.log('[smoke] 1/8 Launching game server (ws 8080, udp 8081)...');
+console.log('[smoke] 1/10 Launching game server (ws 8080, udp 8081)...');
 children.push(spawnTs('SERVER', 'server/src/main.ts', [], { cwd: rootDir, onLine: quiet('SERVER') }));
 
-console.log('[smoke] 2/8 Launching network emulator (routes ws:9000, udp:9100; control 9001)...');
+console.log('[smoke] 2/10 Launching network emulator (routes ws:9000, udp:9100; control 9001)...');
 children.push(spawnTs('EMULATOR', 'emulator/src/main.ts', [
   '--route', 'ws:127.0.0.1:9000=ws://127.0.0.1:8080',
   '--route', 'udp:127.0.0.1:9100=127.0.0.1:8081',
@@ -64,7 +73,7 @@ if (!up.every(Boolean)) {
   process.exit(1);
 }
 
-console.log('[smoke] 3/8 Configuring emulator with "Nightmare" preset (all routes)...');
+console.log('[smoke] 3/10 Configuring emulator with "Nightmare" preset (all routes)...');
 await new Promise((resolveP, reject) => {
   const ctrl = new WebSocket('ws://127.0.0.1:9001');
   ctrl.on('open', () => {
@@ -86,25 +95,41 @@ function fail(msg, code) {
 }
 const echo = (l) => console.log(l);
 
-console.log('[smoke] 4/8 Starting headless bot (10s duration)...');
+console.log('[smoke] 4/10 Starting headless bot (10s duration)...');
 let code = await run(spawnNode('BOT', ['scripts/headless-bot.mjs', '--duration', '10', '--min-tick-hz', '55'], { cwd: rootDir, onLine: echo }));
 if (code !== 0) fail('Bot exited with an error', code);
 
-console.log('[smoke] 5/8 Lab spectator + scripted movers (direct to the server)...');
+console.log('[smoke] 5/10 Lab spectator + scripted movers (direct to the server)...');
 code = await run(spawnTs('SPECTATOR', 'scripts/lab-spectator.ts', [], { cwd: rootDir, onLine: echo }));
 if (code !== 0) fail('Lab spectator check failed', code);
 
-console.log('[smoke] 6/8 Sync models: full vs delta NetClients under Nightmare + direct spectator...');
+console.log('[smoke] 6/10 Sync models: full vs delta NetClients under Nightmare + direct spectator...');
 code = await run(spawnTs('SYNC', 'scripts/sync-clients.ts', [], { cwd: rootDir, onLine: echo }));
 if (code !== 0) fail('Sync-model check failed', code);
 
-console.log('[smoke] 7/8 One UDP network player through udp:9100 under Nightmare (10 s)...');
+console.log('[smoke] 7/10 One UDP network player through udp:9100 under Nightmare (10 s)...');
 code = await run(spawnTs('SWARM', 'scripts/swarm.ts', ['--n', '1', '--duration', '10', '--quiet'], { cwd: rootDir, onLine: echo }));
 if (code !== 0) fail('UDP network player check failed', code);
 
-console.log('[smoke] 8/8 Lockstep: two lab players (Rd off / on) at 50 ms + 5 % loss + direct spectator...');
+console.log('[smoke] 8/10 Lockstep: two lab players (Rd off / on) at 50 ms + 5 % loss + direct spectator...');
 code = await run(spawnTs('LOCKSTEP', 'scripts/lockstep-clients.ts', [], { cwd: rootDir, onLine: echo }));
 if (code !== 0) fail('Lockstep check failed', code);
+
+console.log('[smoke] 9/10 Game edition: npm run build, then the game server on 8090 (one port: page + /ws)...');
+code = await run(spawnNode('BUILD', ['scripts/build.mjs'], { cwd: rootDir, onLine: echo }));
+if (code !== 0) fail('npm run build failed', code);
+const GAME_PORT = 8090;
+process.env.NOBU_JOIN_WINDOW_MS = '3000'; // this server only: a short join window to walk through
+children.push(spawnTs('GAME', 'server/src/main.ts', ['--game', '--static', 'dist/game', '--port', String(GAME_PORT)], { cwd: rootDir, onLine: quiet('GAME') }));
+process.env.NOBU_JOIN_WINDOW_MS = '0';
+if (!(await waitForPort(GAME_PORT))) fail('The game server did not start', 1);
+const base = `http://127.0.0.1:${GAME_PORT}`;
+code = await run(spawnTs('GAME9', 'scripts/game-clients.ts', ['--base', base, '--step', '9'], { cwd: rootDir, onLine: echo }));
+if (code !== 0) fail('Game edition check failed', code);
+
+console.log('[smoke] 10/10 Private room on the game server: create, join by code, host START...');
+code = await run(spawnTs('GAME10', 'scripts/game-clients.ts', ['--base', base, '--step', '10'], { cwd: rootDir, onLine: echo }));
+if (code !== 0) fail('Private room check failed', code);
 
 cleanup();
 console.log('\n\x1b[32m✔ SMOKE TEST COMPLETE: All assertions passed under Nightmare conditions.\x1b[0m\n');

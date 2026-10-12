@@ -26,6 +26,7 @@
 import { WebSocket } from 'ws';
 import { performance } from 'perf_hooks';
 import { NetClient } from '../client/src/net/NetClient.js';
+import { ALL_MODELS } from '../client/src/net/allModels.js';
 import { BotController, type BotView } from '../shared/src/sim/botBrain.js';
 import { mapDef } from '../shared/src/config/game.js';
 import NET from '../shared/src/config/net.js';
@@ -92,7 +93,7 @@ for (let i = 1; i <= N; i++) {
   const p: Player = {
     name, transport: null, brain: null, brainMap: null, seq: new Map(), labelled: false,
     worldMsgs: 0, corrections: 0, last: { corrections: 0, dropped: 0, t: performance.now() },
-    client: new NetClient({
+    client: new NetClient({ models: ALL_MODELS,
       url: `udp://${TARGET}`, name, room: ROOM, labelPrefix: name,
       transport: udpTransport({ onCreate: (h) => { p.transport = h; } }),
       now: () => performance.now(),

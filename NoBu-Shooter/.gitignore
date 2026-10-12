@@ -33,3 +33,6 @@ Thumbs.db
 
 # Generated screenshots and reports (npm run shots, Phase 4 P7)
 artifacts/
+
+# Generated art/sound tiers (npm run assets, Phase 7 D11) — rebuilt from assets/
+assets-build/

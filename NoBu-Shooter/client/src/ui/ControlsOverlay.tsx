@@ -3,12 +3,21 @@ import React from 'react';
 interface ControlsOverlayProps {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * Edition key groups (the demo's Network Lab, netcode and Presenter keys,
+   * ui/demoControls.ts); the game edition has none (docs/PHASE7_PLAN.md D3).
+   */
+  extra?: ExtraControls;
 }
 
-export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClose }) => {
+export interface ControlGroup { category: string; items: { keys: string[]; desc: string }[] }
+/** `beforeSystem` groups go before SYSTEM SHORTCUTS, `last` ones at the end. */
+export interface ExtraControls { beforeSystem: ControlGroup[]; last: ControlGroup[] }
+
+export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClose, extra }) => {
   if (!isOpen) return null;
 
-  const controlGroups = [
+  const base: ControlGroup[] = [
     {
       category: 'PILOT & COMBAT',
       items: [
@@ -32,43 +41,15 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({ isOpen, onClos
       ],
     },
     {
-      category: 'NETWORK LAB & PRESETS',
-      items: [
-        { keys: ['TAB'], desc: 'Toggle Network Lab panel' },
-        { keys: ['1'], desc: 'Preset: Baseline (LAN, 0ms, 0% loss)' },
-        { keys: ['2'], desc: 'Preset: Café Wi-Fi (25ms, 15ms jitter, 1% loss)' },
-        { keys: ['3'], desc: 'Preset: Mobile 4G (45ms, 25ms jitter, 2% loss)' },
-        { keys: ['4'], desc: 'Preset: Transatlantic (90ms, 8ms jitter, 0.5% loss)' },
-        { keys: ['5'], desc: 'Preset: Nightmare (120ms, 50ms jitter, 12% loss)' },
-      ],
-    },
-    {
-      category: 'NETCODE ENGINE TOGGLES',
-      items: [
-        { keys: ['P'], desc: 'Toggle Client-Side Prediction' },
-        { keys: ['C'], desc: 'Toggle Server Reconciliation' },
-        { keys: ['I'], desc: 'Toggle Snapshot Interpolation' },
-        { keys: ['G'], desc: 'Toggle Ghost Player (Server True Position)' },
-        { keys: ['Y'], desc: 'Cycle sync model: Full → Delta → State 10 Hz → State 30 Hz (live)' },
-      ],
-    },
-    {
       category: 'SYSTEM SHORTCUTS',
       items: [
         { keys: ['ESC'], desc: 'Open System Settings (includes Leave Match)' },
         { keys: ['F1', '?'], desc: 'Toggle this Controls Guide' },
       ],
     },
-    {
-      category: 'PRESENTER MODE (landing page buttons)',
-      items: [
-        { keys: ['N'], desc: 'Next step (applies its network, toggles and sync model)' },
-        { keys: ['B'], desc: 'Previous step (exactly the same state again)' },
-        { keys: ['H'], desc: 'Hide / show the caption bar' },
-        { keys: ['END'], desc: 'Button on the bar: leave Presenter mode' },
-      ],
-    },
   ];
+  const system = base.findIndex((g) => g.category === 'SYSTEM SHORTCUTS');
+  const controlGroups = [...base.slice(0, system), ...(extra?.beforeSystem ?? []), ...base.slice(system), ...(extra?.last ?? [])];
 
   return (
     <div

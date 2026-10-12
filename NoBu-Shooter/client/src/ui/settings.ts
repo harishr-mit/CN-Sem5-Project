@@ -1,4 +1,5 @@
 import { DEFAULT_SYNC, isSyncSpec, normalizeSync, type SyncSpec } from '@nobu/shared/sync';
+import { DEFAULT_TIER, isTier, type Tier } from '../game/tiers.js';
 
 export interface UserSettings {
   mouseSensitivity: number;
@@ -13,6 +14,8 @@ export interface UserSettings {
   uiScale: UiScale;
   /** Network Lab sections open (true) or closed, by section id (PHASES.md P4). */
   labSections: Record<string, boolean>;
+  /** Graphics Quality: art and sound tier (docs/PHASE7_PLAN.md D13). */
+  graphicsQuality: Tier;
 }
 
 export type UiScale = 100 | 115 | 130;
@@ -39,6 +42,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   syncModel: DEFAULT_SYNC,
   uiScale: 100,
   labSections: { ...DEFAULT_LAB_SECTIONS },
+  graphicsQuality: DEFAULT_TIER,
 };
 
 export function loadSettings(): UserSettings {
@@ -52,6 +56,7 @@ export function loadSettings(): UserSettings {
     merged.syncModel = isSyncSpec(merged.syncModel) && merged.syncModel.model !== 'lockstep'
       ? normalizeSync(merged.syncModel) : DEFAULT_SYNC;
     if (!UI_SCALES.includes(merged.uiScale)) merged.uiScale = 100;
+    if (!isTier(merged.graphicsQuality)) merged.graphicsQuality = DEFAULT_TIER;
     const sections = typeof merged.labSections === 'object' && merged.labSections !== null ? merged.labSections : {};
     merged.labSections = { ...DEFAULT_LAB_SECTIONS };
     for (const [k, v] of Object.entries(sections)) if (typeof v === 'boolean') merged.labSections[k] = v;

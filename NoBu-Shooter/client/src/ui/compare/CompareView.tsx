@@ -13,6 +13,8 @@ import { MOVER_PATTERNS } from '@nobu/shared/sim';
 import type { MoverPattern, MapId } from '@nobu/shared/protocol';
 import { nextSync, COMPARE_SYNC_CYCLE, type SyncSpec } from '@nobu/shared/sync';
 import { NetClient, type LocalMetrics, type PredictionToggle } from '../../net/NetClient.js';
+import { ALL_MODELS } from '../../net/allModels.js';
+import { demoServiceUrl } from '../../net/serverUrl.js';
 import { EmulatorClient } from '../../net/EmulatorClient.js';
 import type { ArenaSceneOptions } from '../../game/ArenaScene.js';
 import { InputDriver } from '../../compare/InputDriver.js';
@@ -26,9 +28,10 @@ import { useGameStore } from '../store.js';
 import { ComparePane } from './ComparePane.js';
 import { CompareDock, type DockRow } from './CompareDock.js';
 
-const EMULATOR_DATA_URL = `ws://127.0.0.1:${NET.ports.emulatorData}`;
+// Data route and server on the page's host (docs/PHASE7_PLAN.md D5); the control port is this machine only
+const EMULATOR_DATA_URL = () => demoServiceUrl(window.location, NET.ports.emulatorData);
 const EMULATOR_CONTROL_URL = `ws://127.0.0.1:${NET.ports.emulatorControl}`;
-const SERVER_URL = `ws://127.0.0.1:${NET.ports.server}`;
+const SERVER_URL = () => demoServiceUrl(window.location, NET.ports.server);
 const BODY_PAD = 8;
 const GAP = 8;
 const HISTORY = 60;
@@ -80,10 +83,10 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, pr
   const [driver] = useState(() => new InputDriver());
   const [emulator] = useState(() => new EmulatorClient(EMULATOR_CONTROL_URL));
   const [reference] = useState(
-    () => new NetClient({ url: SERVER_URL, name: 'REFERENCE', room: 'lab', labelPrefix: 'REF', spectate: true }),
+    () => new NetClient({ models: ALL_MODELS, url: SERVER_URL(), name: 'REFERENCE', room: 'lab', labelPrefix: 'REF', spectate: true }),
   );
   const [clients] = useState<Record<PaneId, NetClient>>(() => {
-    const make = (id: PaneId) => new NetClient({ url: EMULATOR_DATA_URL, name: `${playerName}_${id}`.slice(0, 12), room: 'lab', labelPrefix: id });
+    const make = (id: PaneId) => new NetClient({ models: ALL_MODELS, url: EMULATOR_DATA_URL(), name: `${playerName}_${id}`.slice(0, 12), room: 'lab', labelPrefix: id });
     return { A: make('A'), B: make('B'), C: make('C'), D: make('D') };
   });
 
@@ -120,6 +123,8 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, pr
     };
     const make = (dimOthers: boolean): ArenaSceneOptions => ({
       renderAtDisplaySize: true,
+      // Small panes: the medium art tier, no background upgrade (docs/PHASE7_PLAN.md D13)
+      tier: 'medium',
       input: driver,
       playerColors: colors,
       truthClock: () => reference.serverNow(),
