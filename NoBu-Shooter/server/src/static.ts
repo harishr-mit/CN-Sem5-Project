@@ -61,7 +61,9 @@ function pickEncoding(header: string | string[] | undefined): Encoding {
 
 export function createStaticHandler(rootDir: string): StaticHandler {
   const root = realpathSync(resolve(rootDir));
-  const cache = new Map<string, Buffer>(); // `${file}|${encoding}` → body
+  // `${file}|${encoding}` → body + the file's size / mtime when it was compressed. A rebuild
+  // (`npm run build` while `npm start` runs) changes them, so the old body is never served.
+  const cache = new Map<string, { size: number; mtimeMs: number; body: Buffer }>();
 
   /** The file a URL path names, or null if it is outside the root or not a file. */
   async function locate(urlPath: string): Promise<string | null> {
@@ -85,15 +87,15 @@ export function createStaticHandler(rootDir: string): StaticHandler {
     }
   }
 
-  async function body(file: string, enc: Encoding): Promise<Buffer> {
+  async function body(file: string, enc: Encoding, st: { size: number; mtimeMs: number }): Promise<Buffer> {
     const key = `${file}|${enc}`;
     const hit = cache.get(key);
-    if (hit) return hit;
+    if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.body;
     const raw = await fs.readFile(file);
     const out = enc === 'br'
       ? brotliCompressSync(raw, { params: { [zlib.BROTLI_PARAM_QUALITY]: 10, [zlib.BROTLI_PARAM_SIZE_HINT]: raw.length } })
       : enc === 'gzip' ? gzipSync(raw, { level: 9 }) : raw;
-    cache.set(key, out);
+    cache.set(key, { size: st.size, mtimeMs: st.mtimeMs, body: out });
     return out;
   }
 
@@ -113,10 +115,11 @@ export function createStaticHandler(rootDir: string): StaticHandler {
         'X-Content-Type-Options': 'nosniff',
         'Cache-Control': urlPath.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache',
       };
-      const size = (await fs.stat(file)).size;
+      const st = await fs.stat(file);
+      const size = st.size;
       if (COMPRESSIBLE.has(ext) && size <= MAX_CACHED_BYTES) {
         const enc = pickEncoding(req.headers['accept-encoding']);
-        const data = await body(file, enc);
+        const data = await body(file, enc, st);
         headers['Vary'] = 'Accept-Encoding';
         if (enc !== 'identity') headers['Content-Encoding'] = enc;
         headers['Content-Length'] = String(data.length);

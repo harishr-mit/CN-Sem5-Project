@@ -76,10 +76,30 @@ async function gameRoom(page) {
   return page.locator('#hud-room-code').innerText();
 }
 
+/** A private room started alone: bots on (a lone host can't start without them), then START. */
 async function gameMatch(page) {
   await gameRoom(page);
+  await page.click('#lobby-bots');
+  await sleep(600);
   await page.click('#hud-room-start');
   await sleep(4500); // 3 s countdown, then the match
+}
+
+/** Touch devices (owner revision R5–R8): a phone in landscape or portrait. Taken once, not per viewport. */
+const PHONE_LANDSCAPE = { viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 };
+const PHONE_PORTRAIT = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 };
+
+/** A started room on a phone, with the Dash power-up always on (so its button shows). */
+async function touchMatch(page) {
+  await page.tap('#create-room-btn');
+  await page.waitForSelector('#hud-room-code');
+  await sleep(1200);
+  await page.tap('#lobby-bots');
+  await sleep(300);
+  await page.tap('#lobby-always-dash');
+  await sleep(500);
+  await page.tap('#hud-room-start');
+  await sleep(4500);
 }
 
 const SCREENS = [
@@ -183,11 +203,23 @@ const SCREENS = [
   // ── Phase 7: the game edition (npm run build + the game server, docs/PHASE7_PLAN.md) ──
   { name: 'game-landing', url: GAME_URL, run: async () => { await sleep(800); } },
   {
-    name: 'game-waiting',
+    name: 'game-quick-match',
     url: GAME_URL,
-    run: async (p) => { await p.click('#quick-match-btn'); await p.waitForSelector('#hud-waiting'); await sleep(2500); },
+    run: async (p) => { await p.click('#quick-match-btn'); await p.waitForSelector('#game-canvas canvas'); await sleep(5000); },
   },
   { name: 'game-room-host', url: GAME_URL, run: gameRoom },
+  {
+    name: 'game-room-options',
+    url: GAME_URL,
+    run: async (p) => {
+      await gameRoom(p);
+      for (const sel of ['#lobby-map button:text-is("WAREHOUSE")', '#lobby-bots', '#lobby-always-weapon button:text-is("SPREAD SHOT")', '#lobby-always-shield', '#lobby-powerup-every button:text-is("3 s")']) {
+        await p.click(sel);
+        await sleep(350);
+      }
+      await sleep(1000);
+    },
+  },
   {
     name: 'game-room-guest',
     url: GAME_URL,
@@ -210,6 +242,40 @@ const SCREENS = [
     name: 'game-room-not-found',
     url: GAME_URL,
     run: async (p) => { await p.fill('#room-code-input', 'jolly zebra'); await p.click('#join-room-btn'); await p.waitForSelector('#hud-error-text'); await sleep(500); },
+  },
+  // ── Touch UI (owner revision of Phase 7): phones, both editions ──
+  { name: 'touch-game-landing-portrait', url: GAME_URL, device: PHONE_PORTRAIT, run: async () => { await sleep(800); } },
+  { name: 'touch-game-match-landscape', url: GAME_URL, device: PHONE_LANDSCAPE, run: touchMatch },
+  { name: 'touch-game-match-portrait', url: GAME_URL, device: PHONE_PORTRAIT, run: touchMatch },
+  {
+    name: 'touch-game-lobby-portrait',
+    url: GAME_URL,
+    device: PHONE_PORTRAIT,
+    run: async (p) => { await p.tap('#create-room-btn'); await p.waitForSelector('#hud-room-code'); await sleep(1500); },
+  },
+  {
+    name: 'touch-game-menu-landscape',
+    url: GAME_URL,
+    device: PHONE_LANDSCAPE,
+    run: async (p) => { await touchMatch(p); await p.tap('#touch-menu'); await sleep(500); },
+  },
+  {
+    name: 'touch-demo-quick-landscape',
+    device: PHONE_LANDSCAPE,
+    run: async (p) => { await p.tap('#quick-match-btn'); await p.waitForSelector('#game-canvas canvas'); await sleep(3500); },
+  },
+  {
+    name: 'touch-demo-lab-landscape',
+    device: PHONE_LANDSCAPE,
+    run: async (p) => {
+      await p.tap('#quick-match-btn');
+      await p.waitForSelector('#touch-menu');
+      await sleep(2500);
+      await p.tap('#touch-menu');
+      await sleep(300);
+      await p.tap('#touch-menu-lab');
+      await sleep(800);
+    },
   },
 ];
 
@@ -276,13 +342,9 @@ if (built.status !== 0) {
   console.error('✘ npm run build failed');
   process.exit(1);
 }
-// Screens are taken right after joining: the old instant start of `main` (Phase 7 join window)
-process.env.NOBU_JOIN_WINDOW_MS = '0';
 const demo = spawnNode('DEMO', ['scripts/demo.mjs', '--swarm', '2'], { cwd: rootDir, onLine: (l) => { demoLog.push(l); if (demoLog.length > 200) demoLog.shift(); } });
-process.env.NOBU_JOIN_WINDOW_MS = '600000';
-// …served like `npm start` (a long join window keeps the waiting screen up)
+// …served like `npm start`
 const gameServer = spawnTs('GAME', 'server/src/main.ts', ['--game', '--static', 'dist/game', '--port', String(GAME_PORT), '--host', '127.0.0.1'], { cwd: rootDir, onLine: () => {} });
-process.env.NOBU_JOIN_WINDOW_MS = '0';
 const cleanup = cleanupOnExit([demo, gameServer]);
 demo.on('exit', (code) => {
   if (!finished) { console.error(`[shots] the demo exited early (code ${code})\n${demoLog.slice(-20).join('\n')}`); process.exit(1); }
@@ -322,9 +384,11 @@ try {
     mkdirSync(dir, { recursive: true });
     const rows = [];
     for (const screen of screens) {
+      // Touch screens use their phone, so they are taken in the first viewport's run only
+      if (screen.device && w !== VIEWPORTS[0][0]) continue;
       // Numbered by the full list, so a partial run (--only) overwrites the same files
       const file = `${String(SCREENS.indexOf(screen) + 1).padStart(2, '0')}-${screen.name}.png`;
-      const context = await browser.newContext({ viewport: { width: w, height: h } });
+      const context = await browser.newContext(screen.device ?? { viewport: { width: w, height: h } });
       const page = await context.newPage();
       const errors = [];
       const notes = [];

@@ -9,6 +9,7 @@ import { isPowerupKind, isMapId, type WeaponId, type PowerupKind, type MapId } f
 import type { CombatState } from '../sim/combat.js';
 import { isSyncModel, isStateHz, isSyncSpec, type SyncSpec, type SyncModel, type StateHz } from '../sync/types.js';
 import { normalizeCode } from '../rooms/codes.js';
+import { validateRoomOptions, type RoomOptions } from '../rooms/options.js';
 
 export type { MoverPattern, WeaponId, PowerupKind, MapId, SyncSpec, SyncModel, StateHz };
 
@@ -126,15 +127,25 @@ export interface MsgLsNack {
 }
 
 /**
- * Start the match now (docs/PHASE7_PLAN.md D9, D10): in a private room from
- * its host while it waits; in `main` only under `npm run demo` (Presenter
- * Quick Match skips the join window).
+ * Start the match now (docs/PHASE7_PLAN.md D9): a private room's host, while
+ * the room waits in its lobby. Ignored from anyone else and in `main` (which
+ * starts by itself).
  */
 export interface MsgStart {
   t: 'start';
 }
 
-export type ClientMsg = MsgHello | MsgInput | MsgPing | MsgPerturb | MsgBye | MsgLab | MsgDev | MsgSync | MsgSnapAck | MsgLsNack | MsgStart;
+/**
+ * A private room's match options (owner revision of Phase 7, R2): the host
+ * sends the complete set while the room waits in its lobby; everyone sees
+ * them in `match.options`. Ignored from anyone else.
+ */
+export interface MsgRoomOptions {
+  t: 'roomOptions';
+  options: RoomOptions;
+}
+
+export type ClientMsg = MsgHello | MsgInput | MsgPing | MsgPerturb | MsgBye | MsgLab | MsgDev | MsgSync | MsgSnapAck | MsgLsNack | MsgStart | MsgRoomOptions;
 
 // ───────────────────────────────────────────────────────────────
 // Server → Client
@@ -219,11 +230,10 @@ export interface MatchSnap {
   timeLeftMs: number;
   /** Presenter mode: the match clock is stopped (`timeLeftMs` frozen); absent otherwise. */
   endless?: true;
-  /** `main` in WAITING: time left of the join window (GAMERULES.md §2); absent otherwise. */
-  waitMsLeft?: number;
-  /** Private rooms: the room code and the host's player id (who may START). */
+  /** Private rooms: the room code, the host's player id (who may START and set the options) and the options. */
   code?: string;
   hostId?: number;
+  options?: RoomOptions;
   results: MatchResults | null;
 }
 
@@ -536,6 +546,11 @@ export function validateClientMsg(raw: unknown): ClientMsg | null {
 
     case 'start':
       return { t: 'start' };
+
+    case 'roomOptions': {
+      const options = validateRoomOptions(raw['options']);
+      return options ? { t: 'roomOptions', options } : null;
+    }
 
     case 'lab': {
       const movers = raw['movers'];

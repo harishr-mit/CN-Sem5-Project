@@ -4,8 +4,8 @@ import { mapDef } from '@nobu/shared/config/game';
 import type { NetClient, CombatView } from '../net/NetClient.js';
 import { soundPrefs } from '../game/audio.js';
 import { playerColor, cssColor } from '../game/playerColors.js';
-import { formatCode } from '@nobu/shared/rooms/codes.js';
-import { roomLink } from '../net/serverUrl.js';
+import { RoomLobby } from './RoomLobby.js';
+import { isTouchUi } from './touch.js';
 import type { MsgSnap } from '@nobu/shared/protocol';
 
 const WEAPON_LABEL: Record<string, string> = { handgun: 'HANDGUN', rifle: 'RIFLE', shotgun: 'SHOTGUN' };
@@ -35,10 +35,12 @@ const WeaponPanel: React.FC<{ net: NetClient }> = ({ net }) => {
   }, [net]);
 
   const chips: { label: string; color: string }[] = [];
-  if (cv.weaponMsLeft > 0) chips.push({ label: `${WEAPON_LABEL[cv.weapon]} ${(cv.weaponMsLeft / 1000).toFixed(1)}s`, color: 'var(--c-amber)' });
-  if (cv.speedMsLeft > 0) chips.push({ label: `SPEED ${(cv.speedMsLeft / 1000).toFixed(1)}s`, color: '#ffd400' });
-  if (cv.pierceMsLeft > 0) chips.push({ label: `PIERCING ${(cv.pierceMsLeft / 1000).toFixed(1)}s`, color: '#b388ff' });
-  if (cv.dashMsLeft > 0) chips.push({ label: `DASH ${cv.dashReady ? '[SPACE]' : '…'} ${(cv.dashMsLeft / 1000).toFixed(1)}s`, color: '#2fd6ff' });
+  // Seconds left, or ∞ for a room's always-on power-up
+  const left = (ms: number) => (ms === Infinity ? '∞' : `${(ms / 1000).toFixed(1)}s`);
+  if (cv.weaponMsLeft > 0) chips.push({ label: `${WEAPON_LABEL[cv.weapon]} ${left(cv.weaponMsLeft)}`, color: 'var(--c-amber)' });
+  if (cv.speedMsLeft > 0) chips.push({ label: `SPEED ${left(cv.speedMsLeft)}`, color: '#ffd400' });
+  if (cv.pierceMsLeft > 0) chips.push({ label: `PIERCING ${left(cv.pierceMsLeft)}`, color: '#b388ff' });
+  if (cv.dashMsLeft > 0) chips.push({ label: `DASH ${cv.dashReady ? (isTouchUi() ? '[BUTTON]' : '[SPACE]') : '…'} ${left(cv.dashMsLeft)}`, color: '#2fd6ff' });
   if (cv.shield) chips.push({ label: 'SHIELD', color: 'var(--c-green)' });
   if (cv.invincible) chips.push({ label: 'DEV: INVINCIBLE', color: 'var(--c-red)' });
 
@@ -82,47 +84,16 @@ const PingChip: React.FC<{ net: NetClient }> = ({ net }) => {
 };
 
 /**
- * WAITING (GAMERULES.md §2): `main` counts down its join window; a private
- * room shows its code and link, and its host gets START (docs/PHASE7_PLAN.md D9, D10).
+ * WAITING (GAMERULES.md §2): a private room's lobby (RoomLobby); `main`
+ * starts at once, so its overlay shows only for a moment. Both have LEAVE.
  */
-const WaitingOverlay: React.FC<{ snap: MsgSnap | null; myId: number | null; net?: NetClient }> = ({ snap, myId, net }) => {
-  const [copied, setCopied] = useState(false);
-  const humans = snap ? snap.players.filter((p) => !p.bot) : [];
-  const code = snap?.match.code;
-  if (!code) {
-    const wait = snap?.match.waitMsLeft;
-    return (
-      <div className="overlay" id="hud-waiting">
-        <div className="overlay-text text-glow-cyan">WAITING FOR PLAYERS</div>
-        <div className="overlay-sub">
-          {wait !== undefined
-            ? <>Match starts in <b id="hud-wait-seconds" style={{ color: 'var(--c-cyan)' }}>{Math.max(0, Math.ceil(wait / 1000))} s</b> · {humans.length} player{humans.length === 1 ? '' : 's'} connected<br />Bots fill the empty slots</>
-            : 'Bots and competitors stand by...'}
-        </div>
-      </div>
-    );
-  }
-  const isHost = myId !== null && snap?.match.hostId === myId;
-  const hostName = snap?.players.find((p) => p.id === snap.match.hostId)?.name ?? 'the host';
-  const link = typeof window !== 'undefined' ? roomLink(window.location, code) : '';
-  const copy = () => {
-    void navigator.clipboard?.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }, () => {});
-  };
+const WaitingOverlay: React.FC<{ snap: MsgSnap | null; myId: number | null; net?: NetClient; onLeave?: () => void }> = ({ snap, myId, net, onLeave }) => {
+  if (snap?.match.code) return <RoomLobby snap={snap} myId={myId} net={net} onLeave={onLeave} />;
   return (
-    <div className="overlay" id="hud-room-lobby" style={{ pointerEvents: 'auto', background: 'rgba(5, 5, 15, 0.55)' }}>
-      <div className="overlay-sub" style={{ letterSpacing: '0.2em' }}>PRIVATE ROOM</div>
-      <div className="overlay-text text-glow-cyan" id="hud-room-code">{formatCode(code)}</div>
-      <div className="overlay-sub" style={{ fontSize: '0.95rem' }}>
-        Friends join with this code, or the link:{' '}
-        <span className="font-mono" style={{ color: 'var(--c-cyan)' }}>{link}</span>{' '}
-        <button className="btn-ghost" style={{ fontSize: '0.7rem', padding: '2px 8px' }} onClick={copy}>{copied ? 'COPIED' : 'COPY'}</button>
-      </div>
-      <div className="overlay-sub" style={{ fontSize: '1rem' }} id="hud-room-players">
-        {humans.length} in the room: {humans.map((p) => p.name + (p.id === snap?.match.hostId ? ' (host)' : '')).join(', ')}
-      </div>
-      {isHost
-        ? <button id="hud-room-start" className="btn-primary" style={{ minWidth: '240px' }} onClick={() => net?.start()}>START MATCH</button>
-        : <div className="overlay-sub">Waiting for {hostName} to start · bots fill the empty slots</div>}
+    <div className="overlay" id="hud-waiting">
+      <div className="overlay-text text-glow-cyan">WAITING FOR PLAYERS</div>
+      <div className="overlay-sub">Bots and competitors stand by...</div>
+      {onLeave && <button id="hud-waiting-leave" className="btn-ghost" style={{ pointerEvents: 'auto' }} onClick={onLeave}>◄ LEAVE</button>}
     </div>
   );
 };
@@ -151,6 +122,8 @@ interface HudProps {
   onOpenControls?: () => void;
   /** Leave the match and return to the landing page. */
   onLeave?: () => void;
+  /** Touch UI: no keyboard buttons (the MENU button has them), only the ping. */
+  touch?: boolean;
 }
 
 const quickButtonStyle: React.CSSProperties = {
@@ -177,7 +150,7 @@ const DEMO_OFFLINE_HINT = (
   </>
 );
 
-export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenControls, onLeave, offlineHint = DEMO_OFFLINE_HINT }) => {
+export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenControls, onLeave, touch = false, offlineHint = DEMO_OFFLINE_HINT }) => {
   const snap = useGameStore((s) => s.snap);
   const myPlayerId = useGameStore((s) => s.playerId);
   const killFeed = useGameStore((s) => s.killFeed);
@@ -265,7 +238,7 @@ export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenContr
       </div>
 
       {/* In-Game State Overlays */}
-      {matchState === 'WAITING' && connStatus === 'connected' && <WaitingOverlay snap={snap} myId={myPlayerId} net={netClient} />}
+      {matchState === 'WAITING' && connStatus === 'connected' && <WaitingOverlay snap={snap} myId={myPlayerId} net={netClient} onLeave={onLeave} />}
 
       {matchState === 'COUNTDOWN' && (
         <div className="overlay">
@@ -381,6 +354,7 @@ export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenContr
 
       {/* Quick Action Floating Bar (.hud has pointer-events: none, so opt back in) */}
       <div
+        className="hud-quickbar"
         style={{
           position: 'absolute',
           bottom: '12px',
@@ -391,7 +365,7 @@ export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenContr
           pointerEvents: 'auto',
         }}
       >
-        {onLeave && (
+        {onLeave && !touch && (
           <button
             id="hud-leave-btn"
             onClick={onLeave}
@@ -401,7 +375,7 @@ export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenContr
             <span>◄</span> LEAVE MATCH
           </button>
         )}
-        {onOpenControls && (
+        {onOpenControls && !touch && (
           <button
             onClick={onOpenControls}
             style={{ ...quickButtonStyle, color: 'var(--c-cyan)' }}
@@ -410,7 +384,7 @@ export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenContr
             <span>?</span> CONTROLS [F1]
           </button>
         )}
-        {onOpenSettings && (
+        {onOpenSettings && !touch && (
           <button
             onClick={onOpenSettings}
             style={{ ...quickButtonStyle, color: 'var(--c-text-muted)' }}

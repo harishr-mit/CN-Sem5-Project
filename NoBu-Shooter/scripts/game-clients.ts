@@ -5,10 +5,11 @@
  *
  *   --base http://127.0.0.1:8090   the running game server (--game --static dist/game)
  *   --step 9    the page and its files (compression, caching), operator
- *               messages refused, and a quick match through the join window
- *               with a NetClient built like the game's (Delta, no optional models)
+ *               messages refused, and a quick match (it starts at once) with a
+ *               NetClient built like the game's (Delta, no optional models)
  *   --step 10   a private room: create → code, a second player joins by code,
- *               a guest's START is ignored, the host's starts the match with bots
+ *               no bots by default, the host's options (map, bots) show in the
+ *               lobby, a guest's START is ignored, the host's starts the match
  * Exit code 0 = pass. Run by scripts/smoke.mjs (node --import tsx).
  */
 
@@ -110,11 +111,11 @@ async function step9(): Promise<void> {
   lab.close();
   await sleep(300);
 
-  // A quick match through the join window, with the game's own client set-up
+  // A quick match with the game's own client set-up: it starts at once, bots fill the slots
   const net = new NetClient({ url: WS_URL, name: 'SMOKE', room: 'main', sync: { model: 'delta' }, transport: wsTransport, now: () => performance.now() });
-  const states: { state: string; wait?: number }[] = [];
+  const states: { state: string; bots: number }[] = [];
   let deltas = 0;
-  net.on('snap', (s: MsgSnap) => states.push({ state: s.match.state, wait: s.match.waitMsLeft }));
+  net.on('snap', (s: MsgSnap) => states.push({ state: s.match.state, bots: s.players.filter((p) => p.bot).length }));
   const origin = (net as unknown as { transportFactory: TransportFactory }).transportFactory;
   (net as unknown as { transportFactory: TransportFactory }).transportFactory = (url, h) => origin(url, { ...h, onMessage: (t) => { if (t.startsWith('{"t":"snapDelta"')) deltas++; h.onMessage(t); } });
   net.connect();
@@ -125,12 +126,11 @@ async function step9(): Promise<void> {
     if (++step % 2 === 0) net.sendInputs();
   }, 1000 / 60);
   const t0 = performance.now();
-  while (performance.now() - t0 < 12_000 && !states.some((s) => s.state === 'RUNNING')) await sleep(50);
+  while (performance.now() - t0 < 8_000 && !states.some((s) => s.state === 'RUNNING')) await sleep(50);
   clearInterval(loop);
-  const waited = states.filter((s) => s.state === 'WAITING' && s.wait !== undefined);
-  check(waited.length > 0 && waited[0].wait! > 0, `WAITING with the join window (first seen: ${Math.round(waited[0]?.wait ?? 0)} ms left)`);
-  check(states.some((s) => s.state === 'COUNTDOWN'), 'then the countdown');
-  check(states.some((s) => s.state === 'RUNNING'), 'then the match runs');
+  const runningAfter = (performance.now() - t0) / 1000;
+  check(states[0]?.state === 'COUNTDOWN' && states[0].bots === GAME.bots.targetParticipants - 1, `the quick match starts at once: COUNTDOWN with ${states[0]?.bots} bots in the first snapshot`);
+  check(states.some((s) => s.state === 'RUNNING') && runningAfter < 5, `then the match runs (after ${runningAfter.toFixed(1)} s)`);
   check(net.sync.model === 'delta' && deltas > 10, `Delta snapshots (${deltas} deltas received)`);
   check(net.supports({ model: 'state', hz: 10 }) === false, 'the game client has no State / Lockstep code');
   net.disconnect();
@@ -143,21 +143,28 @@ async function step10(): Promise<void> {
   check(code && host.welcome?.host === true, `CREATE ROOM → code ${code ? formatCode(code) : '?'}, and the creator is host`);
   const guest = await rawPlayer(formatCode(code!), 'GUEST');
   check(guest.welcome?.code === code && guest.welcome?.host === false, 'a second player joins with the code as shown (not host)');
-  const snapOf = (p: Awaited<ReturnType<typeof rawPlayer>>) => {
-    const s = [...p.inbox].reverse().find((m) => m.t === 'snap' || m.t === 'snapDelta');
-    return s as Record<string, unknown> | undefined;
+  const text = (p: Awaited<ReturnType<typeof rawPlayer>>) => p.inbox.filter((m) => m.t === 'snap' || m.t === 'snapDelta').map((m) => JSON.stringify(m)).join('\n');
+  await guest.until(() => text(guest).length > 0);
+  await sleep(300);
+  check(!text(guest).includes('"bot":true') && text(guest).includes('"map":"neon"'), 'the lobby: the two players only (no bots by default), on Neon');
+
+  // The host's options show in the lobby at once
+  const options = {
+    map: 'plaza', maxPlayers: 4, bots: true, powerupEveryS: 5, powerupMax: 3,
+    alwaysOn: { weapon: 'rapid_fire', shield: false, speed: true, piercing: false, dash: false },
   };
-  await guest.until(() => snapOf(guest) !== undefined);
+  guest.send({ t: 'roomOptions', options: { ...options, map: 'overgrown' } }); // not the host: ignored
+  host.send({ t: 'roomOptions', options });
+  const seen = await guest.until(() => text(guest).includes('"map":"plaza"') && text(guest).includes('"bot":true'), 3000);
+  check(seen && !text(guest).includes('"map":"overgrown"'), "the host's options reach everyone (Plaza, bots fill the slots); a guest's are ignored");
+  check(text(guest).includes('"weapon":"rifle"') && text(guest).includes('"fast":true'), 'always-on Rapid Fire + Speed show on the players in the lobby');
+
   guest.send({ t: 'start' });
   await sleep(1500);
-  const stillWaiting = !host.inbox.some((m) => (m.t === 'snap' || m.t === 'snapDelta') && JSON.stringify(m).includes('"COUNTDOWN"'));
-  check(stillWaiting, "a guest's START is ignored (still waiting)");
+  check(!text(host).includes('"COUNTDOWN"'), "a guest's START is ignored (still in the lobby)");
   host.send({ t: 'start' });
-  const started = await host.until(() => host.inbox.some((m) => JSON.stringify(m).includes('"RUNNING"')), 6000);
+  const started = await host.until(() => text(host).includes('"RUNNING"'), 6000);
   check(started, "the host's START begins the countdown, then the match");
-  // Full snapshot fallback or deltas: count players from the newest full snapshot the server sends on join of bots
-  const sawBots = host.inbox.some((m) => JSON.stringify(m).includes('"bot":true'));
-  check(sawBots, `bots fill the empty slots (target ${GAME.bots.targetParticipants})`);
   const missing = await rawPlayer('jolly-zebra', 'LOST');
   check(missing.errors().includes('ROOM_NOT_FOUND'), 'an unknown code → ROOM_NOT_FOUND');
   for (const p of [host, guest, missing]) p.close();

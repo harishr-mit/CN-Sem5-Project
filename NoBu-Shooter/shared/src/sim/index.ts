@@ -6,7 +6,7 @@ export { mulberry32 } from './prng.js';
 export {
   WEAPONS, DEFAULT_WEAPON, WEAPON_POWERUP_TICKS, SPEED_POWERUP_TICKS,
   INFINITE_RESERVE, PIERCING_POWERUP_TICKS, DASH_POWERUP_TICKS, DASH_BURST_TICKS, DASH_COOLDOWN_TICKS,
-  initialCombat, copyCombat, sameCombat, speedMultiplier, pelletAngles, stepCombat, applyPowerup,
+  initialCombat, copyCombat, sameCombat, speedMultiplier, pelletAngles, stepCombat, applyPowerup, makePermanent, isOn, PERMANENT,
   type CombatState, type CombatStepResult, type WeaponStats,
 } from './combat.js';
 export { powerupCap, pickPowerupKind, isValidPowerupSpot, randomPowerupSpot } from './powerups.js';

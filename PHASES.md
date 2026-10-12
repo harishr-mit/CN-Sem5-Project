@@ -340,7 +340,7 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 
 ### Owner decisions (2026-10-12)
 
-- **Target: LAN play in the browser, on laptops and PCs** ("option A": the operator's machine serves the game; players open its address, nothing to install). Internet play ("option B") is future scope, below. Phones / touch controls are out of scope.
+- **Target: LAN play in the browser** ("option A": the operator's machine serves the game; players open its address, nothing to install) — on laptops and PCs, and since the owner revision on **phones and tablets** too (touch UI, below). Internet play ("option B") is future scope, below.
 - **Players connect straight to the game server**, not through the emulator. The emulator is game-agnostic, so the operator can still put it in front by hand (a route from a public port to the server's port). Behind it every player appears to come from `127.0.0.1`, so nothing may trust "localhost" as proof of being the operator.
 - **Transport: WebSocket** (TCP), as today.
 - **The game uses one fixed set of the best settings**, chosen from the Phase 3–6 measurements:
@@ -363,11 +363,20 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
   | Game, production | `npm run build`, then `npm start` | `build` makes the bundle; `start` runs one Node process that serves the bundle and the game WebSocket on one port |
 - **One code base:** the demo and the game share the simulation, rules, maps, arena scene, effects, assets, HUD and netcode. The editions differ only in their entry point and in which tools they mount. A texture, effect or rule is changed once.
 - **The game server refuses operator messages** (`dev`, `perturb`, `lab`, Presenter controls); `NOBU_DEV` is never set for it.
-- **Join window** before a quick match, in every edition, so a human who takes a few seconds to join isn't late (`GAMERULES.md` §2): 10 s, ends early with 4 humans; Presenter Quick Match skips it. Bots then fill the empty slots as today (§12).
-- **Private rooms with short codes** (owner, M6): CREATE ROOM gives a two-word code (`BLUE FOX`) that others type in JOIN ROOM or open as a link (`?room=blue-fox`). The room waits for its host's START, then plays like a quick match with bots filling the slots. In every edition.
+- **Quick match starts at once** (owner revision, 2026-10-12): the 10 s join window first built here was removed — late join already covers a slow joiner.
+- **Private rooms with short codes** (owner, M6): CREATE ROOM gives a two-word code (`BLUE FOX`) that others type in JOIN ROOM or open as a link (`?room=blue-fox`). The room waits in a lobby for its host's START and returns there after each match. In every edition.
 - **HUD:** the game shows the ping (round-trip time) only.
 - **Graphics Quality setting** (low / medium / high): lower-resolution textures and lower-bitrate sounds at low, the full files at high; a match starts on low and upgrades in the background (`NoBu-Shooter/assets/README.md`).
 - **Assets:** textures served as WebP and all sounds as OGG, generated from the masters in `assets/`; `stone_beige.png` (2.2 MB) served at ≤ 160 kB like the other floors; the raw player frames (7.6 MB, only used by `pack-assets`) move out of the served folder, for every edition.
+
+### Owner revision (2026-10-12, after the first implementation; `docs/PHASE7_PLAN.md` R1–R9)
+
+- **R1 Quick match:** no waiting time; it starts at once with bots (the join window was removed).
+- **R2 Room options** (private rooms, set by the host in the lobby; owner: host only): **map** (default **Neon**, or rotation), **max players** (2–8, default **4**), **bots** (*fill empty slots*, default **off** — only the players who joined), **power-up interval** (off / 3–15 s) and **max on the map** (1–8), **always-on power-ups** (one weapon + Shield / Speed / Piercing / Dash; an always-on one never spawns; always-on Shield = every life starts shielded). The arena behind the lobby shows them live.
+- **R3 Lobby:** lists everyone who joined; **LEAVE** on every waiting page; the room returns to its lobby after each match.
+- **R4 Neon stays as drawn** (owner): it has no textures by design; "the dev loads without textures" was the Neon look, not a loading bug (every texture loads in dev — checked).
+- **R5–R8 Phones and tablets** (both editions, only on touch devices): scaling for landscape and portrait (portrait = arena on top, controls below); touch aims and fires as before; a **joystick** bottom-left (size in Settings); a **DASH** button above it only with the Dash power-up, with a reveal animation; **RELOAD** and a **MENU** button on the right, the menu holding the non-critical actions (settings, mute, leave; the demo's Lab, inspector, Presenter bar).
+- **R9** docs, tests, smoke, shots (touch screens).
 
 ### Items
 
@@ -380,8 +389,10 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 | M5 | **Browser datagrams:** WebTransport or a WebRTC DataChannel. | future option B |
 | M6 | **Many players:** private rooms joined by a short two-word code, alongside the quick-match room. A room list is not planned. | done |
 | M7 | **Game edition:** separate entry point, fixed best settings, ping HUD, game commands. | done |
-| M8 | **Join window** before a match (all editions). | done |
+| M8 | **Join window** before a match (all editions). | done, then removed (R1) |
 | M9 | **Asset quality tiers** behind a Graphics Quality setting. | done |
+| M10 | **Room options + lobby** (R2–R3). | done |
+| M11 | **Touch UI** for phones and tablets (R5–R8). | done |
 
 ### Future scope: option B (internet play)
 

@@ -181,7 +181,7 @@ The existing 222 tests stay green. Where they relied on the instant start, they 
 ## 7. Not in Phase 7
 
 - Option B (internet play): TLS / `wss://`, a public host, M4 hardening, a browser datagram transport (WebRTC DataChannel or WebTransport), and input redundancy back on with it (`PHASES.md` Phase 7, "Future scope").
-- Phones / touch controls, accounts, matchmaking beyond quick match + room codes, a custom Phaser build.
+- Accounts, matchmaking beyond quick match + room codes, a custom Phaser build. (Phones / touch controls were added by the owner revision, §9.)
 
 ## 8. Deviations from this plan
 
@@ -197,4 +197,25 @@ The existing 222 tests stay green. Where they relied on the instant start, they 
 | X8 | **Both editions get an inline SVG favicon.** | The demo linked `/favicon.svg`, which never existed: a 404 on every page load (seen in the game check). |
 | X9 | **`start` in `main` is blocked in the core on the game server, and `main.ts` refuses `--game` with `NOBU_DEV=1`.** | Bug found while writing test 5: `Room.start` trusted `NOBU_DEV` alone, so a game server started with it would have let anyone skip the join window. |
 | X10 | **Smoke's game server uses a 3 s join window; the shots' one a 10-minute window** (`NOBU_JOIN_WINDOW_MS`), so the waiting screen stays up; the demo in smoke and shots keeps 0. | Walk through the window quickly in smoke; capture it reliably in shots. |
+
+## 9. Owner revision (2026-10-12, T115–T120)
+
+Asked after the first implementation; the owner's answers: room options are set by the room's **host** only, rooms have **0 bots by default** with *fill with bots* as an option, **Neon stays as drawn**, an always-on Shield means **every life starts shielded**, and portrait puts the **arena on top, the controls below**.
+
+| ID | Decision | Notes |
+|---|---|---|
+| R1 | **Quick match starts at once** (D10's join window removed: `match.joinWindowMs`, `waitMsLeft`, `NOBU_JOIN_WINDOW_MS`, the Presenter's `start`). | Late join (`GAMERULES.md` §2) already covers a slow joiner. `start` is now for private-room hosts only. |
+| R2 | **Room options** (`shared/src/rooms/options.ts`, `roomOptions` message, `match.options`): map (or rotation), max players 2–8, bots fill on/off, power-up interval {off, 3, 5, 7, 10, 15 s} and max 1–8, always-on (one weapon + Shield / Speed / Piercing / Dash). Defaults Neon / 4 / bots off / 7 s / 4 / none. Host only, lobby only, validated as a whole. | Permanent power-ups are **−1 timers in the shared combat state** (`PERMANENT`, `makePermanent`), so the client's prediction agrees without knowing the options. An always-on weapon stops both weapon pickups. The start rule (`canStartWith`: ≥ 2 counting bots) is shared by the server and the lobby. |
+| R3 | **Lobby** (`ui/RoomLobby.tsx`): code + link, players (bots, open slots), the options (editable for the host, read-only for guests), START (disabled with a hint when < 2), LEAVE; translucent with HIDE, so the arena shows the options: the next map, players on spawn points, bots, **preview power-ups**, always-on effects. Rooms return to the lobby after every match. | The quick-match WAITING overlay has LEAVE too. |
+| R4 | **Neon unchanged** (owner). | Checked: every texture loads in dev (low then 34 high files, no failures); Neon is procedural by design. |
+| R5 | **Touch UI only on touch devices** (`ui/touch.ts`: coarse pointer with touch points; `?touch=1` / `?touch=0`); `html.touch-ui`; both editions. | Desktop unchanged. |
+| R6 | **Joystick** (`ui/TouchControls.tsx`): pointer events on its own element, 8 directions like WASD (`joystickKeys`, `setVirtualKeys` OR-ed into `movementKeys`); size small / medium / large in Settings (touch only). | Aim + fire stay touch-on-the-arena (owner). Checked with two simultaneous CDP touches (stick + arena). |
+| R7 | **DASH button** above the joystick only while the Dash power-up is on (incl. always-on), with a pop-in animation replayed at each pickup; dims while cooling down. | |
+| R8 | **Right side:** RELOAD and ☰ MENU; the menu = Settings, mute, leave (+ demo: Network Lab as a full-screen overlay, packet inspector, Presenter bar). Keyboard buttons of the HUD hidden on touch; ping under the score. **Landscape:** controls over the arena. **Portrait:** arena full width on top, controls and the lobby below (the map stays in view). Packet strip hidden on touch. | Compare and Presenter remain desktop tools (they still render). |
+| R9 | Tests (`tests/rooms.test.ts` lobby / options / always-on / quick match, `tests/touch.test.ts`, `tests/gamemode.test.ts` stale-cache test), smoke step 9–10 rewritten, shots (game room options, touch screens in landscape / portrait for both editions), docs. | |
+
+**Bugs found during the revision:**
+- **Stale pages after a rebuild:** the static server's in-memory compression cache was keyed by path only, so `npm run build` while `npm start` ran kept serving the old `index.html` (pointing at a deleted bundle: a blank page). The cache now checks the file's size and mtime (regression test in `tests/gamemode.test.ts`).
+- **Touch controls over the lobby:** the joystick and buttons drew on top of the lobby's options and LEAVE; they now show only while a match is on.
+- **No way to close the Lab on a phone:** the Lab's edge tab sat off-screen in the touch overlay (and its inline `position: relative` beat the overlay CSS); on touch it is pinned full-screen with the ► close button in its top-right corner.
 

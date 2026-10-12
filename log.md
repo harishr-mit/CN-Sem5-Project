@@ -165,6 +165,13 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T113: Phase 7 step 5 — verification: smoke steps 9–10, shots, LAN check, bundle numbers
 * [x] T114: Phase 7 step 6 — docs + phase exit
 
+* [x] T115: Owner revision of Phase 7 (2026-10-12): owner answers (room options by the host, 0 bots by default with a bots option, Neon kept as drawn, always-on Shield = every life starts shielded, portrait = arena on top + controls below); revision notes in PHASE7_PLAN; tasks below
+* [x] T116: Remove the quick-match join window (server, protocol field, HUD, Presenter start, env overrides, tests, docs)
+* [x] T117: Room options (shared validation + `roomOptions` message; map / max players / bots fill / power-up interval + max / always-on power-ups; applied live in the lobby; rooms return to the lobby after a match) + permanent power-ups in the shared combat sim
+* [x] T118: Lobby UI (players list, options form for the host, read-only for guests, LEAVE on every waiting page)
+* [x] T119: Mobile / touch: layout (landscape + portrait), joystick (size setting), dash button with reveal animation, menu button + right-side buttons, demo Lab as an overlay; both editions
+* [x] T120: Tests, smoke, shots (touch screens), docs sync
+
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
 
@@ -172,10 +179,64 @@ Shared context for every agent working in this directory. Read this file **befor
 
 <!-- Newest first. Copy the template below for each entry. -->
 
+### 2026-10-13 — Claude (Sonnet 5.5) — Commit everything except docs/wiki
+
+* **Task:** Owner: commit everything but `docs/wiki/`, and add it to `.gitignore`.
+* **Files touched:** `.gitignore` (+ `docs/wiki/`), `log.md`. `docs/wiki/*` stays on disk, untracked and ignored. One commit on branch `phase7` with all other pending changes (Phase 7 work, `AGENTS.md`, `.claude/atomic.toml`, docs).
+
+### 2026-10-13 — Claude (Sonnet 5.5) — /refresh-wiki (repo scope, first run)
+
+* **Task:** Owner ran `/refresh-wiki`. Repo scope, first run (no `docs/wiki/`, no root `CLAUDE.md`). `atomic` is not on the Windows PATH, so every call goes through the shim `C:/Users/Jack/.claude/bin/atomic.cmd` (WSL `atomic` 6.10.0).
+  * [x] R3: `atomic wiki init --scope repo` (created `docs/wiki/CLAUDE.md` and `.claude/atomic.toml`)
+  * [x] R4: `atomic code sync` (148 files, 2384 nodes, 6831 edges; index was current)
+  * [~] R5: `atomic signals scan` wrote `docs/wiki/scan.md`; 7 domain pages written (`client`, `server`, `shared`, `emulator`, `scripts`, `assets`, `project-docs`); round-1 review returned CHANGES_REQUESTED for all 7 and the fixes were applied; all 7 Mermaid blocks render. **Stopped by the owner during round-2 review (reviewers killed, no verdicts).**
+  * [ ] Not done: round-2 review to PASS, `docs/wiki/index.md` (router), `.claude/rules/wiki/*` pointer cards, `@docs/wiki/index.md` wiring (no root `CLAUDE.md` exists; ask owner before creating), `atomic signals linkify`, R6 concerns prompt, R8 report. No commit.
+  * **Resume:** re-run `/refresh-wiki`; domain pages already exist, so check them before re-dispatching writers. `atomic` via shim `C:/Users/Jack/.claude/bin/atomic.cmd`.
+  * **Concerns pending for owner (R6):** (1) `emulator/src/presets.ts` `sanitizePatch` leaves latency/jitter/reorderDelay/bandwidth/queueLimit unbounded while the dashboard caps them; (2) `emulator/src/prng.ts` duplicates `shared/src/sim/prng.ts` with no check that they stay identical; (3) nit: `docs/archive/SPEC-v1.md` still lists touch support as a non-goal.
+  * **Files created:** `docs/wiki/{CLAUDE,scan,client,server,shared,emulator,scripts,assets,project-docs}.md`, `.claude/atomic.toml`.
+
+### 2026-10-13 — Claude (Sonnet 5.5) — Port WSL `~/.claude` to `C:\Users\Jack\.claude`
+
+* **Task:** Owner asked to port the WSL (`/home/jack/.claude`) Claude config (skills, settings, etc.) to the Windows user profile without removing or conflicting with anything.
+* **Done:** copied `agents/` (8), `commands/` (25), `output-styles/` (1), `rules/` (3), `CLAUDE.md`, and the 10 `atomic-*` skills into `C:\Users\Jack\.claude\` (none existed there; existing `skills/synced` and `skills/.trash` untouched). Copied `~/.atomic/profile.md` to `C:\Users\Jack\.atomic\profile.md` so the `@~/.atomic/profile.md` import in `CLAUDE.md` resolves. Merged `"outputStyle": "Atomic"` into Windows `settings.json` (existing `model` / `modelSettings` kept; backup in the session scratchpad).
+* **Not ported (on purpose):** the `SessionStart` hook `atomic hooks session-start` (no `atomic` binary on Windows, it would fail every session); the `.atomic` symlink; `~/.atomic/config.toml` and `state.json` (tool-generated, may hold credentials).
+* **Files touched (outside this repo):** `C:\Users\Jack\.claude\{agents,commands,output-styles,rules,skills\atomic-*,CLAUDE.md,settings.json}`, `C:\Users\Jack\.atomic\profile.md`.
+* **Follow-up (same day): WSL `atomic` from Windows.** Added the shim `C:\Users\Jack\.claude\bin\atomic.cmd` (`wsl.exe -e /home/jack/.local/bin/atomic %*`). Tested from Git Bash and PowerShell: `--version` = 6.10.0, cwd maps to `/mnt/c/...`, `atomic hooks session-start` exits 0. PATH not changed (needs owner approval). The `SessionStart` hook (`C:/Users/Jack/.claude/bin/atomic.cmd hooks session-start`) was first blocked by the permission classifier, then added to Windows `settings.json` after the owner approved it ("add that alone"); JSON validated. PATH still unchanged.
+
+### 2026-10-13 — Claude (Haiku 5.5) — Atomic index: AGENTS.md line + global sqlite3
+
+* **Task:** Owner asked (1) to add a line to `AGENTS.md` so the atomic index (`.claude/.atomic-index/atomic.db`) is used by default for symbol / call-graph lookups, and (2) to install `sqlite3` globally.
+  * [x] T-A1: add the AGENTS.md line (new section "Code Index (atomic)" above "Requirements & Docs Sync")
+  * [x] T-A2: install sqlite3 globally via winget (`SQLite.SQLite` 3.53.4), owner-approved explicitly in the request
+  * [x] T-A3: verified: `sqlite3.exe -version` = 3.53.4; read-only query of `nodes` / `project_metadata` works. PATH change only applies to new shells; the Bash session here calls the full path (`C:/Users/Jack/AppData/Local/Microsoft/WinGet/Packages/SQLite.SQLite_Microsoft.Winget.Source_8wekyb3d8bbwe/sqlite3.exe`).
+* **Status:** DONE
+* **Files touched:** `AGENTS.md` (new "Code Index (atomic)" section), `log.md`.
+* **Dependencies:** global install of SQLite CLI (`winget`, `SQLite.SQLite`) — owner explicitly asked. Logged here per AGENTS.md. Note: the same DB was already readable with the local Python `sqlite3` module, so the global install was not strictly necessary. No project-local dependency added; nothing new in `.gitignore`.
+
+### 2026-10-13 — Claude (Haiku 5.5) — AGENTS.md: skill and mattpocock-skills rules
+
+* **Task:** Owner asked for two lines at the top of `AGENTS.md`: use the appropriate skills whenever possible, and do not use any mattpocock-skills without explicit permission from the user.
+* **Files touched:** `AGENTS.md` (two lines added above "Context & Status Tracking").
+
+### 2026-10-12 — Claude (Opus 5.5) — Phase 7 owner revision (T115–T120)
+
+* **Task:** Owner: rooms without bots (show who joined), no quick-match waiting time, LEAVE on waiting pages, room options (map, max players, power-up rate + max, always-on power-ups; Neon + 4 players default; reflected in the background), the "dev without textures" bug, and phones / tablets (scaling, landscape + portrait, joystick with a size setting, dash button with a reveal, other keys as buttons / a menu) in both editions.
+* **Owner answers (asked):** options by the room host only; 0 bots by default, *fill with bots* as an option; keep Neon as drawn; always-on Shield = every life starts shielded; portrait = arena on top, controls below.
+* **"Dev loads without textures":** not a loading bug — checked in `npm run dev`: low tier then 34 high-tier files, 0 failures. Neon (the first map of the rotation, and the room default) is drawn in code by design; the owner chose to keep it.
+* **T116 — DONE:** join window removed (`match.joinWindowMs`, `MatchSnap.waitMsLeft`, `NOBU_JOIN_WINDOW_MS` in vitest / smoke / shots, the Presenter's `start` on welcome, `start` in `main`); quick match starts at once.
+* **T117 — DONE:** `shared/src/rooms/options.ts` (RoomOptions, defaults, validation, `spawnableKinds`, `alwaysOnKinds`, `botsFor`, `canStartWith`); `game.json` / `game.ts` `privateRooms.defaults` + ranges; protocol `roomOptions` message + `match.options`; combat sim `PERMANENT` (−1) timers, `makePermanent`, `isOn`, pickups never override permanent; `pickPowerupKind(rng, allowed)`; `room.ts`: options, live lobby (`refreshLobby`: map, spawn points, bots, preview pickups, always-on effects), `fitBots` (bots make way for humans), `isFull` = humans vs max players, `canStart`, `setOptions`, back to the lobby after each match (`enterLobby`), shield at every spawn when always on; `RoomInit` (was `RoomOptions`) for the constructor.
+* **T118 — DONE:** `client/src/ui/RoomLobby.tsx` (code / link / COPY / HIDE, players + bots + open slots, options form editable by the host and read-only for guests, START with a hint, LEAVE), WAITING overlay LEAVE; `NetClient.setRoomOptions`; HUD ∞ for permanent power-ups.
+* **T119 — DONE:** `ui/touch.ts` (detection, `?touch=`, joystick sizes), `game/input.ts` (`joystickKeys`, `setVirtualKeys`), `ui/TouchControls.tsx` (joystick, DASH with reveal, RELOAD, MENU, `TouchMenu`), `MatchView` (touch controls only while a match is on, menu items + edition extras), `Hud` `touch` (keyboard buttons hidden, ping under the score), Settings → Joystick size (touch only), demo: Lab as a full-screen overlay from the menu, packet strip hidden; viewport meta (no zoom) in both `index.html`; CSS for landscape / portrait.
+  * **Bugs found:** (1) touch controls drew over the lobby's options and LEAVE → shown only during a match; (2) `npm start` served the old `index.html` after `npm run build` (compression cache keyed by path) → cache checks size + mtime, regression test. (3) the demo's Lab overlay on a phone had no reachable close button (edge tab off-screen, inline `position: relative`) → `.lab-toggle-btn` pinned top-right on touch.
+  * Checked in Chrome (scratch Playwright, touch emulation + CDP multi-touch): desktop host + landscape phone + portrait phone in one room; options live for everyone, guests read-only; joystick + a second finger on the arena at once; DASH appears with always-on Dash; menu and Settings → Joystick size; 0 console errors.
+* **Tests:** `tests/rooms.test.ts` rewritten for the lobby (27), `tests/touch.test.ts` (new, 8), `tests/gamemode.test.ts` (+1 stale cache), `tests/combat.test.ts` (nullable draw). **284 tests**, typecheck clean. **Smoke 10/10** (steps 9–10 rewritten: quick match at once with 3 bots; room: no bots by default, host options reach everyone, always-on rifle + speed in the lobby, guest options / START ignored).
+* **Shots:** 35 screens × 2 + 7 touch screens once = **77 shots, 0 console errors** (reviewed the lobby, options, touch landscape / portrait / lobby / menu / demo Lab; the Lab fix re-shot with `--only=touch-demo-lab`).
+* **Docs:** GAMERULES (revision 3, §2, §6b, §12, §14, new §14a Room options, §15 constants, §17 touch UI), PROTOCOL (§2.1, §2.6a, new §2.6b `roomOptions`, match fields, permanent timers, §6 table), README (§3, §4 incl. phones, controls table), ASSUMPTIONS (#119 rewritten, #126–#136), DEMO_SCRIPT (§1, §12, §15), VISUAL_CHECKLIST (game rows renumbered, 29 game-room-options, 36–42 touch screens), PHASES (Phase 7 owner revision R1–R9, M8 removed, M10, M11), PHASE7_PLAN §9.
+
 ### 2026-10-12 — Claude (Opus 5.5) — Phase 7 implementation (T109–T114)
 
 * **Task:** Owner: implement Phase 7 (option A) after the pre-implementation commit; ask for critical decisions, fix bugs found, add tests. No question needed asking mid-run.
-* **Status:** DONE. Plan deviations X1–X10 in `docs/PHASE7_PLAN.md` §8. Remaining: the owner's check from a second machine on the same network. Nothing committed by the agent after the pre-implementation commit `879d0f0`.
+  * **Status:** DONE. Plan deviations X1–X10 in `docs/PHASE7_PLAN.md` §8. Remaining: the owner's check from a second machine on the same network. Nothing committed by the agent after the pre-implementation commit `879d0f0`.
 * **Dependencies:** `sharp@0.33.5`, `ffmpeg-static@5.2.0` (NoBu-Shooter devDependencies, local; owner-approved). No global installs.
 
 * **T109 (step 1, assets) — DONE:**

@@ -15,16 +15,22 @@ export function powerupCap(participants: number): number {
   return Math.floor(participants / P.perPlayers);
 }
 
-/** Weighted draw: rifle (Rapid Fire) is rarest, Speed the most common. */
-export function pickPowerupKind(rng: () => number): PowerupKind {
+/**
+ * Weighted draw: rifle (Rapid Fire) is rarest, Speed the most common.
+ * `allowed` limits the draw (a private room's always-on power-ups never
+ * spawn); null when nothing is allowed.
+ */
+export function pickPowerupKind(rng: () => number, allowed: readonly PowerupKind[] = POWERUP_KINDS): PowerupKind | null {
   const weights = P.weights as Record<PowerupKind, number>;
-  const total = POWERUP_KINDS.reduce((a, k) => a + weights[k], 0);
+  const kinds = POWERUP_KINDS.filter((k) => allowed.includes(k));
+  if (kinds.length === 0) return null;
+  const total = kinds.reduce((a, k) => a + weights[k], 0);
   let r = rng() * total;
-  for (const k of POWERUP_KINDS) {
+  for (const k of kinds) {
     r -= weights[k];
     if (r < 0) return k;
   }
-  return POWERUP_KINDS[POWERUP_KINDS.length - 1];
+  return kinds[kinds.length - 1];
 }
 
 /** A spot clear of the edges, the HUD zones and obstacles (every such spot is walkable on our maps). */

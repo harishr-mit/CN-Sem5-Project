@@ -169,7 +169,7 @@ describe('Combat step (shared/src/sim/combat.ts)', () => {
     expect([1, 2, 3, 4, 5, 8].map(powerupCap)).toEqual([1, 2, 3, 4, 5, 8]);
     const rng = mulberry32(5);
     const counts: Record<string, number> = {};
-    for (let i = 0; i < 20000; i++) { const k = pickPowerupKind(rng); counts[k] = (counts[k] ?? 0) + 1; }
+    for (let i = 0; i < 20000; i++) { const k = pickPowerupKind(rng)!; counts[k] = (counts[k] ?? 0) + 1; }
     const w = GAME.powerups.weights as Record<string, number>;
     const total = Object.values(w).reduce((a, b) => a + b, 0);
     for (const k of GAME.powerups.kinds) expect(counts[k] / 20000).toBeCloseTo(w[k] / total, 1);

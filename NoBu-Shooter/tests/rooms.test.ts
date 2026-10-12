@@ -1,13 +1,16 @@
 /**
- * Private rooms, room codes and the join window (docs/PHASE7_PLAN.md D9, D10;
- * plan tests 1–4).
+ * Private rooms, room codes, room options and the quick match
+ * (docs/PHASE7_PLAN.md D9, owner revision R1–R4; plan tests 1–4).
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { GameServer, type GameServerOptions } from '../server/src/core.js';
 import { ADJECTIVES, ANIMALS, CODE_COUNT, normalizeCode, formatCode, newCode } from '../shared/src/rooms/codes.js';
 import { validateClientMsg } from '../shared/src/protocol/messages.js';
 import { mulberry32 } from '../shared/src/sim/prng.js';
 import GAME from '../shared/src/config/game.js';
+import { defaultRoomOptions, validateRoomOptions, spawnableKinds, type RoomOptions } from '../shared/src/rooms/options.js';
+import { initialCombat, makePermanent, stepCombat, applyPowerup, speedMultiplier, PERMANENT } from '../shared/src/sim/combat.js';
+import { pickPowerupKind } from '../shared/src/sim/powerups.js';
 
 type Msg = Record<string, unknown> & { t: string };
 const SIM_HZ = GAME.sim.hz;
@@ -154,105 +157,241 @@ describe('Private rooms', () => {
   });
 });
 
-// ── Test 3: the private lobby waits for the host ───────────────
+// ── Test 3: the private lobby (owner revision R1–R4) ───────────
+
+type Snap = Msg & {
+  match: Record<string, unknown> & { options?: RoomOptions };
+  players: { id: number; bot: boolean; name: string; alive: boolean; weapon: string; fast: boolean; shield: boolean }[];
+  pickups: { kind: string }[];
+  me?: Record<string, number | string>;
+};
+const snapOf = (p: ReturnType<typeof join>) => p.lastSnap() as Snap | undefined;
+const COUNTDOWN_TICKS = Math.round(GAME.match.countdownMs * SIM_HZ / 1000);
+const MATCH_TICKS = Math.round(GAME.match.durationMs * SIM_HZ / 1000);
+const ENDED_TICKS = Math.round(GAME.match.endedMs * SIM_HZ / 1000);
+
+function room2(opts: GameServerOptions = {}) {
+  const env = server(opts);
+  const a = join(env.s, 'new', 'A');
+  const code = a.welcome()!.code as string;
+  const b = join(env.s, code, 'B');
+  env.ticks(2);
+  return { ...env, a, b, code, room: env.s.rooms.get(code)! };
+}
 
 describe('Private lobby', () => {
-  it('stays WAITING until the host starts; START from a guest is ignored', () => {
-    const { s, ticks } = server();
-    const a = join(s, 'new', 'A');
-    const code = a.welcome()!.code as string;
-    const b = join(s, code, 'B');
+  it('shows only the players who joined (no bots by default), on Neon, with the default options', () => {
+    const { a } = room2();
+    const snap = snapOf(a)!;
+    expect(snap.match.state).toBe('WAITING');
+    expect(snap.players.map((p) => p.name).sort()).toEqual(['A', 'B']);
+    expect(snap.players.every((p) => !p.bot && p.alive)).toBe(true);
+    expect(snap.match.map).toBe('neon');
+    expect(snap.match.options).toEqual(defaultRoomOptions());
+    expect(snap.match.options!.maxPlayers).toBe(4);
+    expect(snap.pickups.length).toBe(GAME.privateRooms.defaults.powerupMax); // preview of where power-ups appear
+  });
+
+  it('stays WAITING until the host starts; START from a guest is ignored; no bots join the match', () => {
+    const { a, b, ticks } = room2();
     ticks(SIM_HZ * 20);
-    expect(a.lastSnap()!.match.state).toBe('WAITING');
-    expect(a.lastSnap()!.match.waitMsLeft).toBeUndefined();
+    expect(snapOf(a)!.match.state).toBe('WAITING');
     b.send({ t: 'start' });
     ticks(2);
-    expect(a.lastSnap()!.match.state).toBe('WAITING');
+    expect(snapOf(a)!.match.state).toBe('WAITING');
     a.send({ t: 'start' });
     ticks(2);
-    const snap = a.lastSnap()!;
+    const snap = snapOf(a)!;
     expect(snap.match.state).toBe('COUNTDOWN');
-    // Bots fill to the target (2 humans + 2 bots)
-    expect(snap.players.length).toBe(GAME.bots.targetParticipants);
-    expect(snap.players.filter((p) => p.bot).length).toBe(GAME.bots.targetParticipants - 2);
-    ticks(Math.round(GAME.match.countdownMs * SIM_HZ / 1000) + 2);
-    expect(a.lastSnap()!.match.state).toBe('RUNNING');
+    expect(snap.players.length).toBe(2);
+    expect(snap.players.some((p) => p.bot)).toBe(false);
+    ticks(COUNTDOWN_TICKS + 2);
+    expect(snapOf(a)!.match.state).toBe('RUNNING');
+  });
+
+  it('a lone host cannot start without bots; with bots on the empty slots fill', () => {
+    const { s, ticks } = server();
+    const a = join(s, 'new', 'A');
+    const room = s.rooms.get(a.welcome()!.code as string)!;
+    expect(room.canStart).toBe(false);
+    a.send({ t: 'start' });
+    ticks(2);
+    expect(snapOf(a)!.match.state).toBe('WAITING');
+    a.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), bots: true, maxPlayers: 5 } });
+    ticks(2);
+    expect(snapOf(a)!.players.filter((p) => p.bot).length).toBe(4); // shown in the lobby already
+    a.send({ t: 'start' });
+    ticks(2);
+    expect(snapOf(a)!.match.state).toBe('COUNTDOWN');
+    expect(snapOf(a)!.players.length).toBe(5);
+  });
+
+  it('only the host sets options, only in the lobby; the map shows at once', () => {
+    const { a, b, ticks } = room2();
+    b.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), map: 'plaza' } });
+    ticks(2);
+    expect(snapOf(a)!.match.map).toBe('neon');
+    a.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), map: 'warehouse' } });
+    ticks(2);
+    expect(snapOf(b)!.match.map).toBe('warehouse');
+    expect(snapOf(b)!.match.options!.map).toBe('warehouse');
+    a.send({ t: 'start' });
+    ticks(COUNTDOWN_TICKS + 4);
+    expect(snapOf(a)!.match.map).toBe('warehouse');
+    a.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), map: 'plaza' } }); // running: ignored
+    ticks(2);
+    expect(snapOf(a)!.match.map).toBe('warehouse');
+    expect(snapOf(a)!.match.options!.map).toBe('warehouse');
+  });
+
+  it('invalid options are rejected by the validator', () => {
+    const bad = [
+      { ...defaultRoomOptions(), maxPlayers: 9 },
+      { ...defaultRoomOptions(), maxPlayers: 1 },
+      { ...defaultRoomOptions(), map: 'moon' },
+      { ...defaultRoomOptions(), powerupEveryS: 4 },
+      { ...defaultRoomOptions(), powerupMax: 0 },
+      { ...defaultRoomOptions(), alwaysOn: { ...defaultRoomOptions().alwaysOn, weapon: 'laser' } },
+      { ...defaultRoomOptions(), bots: 'yes' },
+    ];
+    for (const o of bad) expect(validateRoomOptions(o), JSON.stringify(o)).toBeNull();
+    expect(validateRoomOptions({ ...defaultRoomOptions(), map: 'rotation', powerupEveryS: 0 })).not.toBeNull();
+    expect(validateClientMsg({ t: 'roomOptions', options: { ...defaultRoomOptions(), maxPlayers: 99 } })).toBeNull();
+  });
+
+  it('max players caps the room (ROOM_FULL); bots make way for a human', () => {
+    const { s, a, code, ticks } = room2();
+    a.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), maxPlayers: 3, bots: true } });
+    ticks(2);
+    expect(snapOf(a)!.players.length).toBe(3); // 2 humans + 1 bot
+    const c = join(s, code, 'C');
+    expect(c.welcome()).toBeDefined();
+    ticks(2);
+    expect(snapOf(a)!.players.filter((p) => !p.bot).length).toBe(3);
+    expect(snapOf(a)!.players.some((p) => p.bot)).toBe(false);
+    expect(join(s, code, 'D').error()?.code).toBe('ROOM_FULL');
+  });
+
+  it('power-ups: the host sets the interval and the max; 0 s = none spawn', () => {
+    const { a, ticks } = room2();
+    a.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), powerupEveryS: 3, powerupMax: 2 } });
+    ticks(2);
+    expect(snapOf(a)!.pickups.length).toBe(2);
+    a.send({ t: 'start' });
+    ticks(COUNTDOWN_TICKS + 4);
+    expect(snapOf(a)!.pickups.length).toBe(2);
+    a.send({ t: 'bye' });
+  });
+
+  it('power-ups off: none in the lobby nor the match', () => {
+    const { a, ticks } = room2();
+    a.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), powerupEveryS: 0 } });
+    ticks(2);
+    expect(snapOf(a)!.pickups.length).toBe(0);
+    a.send({ t: 'start' });
+    ticks(COUNTDOWN_TICKS + SIM_HZ * 20);
+    expect(snapOf(a)!.pickups.length).toBe(0);
+  });
+
+  it('always-on power-ups: everyone has them for the whole match, and they never spawn', () => {
+    const { a, ticks } = room2();
+    const alwaysOn = { weapon: 'rapid_fire' as const, shield: true, speed: true, piercing: false, dash: false };
+    a.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), powerupMax: 8, powerupEveryS: 3, alwaysOn } });
+    ticks(2);
+    const lobby = snapOf(a)!;
+    expect(lobby.players.every((p) => p.weapon === 'rifle' && p.fast && p.shield)).toBe(true); // shown in the lobby
+    expect(lobby.pickups.every((k) => !['rapid_fire', 'spread_shot', 'shield', 'speed'].includes(k.kind))).toBe(true);
+    a.send({ t: 'start' });
+    ticks(COUNTDOWN_TICKS + SIM_HZ * 60);
+    const mid = snapOf(a)!;
+    expect(mid.match.state).toBe('RUNNING');
+    expect(mid.players.every((p) => p.weapon === 'rifle' && p.fast)).toBe(true);
+    expect(mid.me!.weaponTicks).toBe(PERMANENT);
+    expect(mid.me!.reserve).toBe(-1); // unlimited reloads
+    expect(mid.pickups.every((k) => !['rapid_fire', 'spread_shot', 'shield', 'speed'].includes(k.kind))).toBe(true);
+  });
+
+  it('after the match the room goes back to its lobby (scores reset, options kept)', () => {
+    const { a, ticks } = room2();
+    a.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), map: 'plaza' } });
+    a.send({ t: 'start' });
+    ticks(COUNTDOWN_TICKS + MATCH_TICKS + 2);
+    expect(snapOf(a)!.match.state).toBe('ENDED');
+    ticks(ENDED_TICKS + 2);
+    const snap = snapOf(a)!;
+    expect(snap.match.state).toBe('WAITING');
+    expect(snap.match.options!.map).toBe('plaza');
+    expect(snap.players.every((p) => p.alive)).toBe(true);
+    a.send({ t: 'start' });
+    ticks(2);
+    expect(snapOf(a)!.match.state).toBe('COUNTDOWN');
   });
 
   it('the last human leaving returns the room to WAITING without bots', () => {
-    const { s, ticks } = server();
-    const a = join(s, 'new', 'A');
-    const code = a.welcome()!.code as string;
+    const { s, a, b, code, ticks } = room2();
+    a.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), bots: true } });
     a.send({ t: 'start' });
     ticks(2);
     s.removeConnection(a.conn);
+    s.removeConnection(b.conn);
     const room = s.rooms.get(code)!;
     expect(room.matchState).toBe('WAITING');
     expect(room.playerCount).toBe(0);
   });
 });
 
-// ── Test 4: the join window of main ────────────────────────────
+// ── Test 4: quick match starts at once (owner revision R1) ─────
 
-describe('Join window (main)', () => {
-  const prevDev = process.env.NOBU_DEV;
-  afterEach(() => { process.env.NOBU_DEV = prevDev; });
-
-  it('waits the window with waitMsLeft counting down, then the countdown and bots', () => {
-    const { s, ticks } = server({ joinWindowMs: 10_000 });
+describe('Quick match (main)', () => {
+  it('starts the countdown as soon as a human joins, with bots in the empty slots', () => {
+    const { s, ticks } = server();
     const a = join(s, 'main', 'A');
     ticks(2);
-    const first = a.lastSnap()!.match;
-    expect(first.state).toBe('WAITING');
-    expect(first.waitMsLeft).toBeGreaterThan(9_900);
-    ticks(SIM_HZ * 5);
-    const mid = a.lastSnap()!.match.waitMsLeft as number;
-    expect(mid).toBeGreaterThan(4_800);
-    expect(mid).toBeLessThan(5_100);
-    ticks(SIM_HZ * 5);
-    const snap = a.lastSnap()!;
+    const snap = snapOf(a)!;
     expect(snap.match.state).toBe('COUNTDOWN');
-    expect(snap.match.waitMsLeft).toBeUndefined();
     expect(snap.players.filter((p) => p.bot).length).toBe(GAME.bots.targetParticipants - 1);
+    expect(snap.match.options).toBeUndefined();
+    expect('waitMsLeft' in snap.match).toBe(false);
   });
 
-  it('ends early once the target number of humans is in', () => {
-    const { s, ticks } = server({ joinWindowMs: 10_000 });
-    const players = Array.from({ length: GAME.bots.targetParticipants }, (_, i) => join(s, 'main', `H${i}`));
-    ticks(2);
-    expect(players[0].lastSnap()!.match.state).toBe('COUNTDOWN');
-    expect(players[0].lastSnap()!.players.some((p) => p.bot)).toBe(false);
-  });
-
-  it('START in main works only under npm run demo (Presenter)', () => {
-    const { s, ticks } = server({ joinWindowMs: 10_000 });
+  it('START and roomOptions do nothing in main', () => {
+    const { s, ticks } = server();
     const a = join(s, 'main', 'A');
-    delete process.env.NOBU_DEV;
-    a.send({ t: 'start' });
+    a.send({ t: 'roomOptions', options: { ...defaultRoomOptions(), map: 'plaza' } });
     ticks(2);
-    expect(a.lastSnap()!.match.state).toBe('WAITING');
-    process.env.NOBU_DEV = '1';
-    a.send({ t: 'start' });
-    ticks(2);
-    expect(a.lastSnap()!.match.state).toBe('COUNTDOWN');
+    expect(snapOf(a)!.match.options).toBeUndefined();
+    expect(s.getRoom('main').start(a.conn.playerId)).toBe(false);
+  });
+});
+
+// ── Permanent power-ups in the shared combat sim ───────────────
+
+describe('Permanent power-ups (combat sim)', () => {
+  it('a permanent weapon never expires and reloads forever; timers stay on', () => {
+    const c = makePermanent(initialCombat(), ['rapid_fire', 'speed', 'piercing', 'dash']);
+    expect(c.weapon).toBe('rifle');
+    expect(c.reserve).toBe(-1);
+    for (let i = 0; i < SIM_HZ * 120; i++) stepCombat(c, true, false, false, true);
+    expect(c.weapon).toBe('rifle');
+    expect(c.weaponTicks).toBe(PERMANENT);
+    expect(c.speedTicks).toBe(PERMANENT);
+    expect(speedMultiplier(c)).toBe(GAME.powerups.speedMultiplier);
+    expect(stepCombat(c, false, false, true, true).dashed || c.dashCooldownTicks > 0).toBe(true);
   });
 
-  it('a window of 0 keeps the old instant start', () => {
-    const { s, ticks } = server({ joinWindowMs: 0 });
-    const a = join(s, 'main', 'A');
-    ticks(2);
-    expect(a.lastSnap()!.match.state).toBe('COUNTDOWN');
+  it('a pickup never replaces or shortens a permanent power-up', () => {
+    const c = makePermanent(initialCombat(), ['spread_shot', 'speed']);
+    applyPowerup(c, 'rapid_fire');
+    applyPowerup(c, 'speed');
+    expect(c.weapon).toBe('shotgun');
+    expect(c.weaponTicks).toBe(PERMANENT);
+    expect(c.speedTicks).toBe(PERMANENT);
   });
 
-  it('everyone leaving during the window stops it; the next human starts a new one', () => {
-    const { s, ticks } = server({ joinWindowMs: 10_000 });
-    const a = join(s, 'main', 'A');
-    ticks(SIM_HZ * 8);
-    s.removeConnection(a.conn);
-    ticks(SIM_HZ * 5);
-    const b = join(s, 'main', 'B');
-    ticks(2);
-    expect(b.lastSnap()!.match.state).toBe('WAITING');
-    expect(b.lastSnap()!.match.waitMsLeft).toBeGreaterThan(9_900);
+  it('spawnable kinds leave out always-on ones; a weapon excludes both weapons', () => {
+    const o = defaultRoomOptions();
+    o.alwaysOn = { weapon: 'spread_shot', shield: false, speed: false, piercing: true, dash: false };
+    expect(spawnableKinds(o).sort()).toEqual(['dash', 'shield', 'speed']);
+    expect(pickPowerupKind(() => 0.5, [])).toBeNull();
   });
 });
