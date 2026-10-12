@@ -5,9 +5,12 @@
  * use this to measure how far their drawn mover is from the truth).
  * Paths are continuous (no teleports) and keep clear of the obstacles in
  * game.json (checked by tests/movers.test.ts).
+ * Only operations with exact IEEE results (+ − × ÷, sqrt, dsin / dcos): a
+ * browser and the server must compute the same bits (lockstep, Phase 6).
  */
 
 import type { Vec2 } from './geometry.js';
+import { dcos, dsin } from './dtrig.js';
 
 export type MoverPattern = 'circle' | 'zigzag' | 'reversal' | 'stopgo';
 
@@ -31,9 +34,16 @@ const ZIGZAG: Vec2[] = Array.from({ length: 15 }, (_, i) => ({ x: 360 + 40 * i, 
 const REVERSAL: Vec2[] = [{ x: 360, y: 175 }, { x: 920, y: 175 }];
 const STOPGO: Vec2[] = [{ x: 400, y: 250 }, { x: 400, y: 470 }];
 
+/** Math.hypot is not guaranteed bit-exact across engines; sqrt is. */
+function segLen(a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
 function polylineLength(pts: Vec2[]): number {
   let len = 0;
-  for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  for (let i = 1; i < pts.length; i++) len += segLen(pts[i - 1], pts[i]);
   return len;
 }
 
@@ -48,7 +58,7 @@ function pingPong(pts: Vec2[], d: number): Vec2 {
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1];
     const b = pts[i];
-    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    const seg = segLen(a, b);
     if (s <= seg || i === pts.length - 1) {
       const u = seg > 0 ? Math.min(1, s / seg) : 0;
       return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
@@ -72,7 +82,7 @@ export function moverPath(pattern: MoverPattern, tSec: number, cfg: MoverCfg): V
   switch (pattern) {
     case 'circle': {
       const angle = (cfg.speed * tSec) / CIRCLE.r;
-      return { x: CIRCLE.x + CIRCLE.r * Math.cos(angle), y: CIRCLE.y + CIRCLE.r * Math.sin(angle) };
+      return { x: CIRCLE.x + CIRCLE.r * dcos(angle), y: CIRCLE.y + CIRCLE.r * dsin(angle) };
     }
     case 'zigzag':
       return pingPong(ZIGZAG, cfg.speed * tSec);

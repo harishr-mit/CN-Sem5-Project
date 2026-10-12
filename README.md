@@ -1,10 +1,10 @@
 # NoBu Shooter
 
-A real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot vs state synchronisation (full / delta snapshots, state sync with extrapolation), and a **standalone network impairment emulator** (latency, jitter, packet loss, bandwidth limit, duplication, reordering) for WebSocket and UDP. You control it live from the in-game **Network Lab** or from its own **dashboard**, and it works in front of any app, not just this game.
+A real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot vs state synchronisation (full / delta snapshots, state sync with extrapolation), deterministic lockstep, and a **standalone network impairment emulator** (latency, jitter, packet loss, bandwidth limit, duplication, reordering) for WebSocket and UDP. You control it live from the in-game **Network Lab** or from its own **dashboard**, and it works in front of any app, not just this game.
 
 > The game is the demo application; the networking is the point.
 
-**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases (plus the owner's Phase 2.5), each ending with a demoable checkpoint. Phases 1 (correct core netcode), 2 (Compare view), 2.5 (gameplay + textures), 3 (sync models: full vs delta snapshots vs state sync with extrapolation), 4 (Presenter mode + polish) and 5 (UDP transport, network players, standalone emulator with its dashboard) are complete; Phase 6 (lockstep + final rehearsal) is next.
+**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases (plus the owner's Phase 2.5), each ending with a demoable checkpoint, and **all six are complete**: 1 (correct core netcode), 2 (Compare view), 2.5 (gameplay + textures), 3 (sync models: full vs delta snapshots vs state sync with extrapolation), 4 (Presenter mode + polish), 5 (UDP transport, network players, standalone emulator with its dashboard) and 6 (deterministic lockstep in the Compare view, final talk track, rehearsal — `docs/REHEARSAL.md`). A candidate Phase 7 (multiplayer readiness) is described but not scheduled.
 
 ---
 
@@ -74,9 +74,9 @@ This single command checks that the ports are free and starts:
 Once started, open your browser to:
 👉 **[http://localhost:5173](http://localhost:5173)**
 
-Click **Quick Match (vs bots)** to play, or **Network Lab — Compare** to compare netcode settings side by side: 2–4 panes driven by one keyboard, an optional reference pane connected straight to the server, scripted moving targets, and one-click comparisons (prediction, interpolation, redundancy, sync models, bandwidth, state rate).
+Click **Quick Match (vs bots)** to play, or **Network Lab — Compare** to compare netcode settings side by side: 2–4 panes driven by one keyboard, an optional reference pane connected straight to the server, scripted moving targets, and one-click comparisons (prediction, interpolation, redundancy, sync models, bandwidth, state rate, snapshot vs lockstep).
 
-**Presenter mode** (for giving the talk): **Presenter — Quick Match** runs 13 scripted steps in a match (baseline → server delay → prediction → loss → redundancy → reconciliation off → jitter → interpolation → nudge → Nightmare with full / delta / state sync → network players over UDP); **Presenter — Compare** steps through the six Compare presets. Each step sets the network, every netcode toggle and the sync model at once and shows a caption bar with what to watch, the expected numbers and a step timer. `N` next, `B` back (exactly the same state again), `H` hides the caption, **END** leaves. Every normal key still works in between. The bar also has **⟲ RESTART** (the game back to its starting case and the talk back to step 1) and **map** buttons (restart the game on that map; the talk stays on its step). In Quick Match the presenter stops the match clock (HUD ∞) and turns on the developer **Invincible** switch so bots can't interrupt; these, RESTART and the map buttons need `npm run demo`. The steps are listed in `docs/DEMO_SCRIPT.md` §12. Step 13 impairs only the network players' route, so start the demo with `-- --swarm 3` for it.
+**Presenter mode** (for giving the talk): **Presenter — Quick Match** runs 13 scripted steps in a match (baseline → server delay → prediction → loss → redundancy → reconciliation off → jitter → interpolation → nudge → Nightmare with full / delta / state sync → network players over UDP); **Presenter — Compare** steps through the seven Compare presets (C7 = Snapshot vs Lockstep). Each step sets the network, every netcode toggle and the sync model at once and shows a caption bar with what to watch, the expected numbers and a step timer. `N` next, `B` back (exactly the same state again), `H` hides the caption, **END** leaves. Every normal key still works in between. The bar also has **⟲ RESTART** (the game back to its starting case and the talk back to step 1) and **map** buttons (restart the game on that map; the talk stays on its step). In Quick Match the presenter stops the match clock (HUD ∞) and turns on the developer **Invincible** switch so bots can't interrupt; these, RESTART and the map buttons need `npm run demo`. The steps are listed in `docs/DEMO_SCRIPT.md` §12. Step 13 impairs only the network players' route, so it needs network players: start them **when you reach step 13**, with `npm run swarm -- --n 3` in a second terminal (the bar says when none are connected). Started from the beginning (`npm run demo -- --swarm 3`) they make the match bigger — full snapshots ≈ 800 instead of ≈ 475 kbps — and under Nightmare (steps 10–12) even Delta then stays above the 400 kbps cap (`docs/REHEARSAL.md`).
 
 **Emulator dashboard** (landing page button, the Lab's **DASHBOARD ↗** link, or `http://127.0.0.1:9001/`) shows:
 - every route and session, the browser's and the network players' side by side;
@@ -113,7 +113,7 @@ npm run udp-send -- --to 9100          # numbered messages through the emulator
 Ensure your environment passes all test suites and the headless end-to-end simulation:
 
 ```bash
-# Run unit and integration tests (196 tests: sim, protocol, emulator pipeline incl. queue
+# Run unit and integration tests (222 tests: sim, protocol, emulator pipeline incl. queue
 # depth and reorder marks, emulator routes (WS + UDP over real sockets, runtime routes,
 # route-scoped presets, control-port safety, "imports nothing from the game"), UDP fragments,
 # the server's UDP adapter, game rules, weapons/ammo/reload, power-ups, map layouts, sync models
@@ -121,16 +121,19 @@ Ensure your environment passes all test suites and the headless end-to-end simul
 # layout/input/presets, Presenter scripts + controller, developer/Presenter room commands,
 # and an end-to-end netcode harness:
 # real server + client + emulator pipeline on fake timers, incl. the twin-pane check and
-# full vs delta vs state under Nightmare, plus NetClient over real UDP through the emulator)
+# full vs delta vs state under Nightmare, NetClient over real UDP through the emulator, and
+# lockstep: replay ≡ the server bit for bit over 2 000 ticks, the encoder, and two lockstep
+# clients that stay identical to the server under random and burst loss with 0 desyncs)
 npm test
 
 # Type-check server, emulator, shared code, tests and client
 npm run typecheck
 
 # Run the automated headless smoke test through the emulator under the Nightmare preset
-# (7 steps: a WS bot incl. ammo, reload, bot shots, power-ups and the map id; the lab movers;
+# (8 steps: a WS bot incl. ammo, reload, bot shots, power-ups and the map id; the lab movers;
 # a delta-sync client that must decode the server's world exactly with far fewer bytes;
-# and one UDP network player through udp:9100 whose fragmented snapshots must reassemble)
+# one UDP network player through udp:9100 whose fragmented snapshots must reassemble;
+# and two lockstep lab players at 50 ms + 5 % loss that must replay the server exactly)
 npm run smoke
 
 # Screenshot every screen at 1280×720 and 1920×1080 with local Chrome (starts and stops the
@@ -154,7 +157,7 @@ Run these from the repository root; from `NoBu-Shooter/` the same `npm run …` 
 | Command | What it does |
 |---|---|
 | `npm run demo` | Server (WS 8080, UDP 8081) + emulator (routes `ws:9000`, `udp:9100`; dashboard 9001) + client (5173). `Ctrl+C` stops everything |
-| `npm run demo -- --swarm 3` | The same, plus 3 network players over UDP (`UDP-1…3`); needed for Presenter step 13 |
+| `npm run demo -- --swarm 3` | The same, plus 3 network players over UDP (`UDP-1…3`). For the Presenter talk, start them only at step 13 instead (`npm run swarm -- --n 3`, below) |
 | `NOBU_MAPS=plaza npm run demo` | Start the rotation on a given map (`neon`, `warehouse`, `plaza`, `overgrown`) |
 | `NOBU_HOST=127.0.0.1 npm run demo` | Bind the game server to this machine only (default: all interfaces, so others on the LAN can join) |
 
@@ -205,11 +208,11 @@ Run these from the repository root; from `NoBu-Shooter/` the same `npm run …` 
 | **Mute sounds** | `M` (volume in Settings, `Esc`) |
 | **Toggle Network Lab** | `Tab` |
 | **Netcode toggles** | `P` prediction, `C` reconciliation (was `R` until 2026-10-10; `R` is now reload), `I` interpolation, `G` ghost (while shown it replaces your cyan ring) |
-| **Sync model** | `Y` cycles Full → Delta → State 10 Hz → State 30 Hz, live (Network Lab → **SYNC MODEL**; remembered; default Full). Exactly one is active, shown in two groups: **Snapshots** (interpolated) — Full = whole world every snapshot, Delta = only changes since the last acknowledged snapshot — and **State sync** (extrapolated) — records + velocity at 10 or 30 Hz |
+| **Sync model** | `Y` cycles Full → Delta → State 10 Hz → State 30 Hz, live (Network Lab → **SYNC MODEL**; remembered; default Full; Compare panes add **Lockstep**). Exactly one is active, shown in two groups: **Snapshots** (interpolated) — Full = whole world every snapshot, Delta = only changes since the last acknowledged snapshot — and **State sync** (extrapolated) — records + velocity at 10 or 30 Hz |
 | **Controls / Settings** | `F1` / `Esc` |
 | **Projector** | Settings → **UI Scale** 100 / 115 / 130 % (all panels and text, not the arena; remembered) |
 | **Network Lab sections** | Click a section title to fold it; the Lab remembers. Defaults fit 1920 × 1080 and 1280 × 720 without scrolling |
-| **Presenter mode** | Landing page **Presenter — Quick Match** (13 steps) / **Presenter — Compare** (6): `N` next step, `B` previous step, `H` hide the caption; bar buttons **⟲ RESTART**, **map** (Neon / Warehouse / Plaza / Overgrown — restarts the game there) and **END**; step 13 adds **OPEN DASHBOARD ↗** |
+| **Presenter mode** | Landing page **Presenter — Quick Match** (13 steps) / **Presenter — Compare** (7): `N` next step, `B` previous step, `H` hide the caption; bar buttons **⟲ RESTART**, **map** (Neon / Warehouse / Plaza / Overgrown — restarts the game there) and **END**; step 13 adds **OPEN DASHBOARD ↗** |
 | **Emulator dashboard** | Landing page **EMULATOR DASHBOARD ↗**, Network Lab **DASHBOARD ↗**, or `http://127.0.0.1:9001/` (new tab). The Lab's presets change only the game's route; the dashboard reaches every route and session |
 | **Leave match** | **◄ LEAVE MATCH** (bottom-left of the arena), or `Esc` → **◄ LEAVE MATCH — BACK TO MAIN MENU** (end of the settings menu). Compare: **◄ EXIT** (top bar) |
 | **Network Presets** | Keys `1` through `5` |
@@ -218,7 +221,7 @@ Run these from the repository root; from `NoBu-Shooter/` the same `npm run …` 
 | **Preset 3** | Mobile 4G (45 ms ± 25 ms jitter, 2% loss, 5 Mbps) |
 | **Preset 4** | Transatlantic (90 ms ± 8 ms jitter, 0.5% loss) |
 | **Preset 5** | Nightmare (120 ms ± 50 ms jitter, 12% burst loss, 3% dup, 5% reorder, 400 kbps) |
-| **Compare view** | **Network Lab — Compare** on the landing page. Presets: Prediction, Interpolation, Redundancy, **Sync** (Full / Delta / State at Nightmare), **Bandwidth** (Full vs Delta at 300 kbps), **State Hz** (State 10 vs 30 Hz), Custom. Inside: `Tab` network drawer, `1`–`5` presets, click a pane then `P` / `C` / `I` / `G` to toggle its settings or `Y` to cycle its sync model, `T` truth rings. The dock shows a table and a live bandwidth chart with the emulator's cap |
+| **Compare view** | **Network Lab — Compare** on the landing page. Presets: Prediction, Interpolation, Redundancy, **Sync** (Full / Delta / State at Nightmare), **Bandwidth** (Full vs Delta at 300 kbps), **State Hz** (State 10 vs 30 Hz), **Lockstep** (Full / Lockstep / Lockstep + Rd at 50 ms + 5 % loss), Custom. Inside: `Tab` network drawer, `1`–`5` presets, click a pane then `P` / `C` / `I` / `G` to toggle its settings or `Y` to cycle its sync model (… → Lockstep; on a lockstep pane only **Rd** applies: on = redundant window, off = resend on request), `T` truth rings. The dock shows a table and a live bandwidth chart with the emulator's cap |
 
 Latencies are one-way, applied in each direction (RTT ≈ 2 × latency).
 
@@ -242,6 +245,8 @@ CN-Sem5-Project/
 │   ├── PHASE3_PLAN.md      # Phase 3 implementation plan (sync models)
 │   ├── PHASE4_PLAN.md      # Phase 4 implementation plan (Presenter mode, polish, shots)
 │   ├── PHASE5_PLAN.md      # Phase 5 implementation plan (UDP, network players, emulator routes + dashboard)
+│   ├── PHASE6_PLAN.md      # Phase 6 implementation plan (lockstep, final docs, rehearsal)
+│   ├── REHEARSAL.md        # Timing sheet + checklist for the presentation laptop
 │   ├── VISUAL_CHECKLIST.md # What to check on the `npm run shots` screenshots
 │   └── archive/SPEC-v1.md  # Original v1 build spec (archived)
 └── NoBu-Shooter/           # Primary application workspace
@@ -272,6 +277,7 @@ Emulator dashboard ────────┴──►  control API http/ws 127
 - **One server core, two transports:** the server's game logic doesn't know about transports. The WS and UDP adapters feed the same `GameServer`.
 - **The 1200-byte rule:** UDP datagrams stay at or under 1200 bytes, so larger messages (full snapshots, ≈ 2–4.5 kB in a fight) travel as fragments. The emulator impairs each fragment on its own, and one lost fragment loses the whole snapshot. That is a second reason why delta snapshots win on lossy links.
 - **Browsers stay on WebSocket**, because they can't open UDP sockets. The emulator treats each WS frame as a datagram.
+- **Four ways to keep a client in sync** (chosen per connection, live): **full** snapshots (interpolated), **delta** snapshots (changes against the last acknowledged one), **state** sync (records + velocity, extrapolated), and — lab room / Compare only — **lockstep**: the server relays the inputs it consumed per tick and the client replays them with the same movement code, bit for bit (checked by a world hash every 30 ticks). Lockstep sends ≈ 1/10 of the bytes but must wait for every tick: a lost one freezes the world until it is resent (Rd off) or covered by the next message (Rd on).
 
 ---
 

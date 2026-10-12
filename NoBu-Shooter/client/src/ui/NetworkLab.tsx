@@ -50,6 +50,7 @@ const SYNC_HINT: Record<SyncSpec['model'], string> = {
   full: 'Whole world every snapshot, interpolated',
   delta: 'Only changes since the last acknowledged snapshot',
   state: 'Records + velocity, extrapolated (no delay)',
+  lockstep: 'Inputs per tick, replayed (Compare only)',
 };
 
 export const NetworkLab: React.FC<NetworkLabProps> = ({

@@ -12,6 +12,11 @@ export * from './types.js';
 export { diffFields, patchFields, diffList, patchList } from './diff.js';
 export { DeltaEncoder, DeltaDecoder, makeDelta, applyDelta } from './delta.js';
 export { StateEncoder, stateToSnap, type Velocity, type VelocityTable } from './state.js';
+export {
+  LockstepLog, LockstepEncoder, applyRecord, worldFromKeyframe, worldHash, labMoveCfg, moverPosAt,
+  type LabWorld, type LabMover, type RecordSource, type LockstepEncoderStats,
+  type Keyframe, type LockstepRecord, type LsPlayer, type LsMover, type MsgLs, type MsgLsNack,
+} from './lockstep.js';
 
 export type SyncOutput = MsgSnap | MsgSnapDelta | MsgState;
 
@@ -40,5 +45,7 @@ export function createEncoder(spec: SyncSpec): SyncEncoder {
     const st = new StateEncoder(s.hz!);
     return { spec: s, encode: (snap, vel) => st.encode(snap, vel), onAck: () => {}, fallbacks: 0 };
   }
+  // Lockstep sends tick records, not snapshots: the server uses a LockstepEncoder instead
+  if (s.model === 'lockstep') return { spec: s, encode: () => null, onAck: () => {}, fallbacks: 0 };
   return { spec: s, encode: (snap) => snap, onAck: () => {}, fallbacks: 0 };
 }

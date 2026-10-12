@@ -15,6 +15,10 @@
  *    the emulator's udp:9100 route under Nightmare for 10 s: snapshots keep
  *    arriving (fragments reassembled), acks advance, and the emulator lists
  *    its session (scripts/swarm.ts --duration)
+ * 8. Lockstep (PHASES.md L2, docs/PHASE6_PLAN.md D11): the game route at
+ *    50 ms + 5 % loss, two lockstep lab players (Rd off / on) and a direct
+ *    spectator; every shown world equals the server's, 0 desyncs, Rd on
+ *    stalls less (scripts/lockstep-clients.ts)
  * All child processes are stopped (and ports freed) on every exit path.
  */
 
@@ -43,10 +47,10 @@ const cleanup = cleanupOnExit(children);
 // The automated run binds this machine only (docs/PHASE5_PLAN.md D15)
 process.env.NOBU_HOST = '127.0.0.1';
 
-console.log('[smoke] 1/7 Launching game server (ws 8080, udp 8081)...');
+console.log('[smoke] 1/8 Launching game server (ws 8080, udp 8081)...');
 children.push(spawnTs('SERVER', 'server/src/main.ts', [], { cwd: rootDir, onLine: quiet('SERVER') }));
 
-console.log('[smoke] 2/7 Launching network emulator (routes ws:9000, udp:9100; control 9001)...');
+console.log('[smoke] 2/8 Launching network emulator (routes ws:9000, udp:9100; control 9001)...');
 children.push(spawnTs('EMULATOR', 'emulator/src/main.ts', [
   '--route', 'ws:127.0.0.1:9000=ws://127.0.0.1:8080',
   '--route', 'udp:127.0.0.1:9100=127.0.0.1:8081',
@@ -60,7 +64,7 @@ if (!up.every(Boolean)) {
   process.exit(1);
 }
 
-console.log('[smoke] 3/7 Configuring emulator with "Nightmare" preset (all routes)...');
+console.log('[smoke] 3/8 Configuring emulator with "Nightmare" preset (all routes)...');
 await new Promise((resolveP, reject) => {
   const ctrl = new WebSocket('ws://127.0.0.1:9001');
   ctrl.on('open', () => {
@@ -82,21 +86,25 @@ function fail(msg, code) {
 }
 const echo = (l) => console.log(l);
 
-console.log('[smoke] 4/7 Starting headless bot (10s duration)...');
+console.log('[smoke] 4/8 Starting headless bot (10s duration)...');
 let code = await run(spawnNode('BOT', ['scripts/headless-bot.mjs', '--duration', '10', '--min-tick-hz', '55'], { cwd: rootDir, onLine: echo }));
 if (code !== 0) fail('Bot exited with an error', code);
 
-console.log('[smoke] 5/7 Lab spectator + scripted movers (direct to the server)...');
+console.log('[smoke] 5/8 Lab spectator + scripted movers (direct to the server)...');
 code = await run(spawnTs('SPECTATOR', 'scripts/lab-spectator.ts', [], { cwd: rootDir, onLine: echo }));
 if (code !== 0) fail('Lab spectator check failed', code);
 
-console.log('[smoke] 6/7 Sync models: full vs delta NetClients under Nightmare + direct spectator...');
+console.log('[smoke] 6/8 Sync models: full vs delta NetClients under Nightmare + direct spectator...');
 code = await run(spawnTs('SYNC', 'scripts/sync-clients.ts', [], { cwd: rootDir, onLine: echo }));
 if (code !== 0) fail('Sync-model check failed', code);
 
-console.log('[smoke] 7/7 One UDP network player through udp:9100 under Nightmare (10 s)...');
+console.log('[smoke] 7/8 One UDP network player through udp:9100 under Nightmare (10 s)...');
 code = await run(spawnTs('SWARM', 'scripts/swarm.ts', ['--n', '1', '--duration', '10', '--quiet'], { cwd: rootDir, onLine: echo }));
 if (code !== 0) fail('UDP network player check failed', code);
+
+console.log('[smoke] 8/8 Lockstep: two lab players (Rd off / on) at 50 ms + 5 % loss + direct spectator...');
+code = await run(spawnTs('LOCKSTEP', 'scripts/lockstep-clients.ts', [], { cwd: rootDir, onLine: echo }));
+if (code !== 0) fail('Lockstep check failed', code);
 
 cleanup();
 console.log('\n\x1b[32m✔ SMOKE TEST COMPLETE: All assertions passed under Nightmare conditions.\x1b[0m\n');

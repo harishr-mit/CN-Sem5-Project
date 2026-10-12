@@ -48,7 +48,9 @@ export function loadSettings(): UserSettings {
     if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw);
     const merged = { ...DEFAULT_SETTINGS, ...parsed } as UserSettings;
-    merged.syncModel = isSyncSpec(merged.syncModel) ? normalizeSync(merged.syncModel) : DEFAULT_SYNC;
+    // Lockstep is Compare-only (lab room, docs/PHASE6_PLAN.md D1): never a Quick Match setting
+    merged.syncModel = isSyncSpec(merged.syncModel) && merged.syncModel.model !== 'lockstep'
+      ? normalizeSync(merged.syncModel) : DEFAULT_SYNC;
     if (!UI_SCALES.includes(merged.uiScale)) merged.uiScale = 100;
     const sections = typeof merged.labSections === 'object' && merged.labSections !== null ? merged.labSections : {};
     merged.labSections = { ...DEFAULT_LAB_SECTIONS };

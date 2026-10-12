@@ -28,7 +28,7 @@ npm test
 # Type-check server, emulator, shared, tests and client
 npm run typecheck
 
-# Run the headless smoke test (through the emulator, Nightmare preset; incl. one UDP network player)
+# Run the headless smoke test (through the emulator, Nightmare preset; incl. one UDP network player and two lockstep players)
 npm run smoke
 
 # Screenshot every screen at 1280×720 and 1920×1080 (local Chrome; output in artifacts/shots/)

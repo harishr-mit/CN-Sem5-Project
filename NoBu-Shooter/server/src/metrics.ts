@@ -3,6 +3,8 @@
  * SPEC.md §9.6.
  */
 
+import type { SyncModel } from '@nobu/shared/sync';
+
 export interface MetricCounters {
   shots: number;
   hits: number;
@@ -50,15 +52,16 @@ export class Metrics {
     reloads: 0, pickups: 0, shieldBlocks: 0,
   };
 
-  readonly sync: Record<'full' | 'delta' | 'state', SyncTraffic> & { deltaFallbacks: number } = {
+  readonly sync: Record<SyncModel, SyncTraffic> & { deltaFallbacks: number } = {
     full: { msgs: 0, bytes: 0 },
     delta: { msgs: 0, bytes: 0 },
     state: { msgs: 0, bytes: 0 },
+    lockstep: { msgs: 0, bytes: 0 },
     deltaFallbacks: 0,
   };
 
   /** One snapshot-type message sent to a connection using `model`. */
-  recordSync(model: 'full' | 'delta' | 'state', payloadBytes: number): void {
+  recordSync(model: SyncModel, payloadBytes: number): void {
     this.sync[model].msgs++;
     this.sync[model].bytes += payloadBytes + WIRE_OVERHEAD_BYTES;
   }

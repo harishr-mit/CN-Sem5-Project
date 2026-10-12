@@ -59,7 +59,7 @@ Resent every 250 ms until an authoritative `welcome` message is received.
 - `room`: `"main"` (full match with bots) or `"lab"` (movement-only sandbox used by the Compare view; every lab player spawns at the same point, `rooms.lab.spawn`, so all panes' players start together).
 - `nonce`: Unique client-generated session identifier for idempotent handshake retry.
 - `spectate` (optional, boolean): join as a **spectator** — the connection receives snapshots but gets no player, doesn't count toward the room's player cap, and its `input`/`perturb` messages are ignored. The Compare view's reference pane uses this, connecting directly to the server (no emulator).
-- `sync` (optional, Phase 3): the connection's **sync model**, `{ "model": "full" | "delta" | "state", "hz"?: 10 | 30 }` (`hz` only for `state`, default 10). Omitted = `full`. Spectators always get full snapshots. It can be changed later with `sync` (§2.8). See §3.5 for what each model sends.
+- `sync` (optional, Phase 3): the connection's **sync model**, `{ "model": "full" | "delta" | "state" | "lockstep", "hz"?: 10 | 30, "rd"?: boolean }` (`hz` only for `state`, default 10; `rd` only for `lockstep`, default false). Omitted = `full`. Spectators always get full snapshots. `lockstep` is accepted in the lab room only (else `error LOCKSTEP_LAB_ONLY`, and the player joins with `full`). It can be changed later with `sync` (§2.8). See §3.5 for what each model sends.
 
 ### 2.2 `input` (Player Movement & Fire)
 Flushed at 30 Hz. Contains one or more 60 Hz input samples.
@@ -82,7 +82,7 @@ Flushed at 30 Hz. Contains one or more 60 Hz input samples.
 - `f`: Fire flag (`1` = fire held, `0` = idle). Sent while the button is held; the server and the client's prediction both apply the weapon's cooldown and magazine (`shared/src/sim/combat.ts`).
 - `d` (optional, omitted when 0): dash request (Dash power-up). Sent on the input after `Space` and repeated during the predicted burst; the server ignores it without the power-up, without a movement key, during a burst or on cooldown.
 - `r` (optional, omitted when 0): reload request (`GAMERULES.md` §6a). The client sets it on the input after `R` and repeats it on every input of its predicted reload, so a lost input can't cancel the reload; the server ignores it while reloading or with a full magazine.
-- `sa` (optional, delta sync only): the newest snapshot tick the client has decoded — the **snapshot ack** the server's delta encoder uses as the next base (§3.5). When no input message goes out in a 30 Hz send step (dead, waiting, or idle), the client sends `snapAck` instead (§2.9).
+- `sa` (optional, delta and lockstep only): delta — the newest snapshot tick the client has decoded, the **snapshot ack** the server's delta encoder uses as the next base (§3.5); lockstep — the newest tick up to which the client holds **every** record (§3.6). When no input message goes out in a 30 Hz send step (dead, waiting, or idle), the client sends `snapAck` instead (§2.9).
 - *Redundancy off (default)*: every input is sent exactly once — the message carries all inputs created since the previous message (normally 2, since inputs are created at 60 Hz and sent at 30 Hz).
 - *Redundancy on*: the message carries all unacknowledged inputs, newest last, at most 10. Lost or late messages are then covered by the next one.
 - The server consumes one input per tick in sequence order, ignores `s <= lastConsumed` (duplicates/stale) and skips gaps; `ack` in the next snapshot is the last consumed `s`.
@@ -152,13 +152,23 @@ Selects the active scripted movers (PHASES.md C3). Accepted only in rooms with `
 ```json
 { "t": "sync", "model": "state", "hz": 30 }
 ```
-- Switches this connection's sync model live: the player stays in the match (same id, no respawn). The server builds a new encoder, so the next message is self-contained (a full `snap`, or a `state`). The same model again is ignored (the delta base is kept). Ignored for spectators. `hz` is only valid for `state` (10 or 30).
+- Switches this connection's sync model live: the player stays in the match (same id, no respawn). The server builds a new encoder, so the next message is self-contained (a full `snap`, a `state`, or an `ls` starting with a keyframe). The same model again is ignored (the delta base is kept). Ignored for spectators. `hz` is only valid for `state` (10 or 30).
+- `{ "t": "sync", "model": "lockstep", "rd": true }` (Phase 6, lab room only): `rd` picks how lost ticks are recovered — `false` = resend on request (`lsNack`, §2.10), `true` = a redundant window (§3.6). The client sends it whenever its **Rd** chip changes; a lockstep connection that only changes `rd` keeps its encoder. Outside the lab: `error LOCKSTEP_LAB_ONLY` and the model stays.
 
 ### 2.9 `snapAck` (Snapshot Ack, Delta Sync)
 ```json
 { "t": "snapAck", "tick": 4182 }
 ```
 - Same meaning as `input.sa`, sent only when no input message carries it. Ticks are non-negative integers; older acks than the newest one are ignored.
+
+### 2.10 `lsNack` (Lockstep: Ask Again, Phase 6)
+```json
+{ "t": "lsNack", "from": 4180, "to": 4183 }
+{ "t": "lsNack", "from": 0, "to": 0, "key": true }
+```
+- Rd off: the client holds a record newer than the next one it needs, so ticks `from`..`to` were lost; the server sends them again with its next `ls`. The client asks again if the hole is still open after 1.5 × RTT (at least 50 ms). Ticks it already acknowledged are never resent; a tick the server's 256-tick ring no longer holds → a fresh keyframe (a resync).
+- `key: true` (after a hash mismatch, §3.6): start over from a fresh keyframe; acks from before the request don't count.
+- `from ≤ to`, both non-negative integers, at most 256 ticks apart.
 
 ## 3. Server → Client Messages
 
@@ -311,6 +321,7 @@ While a Presenter has stopped the match clock (`dev.endless`, §2.6), `match` al
   "msg": "Maximum room capacity reached"
 }
 ```
+- Codes: `ROOM_FULL`, `BAD_VERSION`, `BAD_MESSAGE` (the client stops), and `LOCKSTEP_LAB_ONLY` (Phase 6: a lockstep request outside the lab room; not fatal — the connection keeps its previous model and the client switches back to it).
 
 ### 3.5 Sync models (Phase 3)
 
@@ -320,7 +331,27 @@ While a Presenter has stopped the match clock (`dev.endless`, §2.6), `match` al
 | `delta` | `snapDelta` against the newest acknowledged snapshot (if ≤ 1 s old, from a 32-snapshot ring), else `snap` (fallback) | ≈ 0.25–0.35 kB, ≈ 60–92 kbps (15–19 %) | ≈ 0.6–0.8 kB, ≈ 140–190 kbps |
 | `state` 10 / 30 | `state` at 10 or 30 Hz | ≈ 2.0 kB: ≈ 160 / ≈ 480 kbps | — |
 
-Wire kbps include 28 bytes per message (the emulator's accounting). Measured in the harness and in the browser (`docs/ASSUMPTIONS.md` #49–#59).
+| `lockstep` (lab only) | `ls` every 2 ticks: the consumed inputs per tick (§3.6) | ≈ 35–40 kbps Rd off, ≈ 90–120 kbps Rd on (at 50 ms + 5 % loss) | not available |
+
+Wire kbps include 28 bytes per message (the emulator's accounting). Measured in the harness and in the browser (`docs/ASSUMPTIONS.md` #49–#59, #97–#108).
+
+### 3.6 `ls` (Lockstep Tick Records, Phase 6)
+```json
+{ "t": "ls", "tick": 4184, "ack": 812,
+  "recs": [
+    { "k": 4183, "in": { "17": [8] } },
+    { "k": 4184, "in": { "17": [8, 9], "18": [0] } }
+  ] }
+```
+Sent instead of snapshots to a lockstep connection (lab room only), every 2 ticks (30 Hz).
+- `tick`: the server's newest tick (the client's clock: tick × 1000/60 ms is the server time). `ack`: the receiver's newest consumed input sequence (drops its pending inputs, measures Input → Screen).
+- `recs`: tick records, oldest first. A record `{ k, in?, key?, h? }` says what happened in tick `k`:
+  - `in`: the **movement keys the server consumed** for each player id in that tick, in order (0, 1, or 2 when it worked off a backlog); a player without an entry didn't move. Applying them with `stepPlayer` to the world after tick `k − 1`, then putting every mover at `moverPath(pattern, k / 60)`, gives the server's world after tick `k` exactly (`applyRecord`, `shared/src/sync/lockstep.ts`).
+  - `key`: a **keyframe** — the complete lab world after tick `k`: `{ map, players: [{ id, name, x, y, life }], movers: [{ id, pattern }] }`. It replaces the world (and `in`). The server attaches one to the next tick after anything inputs don't explain: a join, a leave, a nudge (`perturb`), a RESTART or map change (`dev`), a mover change (`lab`).
+  - `h`: every 30 ticks, the server's `hashWorld` after tick `k` (FNV-1a over the IEEE bits of every player's and mover's id, x, y, sorted by id; an unsigned 32-bit integer). A client whose hash differs counts a **desync** and sends `lsNack { key: true }`.
+- **Start / resync:** the first message (and the one after a resync) carries a *base* — a keyframe of the current tick — which repeats in every message until the client acks that tick.
+- **Rd off:** every record is sent once; holes come back via `lsNack` (§2.10). **Rd on:** every message carries every record after the client's ack (at most 60); further behind → a resync.
+- The client plays the ticks out 2 ticks behind its estimate of the server's tick; a missing tick freezes the world (a **stall**), and afterwards it catches up with up to 3 ticks per frame. A keyframe further on replaces missing ticks.
 
 ---
 

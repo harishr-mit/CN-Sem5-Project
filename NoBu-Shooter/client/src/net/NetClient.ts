@@ -9,7 +9,7 @@
  * subscribes with `on(...)` (see bindStore.ts).
  */
 
-import { encodeClient, decodeServer } from '@nobu/shared/protocol';
+import { encodeClient, decodeServer, validateLs } from '@nobu/shared/protocol';
 import {
   stepPlayer, settlePosition, moverPath, initialCombat, copyCombat, sameCombat, stepCombat, speedMultiplier, WEAPONS,
 } from '@nobu/shared/sim';
@@ -20,12 +20,14 @@ import type {
   MsgSnapDelta, MsgState, StateHz,
 } from '@nobu/shared/protocol';
 import {
-  DeltaDecoder, stateToSnap, normalizeSync, sameSync, DEFAULT_SYNC, type SyncSpec, type Velocity,
+  DeltaDecoder, stateToSnap, normalizeSync, sameSync, sameSyncModel, DEFAULT_SYNC, type SyncSpec, type Velocity,
+  type LabWorld, type MsgLs,
 } from '@nobu/shared/sync';
 import GAME, { mapDef, type PowerupKind } from '@nobu/shared/config/game';
 import NET from '@nobu/shared/config/net';
 import { RemoteErrorTracker, type DrawnEntity } from './remoteError.js';
 import { Extrapolator } from './extrapolate.js';
+import { LockstepClient } from './lockstep.js';
 
 // ── Types ──────────────────────────────────────────────────────
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'timeout' | 'error';
@@ -88,6 +90,19 @@ export interface LocalMetrics {
   moverOffPathPct: number;
   /** Delay samples behind the mover metrics (0 = no data). */
   moverSamples: number;
+  /** Lockstep (docs/PHASE6_PLAN.md D7): % of frames frozen waiting for a tick (10 s), stalls begun in the last second, longest stall (ms, 10 s). */
+  lsStalledPct: number;
+  lsStallsPerSec: number;
+  lsLongestStallMs: number;
+  /** Lockstep: how far the shown world is behind the server's tick. */
+  lsBehindTicks: number;
+  lsBehindMs: number;
+  /** Lockstep: ticks asked for again (NACK), records received twice, keyframe jumps, hash checks passed, desyncs (must stay 0). */
+  lsNackedTicks: number;
+  lsDuplicateRecords: number;
+  lsResyncs: number;
+  lsHashChecks: number;
+  lsDesyncs: number;
 }
 
 export interface CorrectionEvent {
@@ -287,6 +302,15 @@ export class NetClient {
   private lostTimes: { t: number; n: number }[] = [];
   private lastMsgBytes = 0;
 
+  // Lockstep (lab only, docs/PHASE6_PLAN.md D5): the replayed world replaces snapshots
+  private lockstep: LockstepClient | null = null;
+  /** Inputs acknowledged by an `ls` message: shown once the world reaches that tick (Input → Screen). */
+  private lsInputMarks: { tick: number; createdAt: number }[] = [];
+  /** Tick of the world behind latestSnap (−1 = none yet). */
+  private lsViewTick = -1;
+  /** The model before lockstep, restored if the server refuses it. */
+  private syncBeforeLockstep: SyncSpec = DEFAULT_SYNC;
+
   // Snapshot buffer / clock
   private snapBuffer: SnapshotEntry[] = [];
   private latestSnap: MsgSnap | null = null;
@@ -353,6 +377,8 @@ export class NetClient {
     duplicatesIgnored: 0, reorderedIgnored: 0, serverTickHz: 0, serverTickMs: 0,
     msgBytesDown: 0, fullFallbacksPerSec: 0, deltaMissingBase: 0, snapsLostPerSec: 0,
     moverLagMs: 0, moverWobbleMs: 0, moverErrorPx: 0, moverFrozenPct: 0, moverOffPathPct: 0, moverSamples: 0,
+    lsStalledPct: 0, lsStallsPerSec: 0, lsLongestStallMs: 0, lsBehindTicks: 0, lsBehindMs: 0,
+    lsNackedTicks: 0, lsDuplicateRecords: 0, lsResyncs: 0, lsHashChecks: 0, lsDesyncs: 0,
   };
 
   constructor(opts: NetClientOptions) {
@@ -369,6 +395,15 @@ export class NetClient {
     this.map = mapDef(roomCfg.map ?? GAME.maps.rotation[0]).id;
     this.moveCfg = moveCfgFor(this.map);
     this.syncSpec = normalizeSync(opts.sync ?? DEFAULT_SYNC);
+    if (this.syncSpec.model === 'lockstep') {
+      if (this.roomName !== 'lab' || this.spectating) this.syncSpec = DEFAULT_SYNC;
+      else {
+        // The Rd chip picks the recovery (docs/PHASE6_PLAN.md D4)
+        if (this.syncSpec.rd) this.toggles = { ...this.toggles, redundancy: true };
+        this.syncSpec = { model: 'lockstep' };
+        this.lockstep = new LockstepClient({ rd: this.toggles.redundancy, onDesync: (t, a, b) => this.logDesync(t, a, b) });
+      }
+    }
     this.extrapolator = new Extrapolator({
       maxMs: NET.state.extrapolateMaxMs,
       backMs: NET.state.extrapolateBackMs,
@@ -453,6 +488,18 @@ export class NetClient {
     this.deltaDecoder = new DeltaDecoder();
     this.lastAckSent = -1;
     this.extrapolator.reset();
+    if (this.lockstep) this.lockstep = new LockstepClient({ rd: this.toggles.redundancy, onDesync: (t, a, b) => this.logDesync(t, a, b) });
+    this.lsInputMarks = [];
+    this.lsViewTick = -1;
+  }
+
+  private logDesync(tick: number, ours: number, theirs: number): void {
+    console.warn(`[client] Lockstep desync at tick ${tick}: hash ${ours.toString(16)} ≠ server ${theirs.toString(16)}; asking for a keyframe`);
+  }
+
+  /** The spec on the wire: lockstep carries the Rd chip as its recovery mode. */
+  private wireSync(): SyncSpec {
+    return this.syncSpec.model === 'lockstep' ? normalizeSync({ model: 'lockstep', rd: this.toggles.redundancy }) : this.syncSpec;
   }
 
   private send(msg: ClientMsg): void {
@@ -466,7 +513,7 @@ export class NetClient {
     const sendHello = () => this.send({
       t: 'hello', v: 1, name: this.playerName, room: this.roomName, nonce: this.nonce,
       ...(this.spectating ? { spectate: true } : {}),
-      ...(!this.spectating && this.syncSpec.model !== 'full' ? { sync: this.syncSpec } : {}),
+      ...(!this.spectating && this.syncSpec.model !== 'full' ? { sync: this.wireSync() } : {}),
     });
     sendHello();
     this.helloTimer = setInterval(sendHello, NET.helloRetryMs);
@@ -507,8 +554,23 @@ export class NetClient {
         this.onSnapReceived(snap, vel, hz);
         break;
       }
+      case 'ls': {
+        const ls = this.lockstep ? validateLs(msg) : null;
+        if (!ls) break;
+        this.recordWorldMsg(false);
+        this.onLockstepMsg(ls);
+        break;
+      }
       case 'pong': this.onPong(msg as unknown as MsgPong); break;
       case 'error':
+        if (msg['code'] === 'LOCKSTEP_LAB_ONLY') {
+          // Not fatal: the server kept the previous model (docs/PHASE6_PLAN.md D1)
+          console.warn('[client] Lockstep refused (lab room only); back to', this.syncBeforeLockstep.model);
+          this.leaveLockstep();
+          this.syncSpec = this.syncBeforeLockstep;
+          this.emit('sync', this.sync);
+          break;
+        }
         console.warn('[client] Server error:', msg['code'], msg['msg']);
         this.setStatus('error');
         break;
@@ -553,6 +615,91 @@ export class NetClient {
   private recordWorldMsg(fallback: boolean): void {
     this.worldMsgs.push({ t: this.now(), bytes: this.lastMsgBytes, fallback });
   }
+
+  // ── Lockstep ───────────────────────────────────────────────
+  private onLockstepMsg(msg: MsgLs): void {
+    const now = this.now();
+    this.snapshotTimes.push(now);
+    this.lockstep!.receive(msg, now);
+    // The inputs the server consumed up to msg.tick: ack delay now, Input → Screen when that tick is shown
+    this.pendingInputs = this.pendingInputs.filter((i) => i.s > msg.ack);
+    let newestCreated: number | undefined;
+    for (const [s, t] of this.inputCreatedAt) {
+      if (s > msg.ack) break;
+      newestCreated = t;
+      this.inputCreatedAt.delete(s);
+    }
+    if (newestCreated !== undefined) {
+      pushCapped(this.ackDelaySamples, now - newestCreated, LATENCY_SAMPLES);
+      this.lsInputMarks.push({ tick: msg.tick, createdAt: newestCreated });
+      if (this.lsInputMarks.length > 64) this.lsInputMarks.shift();
+    }
+    this.flushNack();
+  }
+
+  /** Send the lsNack the lockstep client wants now, if any (Rd off, or a keyframe request). */
+  private flushNack(): void {
+    if (!this.lockstep || !this.connected) return;
+    const nack = this.lockstep.takeNack(this.now(), this.metrics.rttMs || 100);
+    if (nack) this.send({ t: 'lsNack', ...nack });
+  }
+
+  /** Advance the lockstep playout for this frame and expose the world as a snapshot. */
+  private lockstepFrame(): RenderState {
+    const now = this.now();
+    const ls = this.lockstep!;
+    ls.frame(now);
+    const world = ls.current;
+    if (!world) return { players: [], projectiles: [] };
+    if (world.tick !== this.lsViewTick) {
+      this.lsViewTick = world.tick;
+      const snap = this.worldSnap(world);
+      this.latestSnap = snap;
+      if (world.map !== this.map) { this.map = world.map; this.moveCfg = moveCfgFor(this.map); }
+      const me = this.playerId === null ? undefined : world.players.get(this.playerId);
+      if (me) {
+        // Not predicted (docs/PHASE6_PLAN.md D5): the own player is where the replay puts it
+        this.authX = this.predictedX = me.x;
+        this.authY = this.predictedY = me.y;
+        this.smoothOffsetX = this.smoothOffsetY = 0;
+        this.lastLife = me.life;
+      }
+      while (this.lsInputMarks.length && this.lsInputMarks[0].tick <= world.tick) {
+        const mark = this.lsInputMarks.shift()!;
+        pushCapped(this.inputToScreenSamples, now - mark.createdAt + this.lastFrameMs, LATENCY_SAMPLES);
+      }
+      this.emit('snap', snap);
+    }
+    return { players: this.latestSnap!.players, projectiles: [] };
+  }
+
+  /** The lab world as a snapshot, so views and HUD work unchanged. */
+  private worldSnap(world: LabWorld): MsgSnap {
+    const players: PlayerSnap[] = [];
+    const base = {
+      bot: false, alive: true, protectMs: 0, respawnMs: 0, score: 0, aim: 0,
+      weapon: 'handgun' as WeaponId, reloading: false, shield: false, fast: false,
+    };
+    for (const p of world.players.values()) players.push({ ...base, id: p.id, name: p.name, x: p.x, y: p.y, life: p.life });
+    for (const m of world.movers) {
+      players.push({ ...base, id: m.id, name: m.pattern.toUpperCase(), bot: true, x: m.x, y: m.y, life: 1, mover: m.pattern });
+    }
+    return {
+      t: 'snap', tick: world.tick, st: world.tick * TICK_MS, ack: 0,
+      match: { state: 'RUNNING', map: world.map, timeLeftMs: 0, results: null },
+      players, projectiles: [], pickups: [], events: [],
+    };
+  }
+
+  private leaveLockstep(): void {
+    this.lockstep = null;
+    this.lsInputMarks = [];
+    this.lsViewTick = -1;
+  }
+
+  /** The lockstep world being shown (tests, debug), or null. */
+  get lockstepWorld(): LabWorld | null { return this.lockstep?.current ?? null; }
+  get isLockstep(): boolean { return this.lockstep !== null; }
 
   // ── Snapshots ──────────────────────────────────────────────
   private onSnapReceived(snap: MsgSnap, vel?: ReadonlyMap<number, Velocity>, hz?: StateHz): void {
@@ -717,8 +864,10 @@ export class NetClient {
 
     const snap = this.latestSnap;
     const me = snap?.players.find(p => p.id === this.playerId);
-    const matchRunning = snap?.match.state === 'RUNNING';
-    const isAlive = me?.alive ?? false;
+    // Lockstep: the lab is always running; we can move once the replayed world has us
+    const lsWorld = this.lockstep?.current ?? null;
+    const matchRunning = this.lockstep ? lsWorld !== null : snap?.match.state === 'RUNNING';
+    const isAlive = this.lockstep ? lsWorld?.players.has(this.playerId) === true : me?.alive ?? false;
 
     // Decay smoothing offset (half-life smoothHalfLifeMs)
     const alpha = Math.pow(0.5, SIM_STEP_MS / NET.reconcile.smoothHalfLifeMs);
@@ -755,7 +904,7 @@ export class NetClient {
 
     const mult = speedMultiplier(this.combat);
     const res = stepCombat(this.combat, fire === 1, reload, dash, inp.k !== 0);
-    if (this.toggles.prediction) {
+    if (this.toggles.prediction && !this.lockstep) {
       const pos = stepPlayer({ x: this.predictedX, y: this.predictedY }, inp.k, withSpeed(this.moveCfg, mult));
       this.predictedX = pos.x;
       this.predictedY = pos.y;
@@ -816,9 +965,16 @@ export class NetClient {
     const keys = Object.keys(next) as (keyof PredictionToggle)[];
     if (keys.every((k) => next[k] === this.toggles[k])) return;
     const resetLatency = next.prediction !== this.toggles.prediction || next.interpolation !== this.toggles.interpolation;
+    const rdChanged = next.redundancy !== this.toggles.redundancy;
     this.toggles = next;
     if (resetLatency) this.resetLatencySamples();
     this.emit('toggles', { ...next });
+    if (rdChanged && this.lockstep) {
+      // Lockstep: the Rd chip also switches the recovery (docs/PHASE6_PLAN.md D4)
+      this.lockstep.rd = next.redundancy;
+      if (this.connected && !this.spectating) this.send({ t: 'sync', ...this.wireSync() });
+      this.emit('sync', this.sync);
+    }
   }
 
   /**
@@ -828,7 +984,8 @@ export class NetClient {
    */
   sendInputs(): void {
     if (!this.connected) return;
-    const ackTick = this.syncSpec.model === 'delta' ? this.deltaDecoder.newestTick : -1;
+    const ackTick = this.lockstep ? this.lockstep.ackTick
+      : this.syncSpec.model === 'delta' ? this.deltaDecoder.newestTick : -1;
     const ack = ackTick > this.lastAckSent ? ackTick : null;
 
     let toSend: InputEntry[] = [];
@@ -844,6 +1001,7 @@ export class NetClient {
     if (toSend.length > 0) this.send({ t: 'input', inputs: toSend, ...(ack !== null ? { sa: ack } : {}) });
     else if (ack !== null) this.send({ t: 'snapAck', tick: ack });
     if (ack !== null) this.lastAckSent = ack;
+    this.flushNack(); // a NACK retry is due at most every 1.5 × RTT
   }
 
   /**
@@ -852,17 +1010,30 @@ export class NetClient {
    */
   setSync(spec: SyncSpec): void {
     const next = normalizeSync(spec);
-    if (sameSync(next, this.syncSpec)) return;
-    this.syncSpec = next;
+    if (next.model === 'lockstep') {
+      // Lab players only (docs/PHASE6_PLAN.md D1); `rd` is the Rd chip
+      if (this.roomName !== 'lab' || this.spectating) { console.warn('[client] Lockstep is available in the lab room only'); return; }
+      if (next.rd && !this.toggles.redundancy) this.setToggles({ redundancy: true });
+    }
+    if (sameSyncModel(next, this.syncSpec)) return;
+    if (next.model === 'lockstep') {
+      this.syncBeforeLockstep = this.syncSpec;
+      this.lockstep = new LockstepClient({ rd: this.toggles.redundancy, onDesync: (t, a, b) => this.logDesync(t, a, b) });
+    } else if (this.lockstep) {
+      this.leaveLockstep();
+    }
+    this.syncSpec = next.model === 'lockstep' ? { model: 'lockstep' } : next;
     this.lastAckSent = -1;
+    this.snapBuffer = [];
     this.extrapolator.reset();
     this.remoteError.reset();
-    if (this.connected && !this.spectating) this.send({ t: 'sync', ...next });
-    this.emit('sync', { ...next });
+    if (this.connected && !this.spectating) this.send({ t: 'sync', ...this.wireSync() });
+    this.emit('sync', this.sync);
   }
 
+  /** The sync model; lockstep includes `rd` = the Rd chip. */
   get sync(): SyncSpec {
-    return { ...this.syncSpec };
+    return { ...this.wireSync() };
   }
 
   perturb(dx: number, dy: number): void {
@@ -898,7 +1069,7 @@ export class NetClient {
     this.lastFrameMs = frameMs;
     this.sampleRemoteError();
     if (this.unpresentedInputAt === null) return;
-    if (this.toggles.prediction) {
+    if (this.toggles.prediction && !this.lockstep) {
       pushCapped(this.inputToScreenSamples, this.now() - this.unpresentedInputAt + frameMs, LATENCY_SAMPLES);
     }
     this.unpresentedInputAt = null;
@@ -930,6 +1101,7 @@ export class NetClient {
   }
 
   private computeRenderState(): RenderState {
+    if (this.lockstep) return this.lockstepFrame();
     const latest = this.latestSnap;
     const buf = this.snapBuffer;
     // State sync: extrapolate from the newest state (no interpolation delay, docs/PHASE3_PLAN.md D6)
@@ -1003,6 +1175,7 @@ export class NetClient {
    * offset. Prediction off: exactly like a remote player (SPEC.md §10.6).
    */
   getLocalRenderPos(state: RenderState): { x: number; y: number } {
+    if (this.lockstep) return { x: this.authX, y: this.authY };
     if (this.toggles.prediction) {
       return { x: this.predictedX + this.smoothOffsetX, y: this.predictedY + this.smoothOffsetY };
     }
@@ -1060,6 +1233,20 @@ export class NetClient {
     m.moverFrozenPct = re.frozenPct;
     m.moverOffPathPct = re.offPathPct;
     m.moverSamples = re.samples;
+
+    if (this.lockstep) {
+      const ls = this.lockstep.updateStats(now);
+      m.lsStalledPct = ls.stalledPct;
+      m.lsStallsPerSec = ls.stallsPerSec;
+      m.lsLongestStallMs = ls.longestStallMs;
+      m.lsBehindTicks = ls.behindTicks;
+      m.lsBehindMs = ls.behindMs;
+      m.lsNackedTicks = ls.nackedTicks;
+      m.lsDuplicateRecords = ls.duplicateRecords;
+      m.lsResyncs = ls.resyncs;
+      m.lsHashChecks = ls.hashChecks;
+      m.lsDesyncs = ls.desyncs;
+    }
   }
 
   /** Reset the latency averages (e.g. after toggling prediction). */

@@ -11,7 +11,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import NET from '@nobu/shared/config/net';
 import { MOVER_PATTERNS } from '@nobu/shared/sim';
 import type { MoverPattern, MapId } from '@nobu/shared/protocol';
-import { nextSync } from '@nobu/shared/sync';
+import { nextSync, COMPARE_SYNC_CYCLE, type SyncSpec } from '@nobu/shared/sync';
 import { NetClient, type LocalMetrics, type PredictionToggle } from '../../net/NetClient.js';
 import { EmulatorClient } from '../../net/EmulatorClient.js';
 import type { ArenaSceneOptions } from '../../game/ArenaScene.js';
@@ -69,6 +69,11 @@ const barBtn = (active: boolean, color = 'var(--c-cyan)', narrow = false): React
   background: active ? color : 'transparent',
   border: `1px solid ${active ? color : 'var(--c-border)'}`,
 });
+
+/** A pane's sync model as shown: lockstep carries its recovery mode, which is the Rd chip (docs/PHASE6_PLAN.md D4). */
+function paneSync(p: { sync: SyncSpec; toggles: PredictionToggle }): SyncSpec {
+  return p.sync.model === 'lockstep' ? { model: 'lockstep', ...(p.toggles.redundancy ? { rd: true } : {}) } : p.sync;
+}
 
 export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, presetRequest, footer, restartRequest, onMapChange }) => {
   // ── Long-lived objects (created once) ───────────────────────────
@@ -140,11 +145,8 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, pr
   useEffect(() => {
     for (const spec of preset.panes) {
       const c = clients[spec.id];
-      const old = c.toggles;
-      c.toggles = { ...spec.toggles };
-      if (old.prediction !== spec.toggles.prediction || old.interpolation !== spec.toggles.interpolation) {
-        c.resetLatencySamples();
-      }
+      // setToggles also restarts the latency averages and, on a lockstep pane, switches the recovery (Rd)
+      c.setToggles(spec.toggles);
       c.setSync(spec.sync);
     }
   }, [preset, clients]);
@@ -274,7 +276,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, pr
     const next = customPreset(preset.panes.length, preset);
     const pane = next.panes.find((p) => p.id === id);
     if (!pane) return;
-    pane.sync = nextSync(pane.sync);
+    pane.sync = nextSync(pane.sync, COMPARE_SYNC_CYCLE);
     setPreset(next);
   }, [preset]);
 
@@ -316,7 +318,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, pr
     title: p.title,
     color: PANE_COLORS[p.id].css,
     metrics: metrics[p.id] ?? emptyMetrics,
-    sync: p.sync,
+    sync: paneSync(p),
     lagHistory: lagHistory[p.id] ?? new Array(HISTORY).fill(0),
     bwHistory: bwHistory[p.id] ?? new Array(BW_HISTORY).fill(0),
   }));
@@ -392,7 +394,7 @@ export const CompareView: React.FC<CompareViewProps> = ({ playerName, onExit, pr
                   metrics={metrics[p.id] ?? emptyMetrics}
                   showMovers={showMovers}
                   toggles={p.toggles}
-                  sync={p.sync}
+                  sync={paneSync(p)}
                   selected={selected === p.id}
                   onSelect={() => setSelected(p.id)}
                   onToggle={(key) => toggleSetting(p.id, key)}

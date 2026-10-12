@@ -409,7 +409,8 @@ export class ArenaScene extends Phaser.Scene {
     // has no colour rings: its ghost / truth rings already mark positions.
     const dim = (this.options.view?.dimOthers ?? false) && myId !== null;
     const compare = this.isCompare;
-    const ghostShown = net.toggles.ghost && net.toggles.prediction;
+    // Lockstep has no prediction, so no ghost (docs/PHASE6_PLAN.md D5)
+    const ghostShown = net.toggles.ghost && net.toggles.prediction && !net.isLockstep;
     const now = this.time.now;
     const seen = new Set<number>();
     for (const p of players) {
@@ -464,7 +465,7 @@ export class ArenaScene extends Phaser.Scene {
     this.drawRespawnPulses(fxG, now);
 
     // Ghost (SPEC.md §13.4) — hidden with prediction off, where it would coincide
-    if (net.toggles.ghost && net.toggles.prediction && myId !== null && me?.alive) {
+    if (ghostShown && myId !== null && me?.alive) {
       ghost.lineStyle(2, C_GHOST, 0.7);
       ghost.strokeCircle(net.authX, net.authY, P_RADIUS + 3);
       this.drawDashedCircle(ghost, net.authX, net.authY, P_RADIUS + 4, C_GHOST);

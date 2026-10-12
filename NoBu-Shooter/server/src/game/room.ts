@@ -7,14 +7,14 @@
 import {
   stepPlayer, settlePosition, mulberry32, sweptCircleRect, sweptCircleCircle, segmentIntersectsRect, moverPath, MOVER_PATTERNS,
   initialCombat, copyCombat, stepCombat, speedMultiplier, pelletAngles, applyPowerup, WEAPONS,
-  powerupCap, pickPowerupKind, randomPowerupSpot,
+  powerupCap, pickPowerupKind, randomPowerupSpot, hashWorld,
 } from '@nobu/shared/sim';
 import type { Rect, Vec2, MoverPattern, MoverCfg, MoveCfg } from '@nobu/shared/sim';
 import type {
   InputEntry, MsgSnap, PlayerSnap, ProjectileSnap, PickupSnap,
   MatchState, GameEvent, MatchResults, ScoreEntry, WeaponId, MsgDev,
 } from '@nobu/shared/protocol';
-import type { Velocity, VelocityTable } from '@nobu/shared/sync';
+import { LockstepLog, type Velocity, type VelocityTable, type Keyframe, type LockstepRecord } from '@nobu/shared/sync';
 import GAME, { mapDef, isMapId, type MapDef, type MapId, type PowerupKind } from '@nobu/shared/config/game.js';
 import NET from '@nobu/shared/config/net.js';
 import { BotController } from '../bots.js';
@@ -49,6 +49,7 @@ const PICKUP_REACH = P_RADIUS + GAME.powerups.radius;
 const PICKUP_RESPAWN_TICKS = Math.round(GAME.powerups.respawnMs * SIM_HZ / 1000);
 /** A move longer than this in one tick is a teleport (respawn, perturb), not velocity. */
 const MAX_STEP_PX = 30;
+const HASH_EVERY_TICKS = NET.lockstep.hashEveryTicks;
 /** Developer switches (dev message) are honoured only under `npm run demo` (read per call, so tests can set it). */
 const devMode = (): boolean => typeof process !== 'undefined' && process.env.NOBU_DEV === '1';
 
@@ -132,6 +133,15 @@ export class Room {
   /** Player and mover positions at the start of the current tick (velocities for state sync). */
   private prevPos = new Map<number, Vec2>();
 
+  /**
+   * Lockstep (docs/PHASE6_PLAN.md D3, D9): rooms whose world only changes by
+   * movement inputs (the lab) record, per tick, the keys each player consumed.
+   * Anything else that moves something raises `keyframeNeeded`, and the next
+   * tick's record carries a keyframe instead. Null for other rooms.
+   */
+  private readonly lsLog: LockstepLog | null;
+  private keyframeNeeded = true;
+
   // Send callbacks injected at construction
   private sendFn: SendFn;
   private spectatorFn: SpectatorFn;
@@ -151,6 +161,8 @@ export class Room {
     this.map = mapDef(this.rotation[0]);
     this.moveCfg = moveCfgFor(this.map);
     this.botCtrl = new BotController(this.map);
+    const rc = this.roomCfg;
+    this.lsLog = !rc.firing && !rc.bots && !rc.timed && !rc.powerups ? new LockstepLog() : null;
 
     this.state = {
       // Untimed rooms (lab) are a sandbox that is always RUNNING (GAMERULES.md §14).
@@ -179,6 +191,23 @@ export class Room {
   get spectatorCount(): number { return this.spectators; }
   get activeMovers(): MoverPattern[] { return [...this.movers.keys()]; }
   get mapId(): MapId { return this.map.id; }
+  get tickNumber(): number { return this.state.tick; }
+  /** The lockstep tick records (lab rooms only, else null). */
+  get lockstepLog(): LockstepLog | null { return this.lsLog; }
+
+  /** The complete lab world after the latest tick (lockstep keyframe). */
+  labKeyframe(): Keyframe {
+    return {
+      map: this.map.id,
+      players: [...this.state.players.values()].map((p) => ({ id: p.id, name: p.name, x: p.x, y: p.y, life: p.life })),
+      movers: [...this.movers.values()].map((m) => ({ id: m.id, pattern: m.pattern })),
+    };
+  }
+
+  /** Something not driven by relayed inputs changed the world: the next record is a keyframe. */
+  private markKeyframe(): void {
+    this.keyframeNeeded = true;
+  }
 
   addSpectator(): void { this.spectators++; }
 
@@ -204,6 +233,7 @@ export class Room {
       }
     }
     this.stepMovers();
+    this.markKeyframe();
     return true;
   }
 
@@ -236,6 +266,7 @@ export class Room {
       this.botSeqMap.set(id, 0);
     }
     this.emitEvent({ type: 'PLAYER_JOIN', playerId: id });
+    this.markKeyframe();
     this.metrics.counters.playerJoins++;
     this.checkMatchTransition();
     return id;
@@ -255,6 +286,7 @@ export class Room {
       this.botSeqMap.delete(id);
     }
     this.emitEvent({ type: 'PLAYER_LEAVE', playerId: id });
+    this.markKeyframe();
     this.metrics.counters.playerLeaves++;
 
     // If last human leaves, clear bots and return to WAITING
@@ -272,7 +304,10 @@ export class Room {
 
   /** Nobody left to watch: start the next session with movers off. */
   private clearMoversIfEmpty(): void {
-    if (this.state.players.size === 0 && this.spectators === 0) this.movers.clear();
+    if (this.state.players.size === 0 && this.spectators === 0 && this.movers.size > 0) {
+      this.movers.clear();
+      this.markKeyframe();
+    }
   }
 
   receiveInput(playerId: number, inputs: InputEntry[]): void {
@@ -297,6 +332,7 @@ export class Room {
     const pos = settlePosition({ x: p.x + dx, y: p.y + dy }, this.moveCfg);
     p.x = pos.x;
     p.y = pos.y;
+    this.markKeyframe();
   }
 
   /** `playerId` null builds a spectator snapshot (ack 0). */
@@ -389,7 +425,8 @@ export class Room {
       }
     }
 
-    // 2. Consume inputs + movement
+    // 2. Consume inputs + movement (lockstep rooms log the keys that moved each player)
+    const consumedKeys = this.lsLog ? new Map<number, number[]>() : null;
     for (const p of this.state.players.values()) {
       let consumed = 0;
       const maxConsume = p.inputQueue.length > BACKLOG_THRESHOLD
@@ -415,6 +452,11 @@ export class Room {
           p.x = newPos.x;
           p.y = newPos.y;
           this.metrics.counters.playerMoves++;
+          if (consumedKeys) {
+            const list = consumedKeys.get(p.id);
+            if (list) list.push(inp.k);
+            else consumedKeys.set(p.id, [inp.k]);
+          }
 
           const armed = this.roomCfg.firing;
           const res = stepCombat(p.combat, armed && inp.f === 1, armed && inp.r === 1, inp.d === 1, inp.k !== 0);
@@ -451,6 +493,9 @@ export class Room {
     // 6. Match state machine
     this.stepMatchState();
 
+    // 6a. Lockstep record of this tick (before the sends below read it)
+    if (this.lsLog && consumedKeys) this.recordLockstep(consumedKeys);
+
     // 7. Send snapshots every SNAP_EVERY ticks
     if (this.state.tick % SNAP_EVERY === 0) {
       this.sendSnapshots();
@@ -473,6 +518,24 @@ export class Room {
       tick: this.state.tick,
     };
     this.state.events.push(ev);
+  }
+
+  /** One tick's lockstep record: consumed keys, or a keyframe; plus the world hash every HASH_EVERY_TICKS. */
+  private recordLockstep(consumedKeys: Map<number, number[]>): void {
+    const rec: LockstepRecord = { k: this.state.tick };
+    if (this.keyframeNeeded) {
+      rec.key = this.labKeyframe();
+      this.keyframeNeeded = false;
+    } else if (consumedKeys.size > 0) {
+      rec.in = Object.fromEntries(consumedKeys);
+    }
+    if (this.state.tick % HASH_EVERY_TICKS === 0) rec.h = this.labHash();
+    this.lsLog!.push(rec);
+  }
+
+  /** hashWorld over every player and mover (docs/PHASE6_PLAN.md D6). */
+  labHash(): number {
+    return hashWorld([...this.state.players.values(), ...this.movers.values()]);
   }
 
   private stepMovers(): void {
@@ -625,6 +688,7 @@ export class Room {
     if (map) this.setMap(map);
     this.state.projectiles.clear();
     for (const p of this.state.players.values()) this.respawnPlayer(p);
+    this.markKeyframe();
   }
 
   /** Switch the geometry (COUNTDOWN only, so nobody is moving). */

@@ -37,13 +37,24 @@ interface Column {
   movers?: boolean;
   /** Only meaningful for delta panes ('–' elsewhere). */
   deltaOnly?: boolean;
+  /** Only meaningful for lockstep panes ('–' elsewhere). */
+  lockstepOnly?: boolean;
+  /** Not meaningful for lockstep panes (no prediction, no snapshots to ack). */
+  notLockstep?: boolean;
 }
 
 const COLUMNS: Column[] = [
   { key: 'is', head: 'IN→SCREEN', value: (m) => m.inputToScreenMs, fmt: (v) => `${v} ms` },
-  { key: 'ack', head: 'ACK', value: (m) => m.ackDelayMs, fmt: (v) => `${v} ms` },
+  { key: 'ack', head: 'ACK', value: (m) => m.ackDelayMs, fmt: (v) => `${v} ms`, notLockstep: true },
   { key: 'rtt', head: 'RTT', value: (m) => m.rttMs, fmt: (v) => `${v} ms` },
-  { key: 'corr', head: 'CORR/s', value: (m) => m.correctionsPerSec, fmt: (v) => `${v}` },
+  { key: 'corr', head: 'CORR/s', value: (m) => m.correctionsPerSec, fmt: (v) => `${v}`, notLockstep: true },
+  // Lockstep (docs/PHASE6_PLAN.md D7)
+  { key: 'stall', head: 'STALLED', value: (m) => m.lsStalledPct, fmt: (v) => `${v}%`, lockstepOnly: true },
+  { key: 'stalls', head: 'STALLS/s', value: (m) => m.lsStallsPerSec, fmt: (v) => `${v}`, lockstepOnly: true },
+  { key: 'longest', head: 'LONGEST', value: (m) => m.lsLongestStallMs, fmt: (v) => `${v} ms`, lockstepOnly: true },
+  { key: 'behind', head: 'BEHIND', value: (m) => m.lsBehindMs, fmt: (v) => `${v} ms`, lockstepOnly: true },
+  { key: 'resent', head: 'NACKED', value: (m) => m.lsNackedTicks, fmt: (v) => `${v}`, lockstepOnly: true },
+  { key: 'desync', head: 'DESYNC', value: (m) => m.lsDesyncs, fmt: (v) => `${v}`, lockstepOnly: true },
   { key: 'bw', head: '↓ KBPS', value: (m) => m.bwDownKbps, fmt: (v) => `${v}` },
   { key: 'msg', head: 'MSG B', value: (m) => m.msgBytesDown, fmt: (v) => `${v}` },
   { key: 'lost', head: 'LOST/s', value: (m) => m.snapsLostPerSec, fmt: (v) => `${v}` },
@@ -58,16 +69,21 @@ const COLUMNS: Column[] = [
 export const CompareDock: React.FC<CompareDockProps> = ({ caption, rows, showMovers, capKbps, bwSpanSec, width, height }) => {
   const anyDelta = rows.some((r) => r.sync.model === 'delta');
   const anyNonFull = rows.some((r) => r.sync.model !== 'full');
-  const columns = COLUMNS.filter((c) => (showMovers || !c.movers) && (anyDelta || !c.deltaOnly));
+  const anyLockstep = rows.some((r) => r.sync.model === 'lockstep');
+  const columns = COLUMNS.filter((c) => (showMovers || !c.movers) && (anyDelta || !c.deltaOnly) && (anyLockstep || !c.lockstepOnly)
+    // With lockstep panes the table is about stalls: the lost-snapshot and distance columns make room
+    && !(anyLockstep && ['lost', 'err', 'msg'].includes(c.key)));
   const compact = width < 700;
   const wide = width >= 1000;
   // Narrow docks keep the columns the comparison is about: bytes and delay for sync models,
   // latency and mover lag for the Phase 2 toggles
   const shown = compact
-    ? columns.filter((c) => (anyNonFull ? ['ack', 'bw', 'lag', 'off'] : ['is', 'rtt', 'corr', 'lag', 'frz']).includes(c.key))
-    : wide ? columns : columns.filter((c) => !['err', 'rtt'].includes(c.key));
+    ? columns.filter((c) => (anyLockstep ? ['is', 'bw', 'stall', 'longest', 'desync']
+      : anyNonFull ? ['ack', 'bw', 'lag', 'off'] : ['is', 'rtt', 'corr', 'lag', 'frz']).includes(c.key))
+    : wide ? columns : columns.filter((c) => !['err', 'rtt', ...(anyLockstep ? ['off', 'stalls'] : [])].includes(c.key));
   const noData = (c: Column, r: DockRow) =>
-    (c.movers === true && r.metrics.moverSamples === 0) || (c.deltaOnly === true && r.sync.model !== 'delta');
+    (c.movers === true && r.metrics.moverSamples === 0) || (c.deltaOnly === true && r.sync.model !== 'delta')
+    || (c.lockstepOnly === true && r.sync.model !== 'lockstep') || (c.notLockstep === true && r.sync.model === 'lockstep');
 
   // Best (lowest) value per column among rows with data; highlight only if rows differ
   const best = new Map<string, number>();

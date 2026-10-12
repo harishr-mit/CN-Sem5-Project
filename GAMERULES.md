@@ -293,6 +293,8 @@ How the authoritative state reaches a client — full snapshots, delta snapshots
 
 In `lab`, §9 does not apply: every player spawns at `rooms.lab.spawn` (880, 360), clear of the mover lanes. The Compare panes' players are driven by the same input, so they must start from the same place (players don't collide with each other).
 
+**Lockstep** (Phase 6, `docs/PHASE6_PLAN.md`): because the lab world changes only through movement inputs and the movers' fixed paths, a `lab` player may choose the **lockstep** sync model. The server then sends, per tick, the movement keys it consumed for each player; the client replays them and gets the server's positions bit for bit (checked by a hash every 30 ticks). Nothing about the rules changes: movement, collision, spawn and the movers are exactly as above. Anything inputs don't explain (join, leave, nudge, RESTART, map, movers) is sent as a keyframe. Lockstep is not offered in `main` (firing, bots, power-ups and the match clock aren't replayed). The mover paths use a deterministic sine / cosine (`shared/src/sim/dtrig.ts`) so browsers and the server agree on them to the last bit.
+
 ---
 
 ## 15. Game constants (`shared/src/config/game.json`)

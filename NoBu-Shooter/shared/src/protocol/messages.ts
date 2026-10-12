@@ -55,6 +55,8 @@ export interface MsgSync {
   model: SyncModel;
   /** State only: send rate. */
   hz?: StateHz;
+  /** Lockstep only: redundant window (true) or resend on request. */
+  rd?: boolean;
 }
 
 /** Delta sync: snapshot ack, sent when no input message carries `sa`. */
@@ -105,7 +107,19 @@ export interface MsgLab {
   movers: MoverPattern[];
 }
 
-export type ClientMsg = MsgHello | MsgInput | MsgPing | MsgPerturb | MsgBye | MsgLab | MsgDev | MsgSync | MsgSnapAck;
+/**
+ * Lockstep (docs/PHASE6_PLAN.md D3, D4): ask for ticks `from`..`to` again
+ * (resend on request, Rd off), or with `key` for a fresh keyframe (after a
+ * hash mismatch; `from` / `to` are then 0).
+ */
+export interface MsgLsNack {
+  t: 'lsNack';
+  from: number;
+  to: number;
+  key?: true;
+}
+
+export type ClientMsg = MsgHello | MsgInput | MsgPing | MsgPerturb | MsgBye | MsgLab | MsgDev | MsgSync | MsgSnapAck | MsgLsNack;
 
 // ───────────────────────────────────────────────────────────────
 // Server → Client
@@ -297,6 +311,53 @@ export interface MsgState extends Omit<MsgSnap, 't' | 'players'> {
   players: StatePlayerSnap[];
 }
 
+/** A player in a lockstep keyframe. */
+export interface LsPlayer {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  life: number;
+}
+
+/** A scripted mover in a lockstep keyframe: its position is moverPath(pattern, tick / 60). */
+export interface LsMover {
+  id: number;
+  pattern: MoverPattern;
+}
+
+/** The complete lab world after a tick (docs/PHASE6_PLAN.md D3). */
+export interface Keyframe {
+  map: MapId;
+  players: LsPlayer[];
+  movers: LsMover[];
+}
+
+/**
+ * What happened in tick `k`: the movement keys the server consumed for each
+ * player (by id, in order; absent = none), or a keyframe that replaces the
+ * world after the tick (join, leave, nudge, restart, map, movers, resync).
+ * `h` = hashWorld after the tick, every NET.lockstep.hashEveryTicks ticks.
+ */
+export interface LockstepRecord {
+  k: number;
+  in?: Record<string, number[]>;
+  key?: Keyframe;
+  h?: number;
+}
+
+/**
+ * Lockstep tick records (server → client, every 2 ticks). `tick` = the
+ * server's newest tick, `ack` = the receiver's newest consumed input
+ * sequence at that tick.
+ */
+export interface MsgLs {
+  t: 'ls';
+  tick: number;
+  ack: number;
+  recs: LockstepRecord[];
+}
+
 export interface MsgPong {
   t: 'pong';
   id: number;
@@ -309,11 +370,12 @@ export interface MsgPong {
 
 export interface MsgError {
   t: 'error';
-  code: 'ROOM_FULL' | 'BAD_VERSION' | 'BAD_MESSAGE';
+  /** LOCKSTEP_LAB_ONLY: a lockstep sync request outside the lab room; the connection keeps its model. */
+  code: 'ROOM_FULL' | 'BAD_VERSION' | 'BAD_MESSAGE' | 'LOCKSTEP_LAB_ONLY';
   msg: string;
 }
 
-export type ServerMsg = MsgWelcome | MsgSnap | MsgSnapDelta | MsgState | MsgPong | MsgError;
+export type ServerMsg = MsgWelcome | MsgSnap | MsgSnapDelta | MsgState | MsgLs | MsgPong | MsgError;
 
 // ───────────────────────────────────────────────────────────────
 // Validators (basic, non-crashing)
@@ -325,6 +387,58 @@ function isObj(v: unknown): v is Record<string, unknown> {
 
 function isTick(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0;
+}
+
+/** The widest range one lsNack may ask for (the server's ring holds 256 ticks). */
+const LS_NACK_MAX_SPAN = 256;
+const LS_MAX_RECORDS = 300;
+const LS_MAX_ENTITIES = 64;
+const LS_MAX_KEYS = 8;
+
+function isFiniteNum(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function isKeyframe(v: unknown): v is Keyframe {
+  if (!isObj(v) || !isMapId(v['map'])) return false;
+  const { players, movers } = v;
+  if (!Array.isArray(players) || players.length > LS_MAX_ENTITIES) return false;
+  if (!Array.isArray(movers) || movers.length > LS_MAX_ENTITIES) return false;
+  for (const p of players as unknown[]) {
+    if (!isObj(p) || !isTick(p['id']) || typeof p['name'] !== 'string') return false;
+    if (!isFiniteNum(p['x']) || !isFiniteNum(p['y']) || !isTick(p['life'])) return false;
+  }
+  for (const m of movers as unknown[]) {
+    if (!isObj(m) || !isTick(m['id']) || !isMoverPattern(m['pattern'])) return false;
+  }
+  return true;
+}
+
+function isLockstepRecord(v: unknown): v is LockstepRecord {
+  if (!isObj(v) || !isTick(v['k'])) return false;
+  if (v['h'] !== undefined && !(isTick(v['h']) && (v['h'] as number) <= 0xffffffff)) return false;
+  if (v['key'] !== undefined && !isKeyframe(v['key'])) return false;
+  const inputs = v['in'];
+  if (inputs === undefined) return true;
+  if (!isObj(inputs) || Array.isArray(inputs)) return false;
+  const entries = Object.entries(inputs);
+  if (entries.length > LS_MAX_ENTITIES) return false;
+  for (const [id, keys] of entries) {
+    if (!/^\d+$/.test(id) || !Array.isArray(keys) || keys.length > LS_MAX_KEYS) return false;
+    if (!keys.every((k) => Number.isInteger(k) && k >= 0 && k <= 15)) return false;
+  }
+  return true;
+}
+
+/**
+ * Lockstep tick records from the server. The client checks them before
+ * replaying (a malformed record would break the replay for good).
+ */
+export function validateLs(raw: unknown): MsgLs | null {
+  if (!isObj(raw) || raw['t'] !== 'ls' || !isTick(raw['tick']) || !isTick(raw['ack'])) return null;
+  const recs = raw['recs'];
+  if (!Array.isArray(recs) || recs.length > LS_MAX_RECORDS || !recs.every(isLockstepRecord)) return null;
+  return raw as unknown as MsgLs;
 }
 
 export function validateClientMsg(raw: unknown): ClientMsg | null {
@@ -354,10 +468,22 @@ export function validateClientMsg(raw: unknown): ClientMsg | null {
       return raw as unknown as MsgInput;
     }
 
-    case 'sync':
+    case 'sync': {
       if (!isSyncModel(raw['model'])) return null;
       if (raw['hz'] !== undefined && !isStateHz(raw['hz'])) return null;
-      return raw['hz'] === undefined ? { t: 'sync', model: raw['model'] } : { t: 'sync', model: raw['model'], hz: raw['hz'] };
+      if (raw['rd'] !== undefined && typeof raw['rd'] !== 'boolean') return null;
+      const out: MsgSync = { t: 'sync', model: raw['model'] };
+      if (raw['hz'] !== undefined) out.hz = raw['hz'];
+      if (raw['rd'] !== undefined) out.rd = raw['rd'];
+      return out;
+    }
+
+    case 'lsNack': {
+      const { from, to, key } = raw;
+      if (!isTick(from) || !isTick(to) || from > to || to - from > LS_NACK_MAX_SPAN) return null;
+      if (key !== undefined && key !== true) return null;
+      return key ? { t: 'lsNack', from, to, key: true } : { t: 'lsNack', from, to };
+    }
 
     case 'snapAck':
       if (!isTick(raw['tick'])) return null;

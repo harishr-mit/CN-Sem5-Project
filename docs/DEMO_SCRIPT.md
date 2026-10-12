@@ -1,6 +1,6 @@
 # NoBu Shooter — Live Demo Walkthrough Script
 
-Follow these steps for a complete, 60-second end-to-end demonstration of the netcode and network impairment simulator.
+**The final talk track is the next section** (Phase 6): the two Presenter scripts plus the standalone emulator, with timings from the dress rehearsal (`docs/REHEARSAL.md`). Sections 1–14 below are the detailed walkthrough and reference for each topic.
 
 Reference: `PHASES.md` (this script grows with each phase). Since Phase 4 the same walkthrough runs as **Presenter mode** from the landing page — §12 lists its steps, which come from `client/src/presenter/scripts.ts` (the step ids there are pinned by `tests/presenter.test.ts`). Expected numbers below were measured on 2026-10-09 (Windows laptop, local Chrome); §7 and §11 on 2026-10-10 (Phase 3), §7's queue figures on 2026-10-11 (Phase 4). Bandwidth figures count wire bytes (payload + 28 B per message, like the emulator).
 
@@ -22,11 +22,32 @@ Reference: `PHASES.md` (this script grows with each phase). Since Phase 4 the sa
 | Reconciliation Toggle | `C` |
 | Interpolation Toggle | `I` |
 | Ghost Overlay Toggle | `G` |
-| Sync model (Full → Delta → State 10 → State 30) | `Y` (Quick Match: Network Lab; Compare: the selected pane) |
+| Sync model | `Y` — Quick Match (Network Lab): Full → Delta → State 10 → State 30; Compare (the selected pane): the same, then **Lockstep** (§14) |
 | Presenter mode | `N` next step, `B` previous step, `H` hide the caption; bar buttons **⟲ RESTART**, map, **END** (§12) |
 | Projector | Settings (`Esc`) → **UI Scale** 100 / 115 / 130 % |
 | Emulator dashboard | Landing **EMULATOR DASHBOARD ↗**, Lab **DASHBOARD ↗**, or `http://127.0.0.1:9001/` (§13) |
 | Network players | `npm run demo -- --swarm 3`, or `npm run swarm` beside a running demo (§13) |
+
+---
+
+## Final talk track (Phase 6)
+
+Run order and timings from the dress rehearsal on 2026-10-12 (`docs/REHEARSAL.md` §1.2: every step at 60 fps, 0 console errors). **Dwell** = the minimum time on a step for its effect to show; talk as long as you like. Start with `npm run demo` (no network players yet).
+
+| Part | Steps | Dwell | Talk | The point |
+|---|---|---|---|---|
+| 1. Prediction & reconciliation | Q1 Baseline → Q2 delay without prediction → Q3 prediction | 8 / 10 / 8 s | ≈ 3 min | Latency alone never causes corrections; prediction hides it (Input → Screen 370 → 18 ms) |
+| 2. Loss | Q4 loss → Q5 input redundancy → Q6 reconciliation off | 10 / 8 / 10 s | ≈ 3 min | Lost inputs cause corrections; repeating unacknowledged inputs removes them; without reconciliation the error stays |
+| 3. Jitter | Q7 no interpolation → Q8 interpolation | 8 / 8 s | ≈ 2 min | Interpolation buys smoothness with a fixed 100 ms lag |
+| 4. Misprediction | Q9 nudge | 6 s | ≈ 1 min | One smooth correction, amber vector |
+| 5. Bandwidth | Q10 Nightmare full → Q11 delta → Q12 state | **15 / 12–15 / 10 s** | ≈ 4 min | Under a cap, bytes become latency; delta sends ≈ 1/5; state extrapolates and overshoots |
+| 6. Realistic transport | Q13 — first run `npm run swarm -- --n 3` in a second terminal | 12 s | ≈ 2 min | UDP players on a lossy route, your link clean; fragments; **OPEN DASHBOARD ↗** |
+| 7. Side by side | **END** → Presenter — Compare: C1 Prediction, C2 Interpolation, C3 Redundancy | 10 / 12 / 10 s | ≈ 3 min | The same comparisons, measured next to each other |
+| 8. Sync models | C4 Sync, C5 Bandwidth, C6 State Hz | **15 / 15** / 12 s | ≈ 3 min | Full vs delta vs state at the same time; the bandwidth chart |
+| 9. Lockstep | C7 Snapshot vs Lockstep | 12 s | ≈ 2 min | Inputs instead of the world: exact and ≈ 1/10 of the bytes, but every lost tick freezes the world (B); redundancy makes it smooth again at the price of input delay (C); DESYNC 0 (§14) |
+| 10. Optional | §13a the emulator on its own (three terminals) | — | ≈ 2 min | The emulator works in front of any app |
+
+Total ≈ 20–25 min (≈ 3 min 45 s of dwell; the rest is talk). Why the network players start only at Q13: with them in the match from the start, full snapshots grow from ≈ 475 to ≈ 800 kbps, and at Nightmare even Delta then stays at the cap (Q11 ack ≈ 720 instead of ≈ 330 ms) — `docs/REHEARSAL.md` §1.2.
 
 ---
 
@@ -135,7 +156,7 @@ Start from the landing page. Each step sets everything at once (network, all net
 - In Quick Match the **match clock is stopped** while presenting (the HUD shows ∞), so the match never ends mid-talk; END starts the clock again.
 - These and Invincible need `npm run demo` (the bar says so otherwise).
 
-**Presenter — Quick Match** (13 steps; step 13 needs network players: start with `npm run demo -- --swarm 3`; turns on the developer **Invincible** switch so bots can't interrupt — `[DEV]` tag, needs `npm run demo`; turned off again on END). Walk around while you talk.
+**Presenter — Quick Match** (13 steps; step 13 needs network players: start them **when you reach Q13** with `npm run swarm -- --n 3` in a second terminal — started with the demo (`--swarm 3`) they make the match bigger, and at Nightmare (Q10–Q12) even Delta then stays above the cap, see `docs/REHEARSAL.md`; turns on the developer **Invincible** switch so bots can't interrupt — `[DEV]` tag, needs `npm run demo`; turned off again on END). Walk around while you talk.
 
 | Step | Title | Network | Changes from the defaults | Watch / expect |
 |---|---|---|---|---|
@@ -153,9 +174,9 @@ Start from the landing page. Each step sets everything at once (network, all net
 | Q12 | Nightmare: state sync | Nightmare | sync State 10 Hz | ↓ ≈ 190 kbps; bots most current but overshoot at turns |
 | Q13 | Network players over UDP | Baseline (you) · network players' route `udp:9100`: 120 ± 40 ms, 10 % loss | — | Your corrections 0/s; the `UDP-n` players stutter, jump and aim at stale positions. **OPEN DASHBOARD ↗**: their sessions at ≈ 10 % loss; their full snapshots need 2–4 fragments, so ≈ 20–34 % are lost. The bar says how many are connected (or how to start them) |
 
-**Presenter — Compare** (6 steps = the six Compare presets of §8 and §11, in order): C1 Prediction, C2 Interpolation, C3 Redundancy, C4 Sync, C5 Bandwidth, C6 State Hz. The bar shows the preset's caption and the expected numbers from §8 / §11 (the dock then shows only its table and chart). Give C4 and C5 ≈ 15 s.
+**Presenter — Compare** (7 steps = the seven Compare presets of §8, §11 and §14, in order): C1 Prediction, C2 Interpolation, C3 Redundancy, C4 Sync, C5 Bandwidth, C6 State Hz, C7 Snapshot vs Lockstep. The bar shows the preset's caption and the expected numbers from §8 / §11 / §14 (the dock then shows only its table and chart). Give C4 and C5 ≈ 15 s, C7 ≈ 10 s.
 
-Rehearsal: `npm run shots` (README) captures both scripts' first steps, the Nightmare step and step 13 with two network players; `docs/VISUAL_CHECKLIST.md` says what to look for.
+Rehearsal: `npm run shots` (README) captures both scripts' first steps, the Nightmare step, step 13 with two network players and step C7; `docs/VISUAL_CHECKLIST.md` says what to look for. `docs/REHEARSAL.md` has the timing sheet and the checklist for the presentation laptop.
 
 ### 13. Standalone Emulator & Network Players (Phase 5)
 
@@ -186,3 +207,22 @@ Measured (2026-10-12):
 - **Clean link:** 300 snapshots in 10 s per player, all reassembled, ≈ 2.7 fragments each, RTT ≈ 15 ms.
 - **Nightmare** (smoke step 7): ≈ 22 world messages/s still arrive, ≈ 3 % of the fragmented ones are lost to fragment loss, ack delay ≈ 500 ms.
 - The few corrections on a clean link happen at the moment the player dies (death isn't predicted).
+
+### 14. Lockstep: Snapshot vs Lockstep (Phase 6)
+
+Open **NETWORK LAB — COMPARE** and click **Lockstep** (or Presenter — Compare, step **C7**). Network: 50 ms one-way, 5 % random loss; all four drones; no REF pane. Move with WASD.
+
+How lockstep works here: the server stays the authority and never waits. Every tick it relays the movement keys it *consumed* for each player; a lockstep client replays them with the same movement code and gets the server's world **bit for bit**. Joins, leaves, nudges, a RESTART or a map change arrive as keyframes in the same stream. Every 30 ticks the server sends a hash of its world; a lockstep pane compares it (**DESYNC** must stay 0). The catch: the client needs **every** tick in order, so one missing tick freezes the whole world.
+
+- **Pane A (Full snapshots)** carries on as usual (interpolated, your player predicted).
+- **Pane B (Lockstep, Rd off)**: a lost tick is asked for again (NACK), so each loss freezes the whole pane for about a round trip, then it fast-forwards (up to 3 ticks per frame) to catch up. Watch **STALLED %** and **MAX**.
+- **Pane C (Lockstep + Rd)**: every message repeats the ticks not yet acknowledged, so a loss is covered by the next message: smooth again. But your own player still moves only after the key has been to the server and back (lockstep doesn't predict): **IN→SCR** ≈ RTT + playout buffer.
+- P / C / I / G are greyed out on lockstep panes (nothing is predicted or interpolated); **Rd** stays live and switches the recovery.
+
+**Expect** (browser, 2026-10-12, 1600×900 and the `npm run shots` screens): stalled – / ≈ 15–30 % / ≈ 3–5 %, longest stall ≈ – / 300–650 ms / 40–70 ms, Input → Screen ≈ 18 / 220–350 / 200–215 ms, ↓ ≈ 400–460 / ≈ 40 / ≈ 100–120 kbps, desyncs 0 / 0. Smoke step 8 (Node clients, real sockets): stalled 28.8 % vs 4.6 %, 33 vs 89 kbps, 0 desyncs.
+
+Talking points:
+1. Lockstep sends **inputs**, not the world: ≈ 1/10 of the bytes of full snapshots, and the world is exact everywhere — no interpolation, no extrapolation, no corrections.
+2. The price is **waiting**. It can't show tick n + 1 before it has it: loss becomes freezes (B), and without prediction your own input takes a round trip to appear (B, C).
+3. Redundancy turns loss back into a small, constant delay (C) — the same trade as input redundancy in Phase 1, paid in bytes (C ≈ 2.5 × B).
+4. Determinism must be **checked**: during Phase 6 the hash check caught Chrome and Node computing `Math.cos` / `Math.sin` one bit apart for ≈ 3 % of the drone's angles. The movers now use a sine / cosine built only from + − × ÷ (exactly defined by IEEE 754), and the desync counter stays at 0.

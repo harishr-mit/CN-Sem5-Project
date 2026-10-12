@@ -10,7 +10,8 @@ export {
   type CombatState, type CombatStepResult, type WeaponStats,
 } from './combat.js';
 export { powerupCap, pickPowerupKind, isValidPowerupSpot, randomPowerupSpot } from './powerups.js';
-export { hashState } from './hash.js';
+export { hashState, hashWorld, type HashEntity } from './hash.js';
+export { dsin, dcos } from './dtrig.js';
 export { moverPath, isMoverPattern, MOVER_PATTERNS, type MoverPattern, type MoverCfg } from './movers.js';
 export {
   type Rect,
