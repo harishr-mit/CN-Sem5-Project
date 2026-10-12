@@ -25,7 +25,8 @@ import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { createRequire } from 'module';
-import { spawnNode, assertPortsFree, assertUdpPortsFree, waitForPort, waitForUdpPort, cleanupOnExit } from './lib/procs.mjs';
+import { spawnNode, spawnTs, assertPortsFree, assertUdpPortsFree, waitForPort, waitForUdpPort, cleanupOnExit } from './lib/procs.mjs';
+import { spawnSync } from 'child_process';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -34,6 +35,9 @@ const FAST = args.includes('--fast');
 const ONLY = (args.find((a) => a.startsWith('--only=')) ?? '').slice(7).split(',').filter(Boolean);
 const VIEWPORTS = [[1280, 720], [1920, 1080]];
 const URL = 'http://localhost:5173';
+/** The game edition (Phase 7): the built game on its own server, this machine only. */
+const GAME_PORT = 8090;
+const GAME_URL = `http://127.0.0.1:${GAME_PORT}/`;
 const DASHBOARD = 'http://127.0.0.1:9001/';
 const OUT = join(rootDir, 'artifacts', 'shots');
 /** Effects that need the queue to build (Nightmare) get this long. */
@@ -62,6 +66,20 @@ async function comparePreset(page, id) {
   await startCompare(page);
   await page.click(`#cmp-preset-${id}`);
   await sleep(id === 'sync' || id === 'bandwidth' ? SETTLE_MS : 5000);
+}
+
+/** Game edition: a private room created by this page; returns its code. */
+async function gameRoom(page) {
+  await page.click('#create-room-btn');
+  await page.waitForSelector('#hud-room-code');
+  await sleep(1500);
+  return page.locator('#hud-room-code').innerText();
+}
+
+async function gameMatch(page) {
+  await gameRoom(page);
+  await page.click('#hud-room-start');
+  await sleep(4500); // 3 s countdown, then the match
 }
 
 const SCREENS = [
@@ -162,6 +180,37 @@ const SCREENS = [
     // Back to Baseline, so the next viewport's screens start clean
     after: async (p) => { await p.click('#presets button.reset'); await sleep(300); },
   },
+  // ── Phase 7: the game edition (npm run build + the game server, docs/PHASE7_PLAN.md) ──
+  { name: 'game-landing', url: GAME_URL, run: async () => { await sleep(800); } },
+  {
+    name: 'game-waiting',
+    url: GAME_URL,
+    run: async (p) => { await p.click('#quick-match-btn'); await p.waitForSelector('#hud-waiting'); await sleep(2500); },
+  },
+  { name: 'game-room-host', url: GAME_URL, run: gameRoom },
+  {
+    name: 'game-room-guest',
+    url: GAME_URL,
+    run: async (p) => {
+      const host = await p.context().newPage();
+      await host.goto(GAME_URL);
+      await host.waitForSelector('#landing-screen');
+      const code = await gameRoom(host);
+      await p.fill('#room-code-input', code);
+      await p.click('#join-room-btn');
+      await p.waitForSelector('#hud-room-players');
+      await sleep(1500);
+    },
+  },
+  { name: 'game-match', url: GAME_URL, run: gameMatch },
+  { name: 'game-settings', url: GAME_URL, run: async (p) => { await gameMatch(p); await p.keyboard.press('Escape'); await sleep(500); } },
+  { name: 'game-controls', url: GAME_URL, run: async (p) => { await gameMatch(p); await p.keyboard.press('F1'); await sleep(500); } },
+  { name: 'game-quality-low', url: GAME_URL, settings: { graphicsQuality: 'low' }, run: gameMatch },
+  {
+    name: 'game-room-not-found',
+    url: GAME_URL,
+    run: async (p) => { await p.fill('#room-code-input', 'jolly zebra'); await p.click('#join-room-btn'); await p.waitForSelector('#hud-error-text'); await sleep(500); },
+  },
 ];
 
 /**
@@ -215,20 +264,32 @@ try {
   process.exit(1);
 }
 
-await assertPortsFree([5173, 8080, 9000, 9001]);
+await assertPortsFree([5173, 8080, GAME_PORT, 9000, 9001]);
 await assertUdpPortsFree([8081, 9100]);
 console.log(`[shots] starting the demo with 2 network players${FAST ? ' (--fast)' : ''}...`);
 const demoLog = [];
 /** Set once the run is over, so the demo stopping then is expected. */
 let finished = false;
+// The game edition first (its assets step must not race the demo's): `npm run build`
+const built = spawnSync(process.execPath, ['scripts/build.mjs'], { cwd: rootDir, stdio: 'inherit' });
+if (built.status !== 0) {
+  console.error('✘ npm run build failed');
+  process.exit(1);
+}
+// Screens are taken right after joining: the old instant start of `main` (Phase 7 join window)
+process.env.NOBU_JOIN_WINDOW_MS = '0';
 const demo = spawnNode('DEMO', ['scripts/demo.mjs', '--swarm', '2'], { cwd: rootDir, onLine: (l) => { demoLog.push(l); if (demoLog.length > 200) demoLog.shift(); } });
-const cleanup = cleanupOnExit([demo]);
+process.env.NOBU_JOIN_WINDOW_MS = '600000';
+// …served like `npm start` (a long join window keeps the waiting screen up)
+const gameServer = spawnTs('GAME', 'server/src/main.ts', ['--game', '--static', 'dist/game', '--port', String(GAME_PORT), '--host', '127.0.0.1'], { cwd: rootDir, onLine: () => {} });
+process.env.NOBU_JOIN_WINDOW_MS = '0';
+const cleanup = cleanupOnExit([demo, gameServer]);
 demo.on('exit', (code) => {
   if (!finished) { console.error(`[shots] the demo exited early (code ${code})\n${demoLog.slice(-20).join('\n')}`); process.exit(1); }
 });
 
 const up = (await Promise.all([
-  ...[5173, 8080, 9000, 9001].map((p) => waitForPort(p, 30000)),
+  ...[5173, 8080, GAME_PORT, 9000, 9001].map((p) => waitForPort(p, 30000)),
   ...[8081, 9100].map((p) => waitForUdpPort(p, 30000)),
 ])).every(Boolean);
 if (!up) {
@@ -277,7 +338,7 @@ try {
       const row = { name: screen.name, file, fps: null, errors, notes, warnings: 0, ok: true };
       try {
         await resetEmulator();
-        await page.goto(URL);
+        await page.goto(screen.url ?? URL);
         await page.waitForSelector('#landing-screen');
         if (screen.settings) {
           await page.evaluate((s) => localStorage.setItem('nobu_shooter_settings', JSON.stringify(s)), screen.settings);

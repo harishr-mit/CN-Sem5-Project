@@ -13,6 +13,7 @@
 import { WebSocket } from 'ws';
 import { performance } from 'perf_hooks';
 import { NetClient, type TransportFactory } from '../client/src/net/NetClient.js';
+import { ALL_MODELS } from '../client/src/net/allModels.js';
 import { MOVER_PATTERNS } from '../shared/src/sim/movers.js';
 import NET from '../shared/src/config/net.js';
 import type { MsgSnap } from '../shared/src/protocol/messages.js';
@@ -46,7 +47,7 @@ function setNetwork(): Promise<void> {
 
 function client(name: string, opts: { rd?: boolean; direct?: boolean }): NetClient {
   const port = opts.direct ? NET.ports.server : NET.ports.emulatorData;
-  return new NetClient({
+  return new NetClient({ models: ALL_MODELS,
     url: `ws://127.0.0.1:${port}`, name, room: 'lab', labelPrefix: name,
     transport: wsTransport, now: () => performance.now(),
     ...(opts.direct ? { spectate: true } : { sync: { model: 'lockstep', ...(opts.rd ? { rd: true } : {}) } }),

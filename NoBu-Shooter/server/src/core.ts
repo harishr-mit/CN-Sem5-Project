@@ -6,7 +6,7 @@
  */
 
 import { decodeClient, encodeServer } from '@nobu/shared/protocol';
-import type { MsgInput, MsgSnap, ServerMsg } from '@nobu/shared/protocol';
+import type { MsgInput, MsgSnap, ServerMsg, MsgPerturb, MsgLab, MsgDev } from '@nobu/shared/protocol';
 import {
   createEncoder, DEFAULT_SYNC, normalizeSync, sameSync, sameSyncModel, LockstepEncoder,
   type SyncEncoder, type SyncSpec, type VelocityTable,
@@ -14,6 +14,28 @@ import {
 import NET from '@nobu/shared/config/net.js';
 import GAME from '@nobu/shared/config/game.js';
 import { Room } from './game/room.js';
+import { newCode, formatCode } from '@nobu/shared/rooms/codes.js';
+
+/**
+ * `demo` (default): everything, as `npm run demo` needs it. `game` (`npm run
+ * dev` / `npm start`, docs/PHASE7_PLAN.md D3, D6): players only — no `dev`,
+ * `perturb`, `lab`, spectators or lab room, and every connection on Delta.
+ */
+export type ServerMode = 'demo' | 'game';
+
+export interface GameServerOptions {
+  mode?: ServerMode;
+  /** `main`'s join window (default GAME.match.joinWindowMs / NOBU_JOIN_WINDOW_MS). */
+  joinWindowMs?: number;
+  /** Most private rooms at once (default GAME.privateRooms.max). */
+  maxPrivateRooms?: number;
+  /** A private room without humans is removed after this long (default GAME.privateRooms.emptyGraceMs). */
+  emptyGraceMs?: number;
+  /** Code picker (tests: deterministic). */
+  random?: () => number;
+}
+
+const GAME_SYNC: SyncSpec = { model: 'delta' };
 
 export interface Connection {
   readonly id: number;
@@ -38,13 +60,26 @@ let nextConnId = 1;
 
 export class GameServer {
   readonly rooms = new Map<string, Room>();
+  readonly mode: ServerMode;
   private readonly connections = new Set<Connection>();
   private readonly now: () => number;
+  private readonly opts: GameServerOptions;
+  /** Private rooms without humans: when they became empty (removed after the grace period). */
+  private readonly emptySince = new Map<string, number>();
 
-  constructor(now: () => number = Date.now) {
+  constructor(now: () => number = Date.now, opts: GameServerOptions = {}) {
     this.now = now;
+    this.opts = opts;
+    this.mode = opts.mode ?? 'demo';
     this.getRoom('main');
-    this.getRoom('lab');
+    if (this.mode === 'demo') this.getRoom('lab');
+  }
+
+  /** Private rooms currently open. */
+  get privateRoomCount(): number {
+    let n = 0;
+    for (const r of this.rooms.values()) if (r.kind === 'private') n++;
+    return n;
   }
 
   getRoom(name: string): Room {
@@ -64,7 +99,8 @@ export class GameServer {
         (snap) => {
           const text = encodeServer(snap);
           for (const conn of this.connections) if (conn.room === room && conn.spectator) conn.send(text);
-        }
+        },
+        { ...(this.opts.joinWindowMs !== undefined ? { joinWindowMs: this.opts.joinWindowMs } : {}) },
       );
       this.rooms.set(name, room);
     }
@@ -73,10 +109,11 @@ export class GameServer {
 
   addConnection(send: (text: string) => void, close: () => void): Connection {
     const t = this.now();
+    const sync = this.mode === 'game' ? GAME_SYNC : DEFAULT_SYNC;
     const conn: Connection = {
       id: nextConnId++, send, close,
       playerId: null, spectator: false, room: null, nonce: null,
-      sync: DEFAULT_SYNC, encoder: createEncoder(DEFAULT_SYNC), lockstep: null,
+      sync, encoder: createEncoder(sync), lockstep: null,
       lastMsg: t, msgCount: 0, msgCountWindow: t,
     };
     this.connections.add(conn);
@@ -89,6 +126,7 @@ export class GameServer {
     if (conn.playerId !== null && conn.room) {
       conn.room.removePlayer(conn.playerId);
       console.log(`[server] Player ${conn.playerId} left ${conn.room.name}`);
+      if (conn.room.kind === 'private' && conn.room.humanCount === 0) this.emptySince.set(conn.room.name, this.now());
     }
     if (conn.spectator && conn.room) conn.room.removeSpectator();
     conn.playerId = null;
@@ -101,9 +139,19 @@ export class GameServer {
     for (const room of this.rooms.values()) room.tick();
   }
 
-  /** Drop connections silent for longer than `timeoutMs` (SPEC.md §9.2). */
+  /** Drop connections silent for longer than `timeoutMs` (SPEC.md §9.2), and empty private rooms. */
   checkTimeouts(): void {
     const t = this.now();
+    const grace = this.opts.emptyGraceMs ?? GAME.privateRooms.emptyGraceMs;
+    for (const [name, since] of this.emptySince) {
+      const room = this.rooms.get(name);
+      if (!room || room.humanCount > 0) { this.emptySince.delete(name); continue; }
+      if (t - since >= grace) {
+        this.rooms.delete(name);
+        this.emptySince.delete(name);
+        console.log(`[server] Private room ${formatCode(name)} closed (empty)`);
+      }
+    }
     for (const conn of [...this.connections]) {
       if (t - conn.lastMsg > NET.timeoutMs) {
         console.log(`[server] Timeout: player ${conn.playerId}`);
@@ -144,7 +192,12 @@ export class GameServer {
           if (conn.nonce === msg.nonce) this.sendWelcome(conn, msg.nonce);
           return;
         }
-        const room = this.getRoom(msg.room === 'lab' ? 'lab' : 'main');
+        const room = this.roomFor(msg.room, reply);
+        if (!room) return;
+        if (msg.spectate && this.mode === 'game') {
+          reply({ t: 'error', code: 'NOT_ALLOWED', msg: 'Spectating is not available on this server' });
+          return;
+        }
         if (msg.spectate) {
           conn.spectator = true;
           conn.room = room;
@@ -158,8 +211,9 @@ export class GameServer {
           reply({ t: 'error', code: 'ROOM_FULL', msg: 'Room is full' });
           return;
         }
-        if (msg.sync) this.setSync(conn, msg.sync, room);
+        if (msg.sync && this.mode === 'demo') this.setSync(conn, msg.sync, room);
         conn.playerId = room.addPlayer(msg.name);
+        this.emptySince.delete(room.name);
         conn.room = room;
         conn.nonce = msg.nonce;
         this.sendWelcome(conn, msg.nonce);
@@ -183,7 +237,19 @@ export class GameServer {
         break;
 
       case 'sync':
+        if (this.mode === 'game') {
+          if (msg.model !== 'delta') reply({ t: 'error', code: 'SYNC_FIXED', msg: 'This server uses delta snapshots only' });
+          break;
+        }
         if (!conn.spectator && conn.room) this.setSync(conn, msg, conn.room);
+        break;
+
+      case 'start':
+        // On the game server only a private room's host may start early (never `main`)
+        if (this.mode === 'game' && conn.room?.kind !== 'private') break;
+        if (conn.room && conn.room.start(conn.playerId)) {
+          console.log(`[server] Match started early in ${conn.room.name} by player ${conn.playerId}`);
+        }
         break;
 
       case 'ping': {
@@ -198,6 +264,26 @@ export class GameServer {
       }
 
       case 'perturb':
+      case 'lab':
+      case 'dev':
+        if (this.mode === 'game') {
+          reply({ t: 'error', code: 'NOT_ALLOWED', msg: `${msg.t} is not available on this server` });
+          break;
+        }
+        this.handleOperator(conn, msg);
+        break;
+
+      case 'bye':
+        this.removeConnection(conn);
+        conn.close();
+        break;
+    }
+  }
+
+  /** Demo-only messages: the Network Lab's nudge, lab movers and developer / Presenter commands. */
+  private handleOperator(conn: Connection, msg: MsgPerturb | MsgLab | MsgDev): void {
+    switch (msg.t) {
+      case 'perturb':
         if (conn.playerId !== null && conn.room) {
           conn.room.receivePerturb(conn.playerId, msg.dx, msg.dy);
         }
@@ -211,12 +297,41 @@ export class GameServer {
         // Player switches need a player; room commands (Presenter) may come from a spectator
         if (conn.room) conn.room.devCommand(conn.playerId, msg);
         break;
-
-      case 'bye':
-        this.removeConnection(conn);
-        conn.close();
-        break;
     }
+  }
+
+  /**
+   * The room a hello asks for (docs/PHASE7_PLAN.md D9): `main`, `lab` (demo
+   * only), `new` = a private room with a fresh code, or an existing code.
+   * Replies with the error and returns null when there is none.
+   */
+  private roomFor(name: string, reply: (m: ServerMsg) => void): Room | null {
+    if (name === 'main') return this.getRoom('main');
+    if (name === 'lab') {
+      if (this.mode === 'demo') return this.getRoom('lab');
+      reply({ t: 'error', code: 'NOT_ALLOWED', msg: 'The lab room is not available on this server' });
+      return null;
+    }
+    if (name === 'new') {
+      const max = this.opts.maxPrivateRooms ?? GAME.privateRooms.max;
+      const code = this.privateRoomCount < max
+        ? newCode(new Set(this.rooms.keys()), this.opts.random)
+        : null;
+      if (!code) {
+        reply({ t: 'error', code: 'ROOM_LIMIT', msg: 'Too many rooms on this server; try again later' });
+        return null;
+      }
+      const room = this.getRoom(code);
+      this.emptySince.set(code, this.now());
+      console.log(`[server] Private room ${formatCode(code)} created`);
+      return room;
+    }
+    const room = this.rooms.get(name);
+    if (!room || room.kind !== 'private') {
+      reply({ t: 'error', code: 'ROOM_NOT_FOUND', msg: `No room ${formatCode(name)}` });
+      return null;
+    }
+    return room;
   }
 
   /**
@@ -277,6 +392,7 @@ export class GameServer {
       serverTime: this.now(),
       nonce,
       ...(conn.spectator ? { spectator: true } : {}),
+      ...(conn.room!.kind === 'private' ? { code: conn.room!.name, host: conn.playerId !== null && conn.room!.hostId === conn.playerId } : {}),
     }));
   }
 }

@@ -8,6 +8,7 @@ import { isMoverPattern, type MoverPattern } from '../sim/movers.js';
 import { isPowerupKind, isMapId, type WeaponId, type PowerupKind, type MapId } from '../config/game.js';
 import type { CombatState } from '../sim/combat.js';
 import { isSyncModel, isStateHz, isSyncSpec, type SyncSpec, type SyncModel, type StateHz } from '../sync/types.js';
+import { normalizeCode } from '../rooms/codes.js';
 
 export type { MoverPattern, WeaponId, PowerupKind, MapId, SyncSpec, SyncModel, StateHz };
 
@@ -34,7 +35,12 @@ export interface MsgHello {
   t: 'hello';
   v: 1;
   name: string;
-  room: 'main' | 'lab';
+  /**
+   * `main` (quick match), `lab` (demo only), `new` (create a private room) or
+   * a private room's code (docs/PHASE7_PLAN.md D9; the validator makes it
+   * canonical, e.g. `blue-fox`).
+   */
+  room: string;
   nonce: string;
   /** Join as a spectator: receive snapshots, no player (Compare reference pane). */
   spectate?: boolean;
@@ -119,7 +125,16 @@ export interface MsgLsNack {
   key?: true;
 }
 
-export type ClientMsg = MsgHello | MsgInput | MsgPing | MsgPerturb | MsgBye | MsgLab | MsgDev | MsgSync | MsgSnapAck | MsgLsNack;
+/**
+ * Start the match now (docs/PHASE7_PLAN.md D9, D10): in a private room from
+ * its host while it waits; in `main` only under `npm run demo` (Presenter
+ * Quick Match skips the join window).
+ */
+export interface MsgStart {
+  t: 'start';
+}
+
+export type ClientMsg = MsgHello | MsgInput | MsgPing | MsgPerturb | MsgBye | MsgLab | MsgDev | MsgSync | MsgSnapAck | MsgLsNack | MsgStart;
 
 // ───────────────────────────────────────────────────────────────
 // Server → Client
@@ -136,6 +151,9 @@ export interface MsgWelcome {
   nonce: string;
   /** Present for spectators, whose playerId is 0. */
   spectator?: boolean;
+  /** Private rooms: the room code (`blue-fox`), and whether this player is its host. */
+  code?: string;
+  host?: boolean;
 }
 
 export interface PlayerSnap {
@@ -201,6 +219,11 @@ export interface MatchSnap {
   timeLeftMs: number;
   /** Presenter mode: the match clock is stopped (`timeLeftMs` frozen); absent otherwise. */
   endless?: true;
+  /** `main` in WAITING: time left of the join window (GAMERULES.md §2); absent otherwise. */
+  waitMsLeft?: number;
+  /** Private rooms: the room code and the host's player id (who may START). */
+  code?: string;
+  hostId?: number;
   results: MatchResults | null;
 }
 
@@ -370,8 +393,13 @@ export interface MsgPong {
 
 export interface MsgError {
   t: 'error';
-  /** LOCKSTEP_LAB_ONLY: a lockstep sync request outside the lab room; the connection keeps its model. */
-  code: 'ROOM_FULL' | 'BAD_VERSION' | 'BAD_MESSAGE' | 'LOCKSTEP_LAB_ONLY';
+  /**
+   * LOCKSTEP_LAB_ONLY: a lockstep sync request outside the lab room; the connection keeps its model.
+   * ROOM_NOT_FOUND / ROOM_LIMIT: no private room with that code / too many rooms (docs/PHASE7_PLAN.md D9).
+   * NOT_ALLOWED: an operator message (dev, perturb, lab, spectate, the lab room) on the game server (D6).
+   * SYNC_FIXED: the game server keeps every connection on Delta (D3).
+   */
+  code: 'ROOM_FULL' | 'BAD_VERSION' | 'BAD_MESSAGE' | 'LOCKSTEP_LAB_ONLY' | 'ROOM_NOT_FOUND' | 'ROOM_LIMIT' | 'NOT_ALLOWED' | 'SYNC_FIXED';
   msg: string;
 }
 
@@ -447,11 +475,15 @@ export function validateClientMsg(raw: unknown): ClientMsg | null {
     case 'hello':
       if (raw['v'] !== 1) return null;
       if (typeof raw['name'] !== 'string') return null;
-      if (raw['room'] !== 'main' && raw['room'] !== 'lab') return null;
       if (typeof raw['nonce'] !== 'string') return null;
       if (raw['spectate'] !== undefined && typeof raw['spectate'] !== 'boolean') return null;
       if (raw['sync'] !== undefined && !isSyncSpec(raw['sync'])) return null;
-      return raw as unknown as MsgHello;
+      {
+        const room = raw['room'];
+        const canonical = room === 'main' || room === 'lab' || room === 'new' ? room : normalizeCode(room);
+        if (!canonical) return null;
+        return { ...(raw as unknown as MsgHello), room: canonical };
+      }
 
     case 'input': {
       if (!Array.isArray(raw['inputs'])) return null;
@@ -501,6 +533,9 @@ export function validateClientMsg(raw: unknown): ClientMsg | null {
 
     case 'bye':
       return { t: 'bye' };
+
+    case 'start':
+      return { t: 'start' };
 
     case 'lab': {
       const movers = raw['movers'];

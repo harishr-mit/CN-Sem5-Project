@@ -3,7 +3,7 @@
  *
  *   npm run pack-assets [-- --preview <file.png>]
  *
- * Input:  assets/sprites/player/{body/<weapon>/<anim>,feet/<anim>}/NN.png
+ * Input:  assets-src/player/{body/<weapon>/<anim>,feet/<anim>}/NN.png
  *         (Top-Down Survivor, ~255 × 215 px per frame, 245 frames)
  * Output: assets/packed/player.png + player.json (Phaser JSON-hash atlas)
  *
@@ -25,7 +25,7 @@ import { fileURLToPath } from 'url';
 import { PNG } from 'pngjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SRC = join(root, 'assets', 'sprites', 'player');
+const SRC = join(root, 'assets-src', 'player');
 const OUT = join(root, 'assets', 'packed');
 /** Stored size relative to the source frames (the client draws them at ~0.26). */
 const STORE_SCALE = 0.4;

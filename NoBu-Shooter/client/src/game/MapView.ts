@@ -10,7 +10,7 @@
 
 import Phaser from 'phaser';
 import GAME, { mapDef, type MapId, type ObstacleDef } from '@nobu/shared/config/game';
-import { TEX, has, loadMapArt } from './assets.js';
+import { TEX, has, loadMapArt, invScale } from './assets.js';
 
 const ARENA_W = GAME.arena.width;
 const ARENA_H = GAME.arena.height;
@@ -68,7 +68,9 @@ export class MapView {
     }
 
     if (textured) {
-      this.add(this.scene.add.tileSprite(0, 0, ARENA_W, ARENA_H, TEX.floor(map.floor!)).setOrigin(0, 0).setDepth(DEPTH.floor));
+      const floorKey = TEX.floor(map.floor!);
+      this.add(this.scene.add.tileSprite(0, 0, ARENA_W, ARENA_H, floorKey).setOrigin(0, 0)
+        .setTileScale(invScale(this.scene, floorKey)).setDepth(DEPTH.floor));
       // Darken so players and bullets stay the brightest things on screen
       this.add(this.scene.add.rectangle(0, 0, ARENA_W, ARENA_H, 0x05050c, 0.42).setOrigin(0, 0).setDepth(DEPTH.floor));
     } else {

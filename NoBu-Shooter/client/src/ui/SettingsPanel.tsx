@@ -1,5 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, UI_SCALES, type UserSettings } from './settings.js';
+import { TIERS } from '../game/tiers.js';
+
+const TIER_LABEL = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as const;
+
+/** A row of equal buttons, one selected (UI Scale, Graphics Quality). */
+function Choice<T extends string | number>({ options, value, label, onPick }: {
+  options: readonly T[];
+  value: T;
+  label: (v: T) => string;
+  onPick: (v: T) => void;
+}): React.ReactElement {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${options.length}, 1fr)`, gap: 'var(--sp-s)' }}>
+      {options.map((v) => (
+        <button
+          key={String(v)}
+          onClick={() => onPick(v)}
+          style={{
+            padding: '6px',
+            borderRadius: '4px',
+            fontSize: '0.75rem',
+            fontFamily: 'var(--font-display)',
+            letterSpacing: '0.08em',
+            background: value === v ? 'var(--c-violet)' : 'rgba(255, 255, 255, 0.05)',
+            color: value === v ? '#fff' : 'var(--c-text-muted)',
+            border: value === v ? '1px solid var(--c-cyan)' : '1px solid var(--c-border)',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+        >
+          {label(v)}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -7,6 +43,8 @@ interface SettingsPanelProps {
   onSettingsChange?: (settings: UserSettings) => void;
   /** Leave the match and return to the landing page. */
   onLeave?: () => void;
+  /** Demo-only rows (ghost player); the game edition hides them (docs/PHASE7_PLAN.md D3). */
+  demoRows?: boolean;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -14,6 +52,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onClose,
   onSettingsChange,
   onLeave,
+  demoRows = true,
 }) => {
   const [settings, setSettings] = useState<UserSettings>(() => loadSettings());
 
@@ -117,41 +156,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {/* UI scale for projectors (PHASES.md P4): all panels and text, not the arena */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-xs)' }} id="settings-ui-scale">
           <div style={{ fontSize: '0.9rem', color: 'var(--c-text)' }}>UI Scale (projector)</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--sp-s)' }}>
-            {UI_SCALES.map((scale) => (
-              <button
-                key={scale}
-                onClick={() => updateSetting('uiScale', scale)}
-                style={{
-                  padding: '6px',
-                  borderRadius: '4px',
-                  fontSize: '0.75rem',
-                  fontFamily: 'var(--font-display)',
-                  letterSpacing: '0.08em',
-                  background: settings.uiScale === scale ? 'var(--c-violet)' : 'rgba(255, 255, 255, 0.05)',
-                  color: settings.uiScale === scale ? '#fff' : 'var(--c-text-muted)',
-                  border: settings.uiScale === scale ? '1px solid var(--c-cyan)' : '1px solid var(--c-border)',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                {scale} %
-              </button>
-            ))}
+          <Choice options={UI_SCALES} value={settings.uiScale} label={(v) => `${v} %`} onPick={(v) => updateSetting('uiScale', v)} />
+        </div>
+
+        {/* Graphics Quality (docs/PHASE7_PLAN.md D13): art and sound tier, applied live */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-xs)' }} id="settings-quality">
+          <div style={{ fontSize: '0.9rem', color: 'var(--c-text)' }}>Graphics Quality</div>
+          <Choice options={TIERS} value={settings.graphicsQuality} label={(v) => TIER_LABEL[v]} onPick={(v) => updateSetting('graphicsQuality', v)} />
+          <div style={{ fontSize: '0.72rem', color: 'var(--c-text-muted)' }}>
+            Lower uses smaller textures and sounds (less to download, less GPU memory).
           </div>
         </div>
 
         {/* Toggles */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-s)', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 'var(--sp-s)' }}>
-          <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', fontSize: '0.88rem' }}>
-            <span>Show Ghost Player (Server True State)</span>
-            <input
-              type="checkbox"
-              checked={settings.showGhost}
-              onChange={(e) => updateSetting('showGhost', e.target.checked)}
-              style={{ accentColor: 'var(--c-cyan)', width: '16px', height: '16px', cursor: 'pointer' }}
-            />
-          </label>
+          {demoRows && (
+            <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', fontSize: '0.88rem' }}>
+              <span>Show Ghost Player (Server True State)</span>
+              <input
+                type="checkbox"
+                checked={settings.showGhost}
+                onChange={(e) => updateSetting('showGhost', e.target.checked)}
+                style={{ accentColor: 'var(--c-cyan)', width: '16px', height: '16px', cursor: 'pointer' }}
+              />
+            </label>
+          )}
           <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', fontSize: '0.88rem' }}>
             <span>Show Particle Effects</span>
             <input

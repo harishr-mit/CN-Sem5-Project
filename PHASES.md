@@ -1,10 +1,10 @@
 # NoBu Shooter — Project Phases
 
 **Audience:** the project owner and any agent implementing the next phase.
-**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). Phase 4 (Presenter mode + polish) done 2026-10-11 (plan, decisions D1–D11 and deviations in `docs/PHASE4_PLAN.md`). Phase 5 (realistic transport + standalone emulator) done 2026-10-12 (plan, decisions D1–D15 and deviations in `docs/PHASE5_PLAN.md`). Phase 6 (lockstep + final verification) done 2026-10-12 (plan, decisions D1–D12 and deviations X1–X8 in `docs/PHASE6_PLAN.md`). **All six phases are complete.** What remains is the owner's rehearsal on the presentation laptop (`docs/REHEARSAL.md`); Phase 7 is a candidate.
+**Status:** Phases 1 and 2 done (2026-10-09; Phase 2 plan, decisions D1–D7 and deviations in `docs/PHASE2_PLAN.md`). The separate bug-fix run on branch `game` (keys, leave match, one lab spawn point) was merged on 2026-10-10. Phase 2.5 (gameplay + textures, added by the owner) done 2026-10-10. Phase 3 (sync models) done 2026-10-10 (plan, decisions D1–D10 and deviations in `docs/PHASE3_PLAN.md`). Phase 4 (Presenter mode + polish) done 2026-10-11 (plan, decisions D1–D11 and deviations in `docs/PHASE4_PLAN.md`). Phase 5 (realistic transport + standalone emulator) done 2026-10-12 (plan, decisions D1–D15 and deviations in `docs/PHASE5_PLAN.md`). Phase 6 (lockstep + final verification) done 2026-10-12 (plan, decisions D1–D12 and deviations X1–X8 in `docs/PHASE6_PLAN.md`). **All six phases are complete.** What remains is the owner's rehearsal on the presentation laptop (`docs/REHEARSAL.md`). Phase 7 (multiplayer readiness, LAN: the game edition, private rooms, asset tiers) done 2026-10-12 (plan, decisions D1–D16 and deviations in `docs/PHASE7_PLAN.md`); its option B (internet play) is future scope.
 **Replaces:** `ROADMAP.md` (draft of 2026-10-09). The v1 build spec is archived at `docs/archive/SPEC-v1.md`. `GAMERULES.md` remains the source of truth for gameplay.
 
-The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10-10 (and a candidate Phase 7, multiplayer readiness, added on 2026-10-12 and not scheduled). Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
+The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10-10 (and Phase 7, multiplayer readiness, added by the owner on 2026-10-12 and done the same day). Each phase ends with something you can **show** (a demo checkpoint) and something you can **check** (exit criteria). After Phase 6, all four goals below are met.
 
 ---
 
@@ -29,7 +29,7 @@ The project moves in six phases, plus Phase 2.5 inserted by the owner on 2026-10
 | 4 | **Presenter mode + polish** | A guided, keyboard-driven talk track (N = next step), polished arena and UI | G4 | **done 2026-10-11** |
 | 5 | **Realistic transport + standalone emulator** | Real UDP between Node "network players", emulator and server. The emulator dashboard works with no game running | G3 | **done 2026-10-12** |
 | 6 | **Lockstep + final verification** | Deterministic lockstep freezing under 2–5 % loss beside snapshot sync. Full rehearsal and docs | G1, all | **done 2026-10-12** |
-| 7 | **Multiplayer readiness** (candidate, owner 2026-10-12) | Players on other machines join a match; operator tools stay with the operator | — | candidate, not scheduled |
+| 7 | **Multiplayer readiness** (owner 2026-10-12) | Players on other machines on the LAN open the game in a browser and join a quick match or a private room; operator tools stay in the demo | — | done 2026-10-12 (`docs/PHASE7_PLAN.md`) |
 
 Each phase builds on the previous one. Phases 4 and 5 are independent of each other and can be swapped if the presentation date requires it.
 
@@ -326,22 +326,69 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 
 ---
 
-## Phase 7 (candidate) — Multiplayer readiness
+## Phase 7 — Multiplayer readiness (LAN)
 
-**Status:** candidate, added by the owner on 2026-10-12. Not scheduled; it needs its own plan and the owner's go-ahead. Some items move entries out of "Out of scope" below, and doing that is the owner's call.
+**Status:** **done 2026-10-12** (T108–T114; plan, decisions D1–D16 and deviations in `docs/PHASE7_PLAN.md`). Option A (LAN) is complete; option B (internet play) stays future scope, below.
+
+**Demo checkpoint:** `npm run build` + `npm start` on the host; another machine on the same network opens `http://<host IP>:8080`, plays a quick match (join window, then bots), and a private room created on one browser is joined by code from another and started by its host. The page shows a ping and none of the demo's tools.
+
+**Exit criteria (met):** 267 tests, typecheck, smoke 10 steps (steps 9–10: the built game on its own server — page, compression, refusals, a quick match through the join window with the game's client, a private room created / joined / started), `npm run shots` incl. 9 game screens, `npm run build`'s bundle guard (no demo code in the game JS); checked by hand from this laptop's LAN address (`npm start` and `npm run dev`). The owner's check from a second machine is the remaining step (it can't be done from one laptop).
 
 **Goal:** turn the demo into a game that players on other machines can join, without handing them the operator's tools.
 
 **What Phase 5 already prepares:** a transport-agnostic server with WS and UDP ports reachable from other machines (configurable bind address), and an emulator whose data routes can face the LAN while its control port stays local (`docs/PHASE5_PLAN.md` D7, D15).
 
-| ID | Candidate item |
-|---|---|
-| M1 | **Server address in the client:** today the client has `ws://127.0.0.1:…` hard-coded (`App.tsx`, `CompareView.tsx`). Derive it from the page's host, a setting or a build variable, and choose per deployment whether players go straight to the server or through the emulator. |
-| M2 | **Serving the client to other machines:** a production build (`vite build`) served by the game server or a static host. For LAN tests, a dev-server host option. |
-| M3 | **Operator-only controls:** the Network Lab's emulator controls, Presenter, and the `dev` / `perturb` / `lab` messages are honoured only for the operator (localhost connection or an operator token) and never for remote players. `NOBU_DEV` is never set on a public server. The emulator's control port stays local, as it is from Phase 5. |
-| M4 | **Transport hardening:** `wss://` (TLS) when served over the internet; on UDP, a return-routability challenge before any snapshot is streamed (so a spoofed `hello` can't turn the server into a reflector); per-IP connection and rate limits. |
-| M5 | **Browser datagrams** (today out of scope): WebTransport or a WebRTC DataChannel, if browser players should get UDP-like transport instead of WS. |
-| M6 | **Many players:** a room list or join codes, and more than one match room. Matchmaking and accounts stay out of scope unless the owner asks. |
+### Owner decisions (2026-10-12)
+
+- **Target: LAN play in the browser, on laptops and PCs** ("option A": the operator's machine serves the game; players open its address, nothing to install). Internet play ("option B") is future scope, below. Phones / touch controls are out of scope.
+- **Players connect straight to the game server**, not through the emulator. The emulator is game-agnostic, so the operator can still put it in front by hand (a route from a public port to the server's port). Behind it every player appears to come from `127.0.0.1`, so nothing may trust "localhost" as proof of being the operator.
+- **Transport: WebSocket** (TCP), as today.
+- **The game uses one fixed set of the best settings**, chosen from the Phase 3–6 measurements:
+
+  | Setting | Game | Evidence |
+  |---|---|---|
+  | Sync model | **Delta** (full snapshots stay as its fallback keyframe) | ≈ 1/5 of Full's bytes, off-path 0 %, best ack delay under a cap (Nightmare ≈ 310 vs 740 ms). State 10 overshoots (≈ 33 % off-path); lockstep stalls under loss and adds ≈ RTT + buffer (Input → Screen ≈ 204 vs 18 ms) |
+  | Prediction + reconciliation + smoothing | **on** | G2: 0 corrections on a clean network |
+  | Remote-player interpolation | **on**, 100 ms | Phase 1 default |
+  | Input redundancy | **off** | Over WebSocket TCP already resends lost packets, so redundancy only adds bytes. Turned back on with a datagram transport (future option B) |
+
+  No sync-model or netcode toggles, no Network Lab, Compare, Presenter, emulator client, lockstep / state clients or developer tools in the game's bundle.
+- **Editions and commands** (names proposed, confirmed by the owner):
+
+  | Edition | Command | What it is |
+  |---|---|---|
+  | Demo | `npm run demo` | unchanged: server + built-in emulator + client with Lab, Compare, Presenter |
+  | Emulator | `npm run emulator` | unchanged: the standalone, game-agnostic emulator (WS + UDP routes, dashboard) |
+  | Game, development | `npm run dev` | game server + Vite dev server with hot reload (HMR), reachable on the LAN |
+  | Game, production | `npm run build`, then `npm start` | `build` makes the bundle; `start` runs one Node process that serves the bundle and the game WebSocket on one port |
+- **One code base:** the demo and the game share the simulation, rules, maps, arena scene, effects, assets, HUD and netcode. The editions differ only in their entry point and in which tools they mount. A texture, effect or rule is changed once.
+- **The game server refuses operator messages** (`dev`, `perturb`, `lab`, Presenter controls); `NOBU_DEV` is never set for it.
+- **Join window** before a quick match, in every edition, so a human who takes a few seconds to join isn't late (`GAMERULES.md` §2): 10 s, ends early with 4 humans; Presenter Quick Match skips it. Bots then fill the empty slots as today (§12).
+- **Private rooms with short codes** (owner, M6): CREATE ROOM gives a two-word code (`BLUE FOX`) that others type in JOIN ROOM or open as a link (`?room=blue-fox`). The room waits for its host's START, then plays like a quick match with bots filling the slots. In every edition.
+- **HUD:** the game shows the ping (round-trip time) only.
+- **Graphics Quality setting** (low / medium / high): lower-resolution textures and lower-bitrate sounds at low, the full files at high; a match starts on low and upgrades in the background (`NoBu-Shooter/assets/README.md`).
+- **Assets:** textures served as WebP and all sounds as OGG, generated from the masters in `assets/`; `stone_beige.png` (2.2 MB) served at ≤ 160 kB like the other floors; the raw player frames (7.6 MB, only used by `pack-assets`) move out of the served folder, for every edition.
+
+### Items
+
+| ID | Item | Decision |
+|---|---|---|
+| M1 | **Server address in the client:** it was `ws://127.0.0.1:…`, hard-coded (`App.tsx`, `CompareView.tsx`). The game derives it from the page's host (`/ws`, `?server=` override); the demo keeps its emulator route, on the page's host too (`net/serverUrl.ts`). | done |
+| M2 | **Serving the client to other machines:** a production build (`vite build`) served by the game server (`npm start`); the dev server reachable on the LAN (`npm run dev`). | done |
+| M3 | **Operator-only controls:** the game server refuses the operator messages; the Lab, Presenter and dev tools exist only in the demo. The emulator's control port stays local, as it is from Phase 5. | done (simplified as above) |
+| M4 | **Transport hardening:** `wss://` (TLS); a UDP return-routability challenge before any snapshot is streamed (so a spoofed `hello` can't turn the server into a reflector); per-IP connection and rate limits. | future option B |
+| M5 | **Browser datagrams:** WebTransport or a WebRTC DataChannel. | future option B |
+| M6 | **Many players:** private rooms joined by a short two-word code, alongside the quick-match room. A room list is not planned. | done |
+| M7 | **Game edition:** separate entry point, fixed best settings, ping HUD, game commands. | done |
+| M8 | **Join window** before a match (all editions). | done |
+| M9 | **Asset quality tiers** behind a Graphics Quality setting. | done |
+
+### Future scope: option B (internet play)
+
+- A public host (cloud server or VPS), a domain and a TLS certificate: browsers require `https://` pages to use `wss://`, not `ws://` ("mixed content").
+- M4 hardening: per-IP limits, and the UDP return-routability challenge.
+- **A datagram transport for browsers** (M5: WebRTC DataChannel or WebTransport). Unreliable datagrams pay off on the lossy internet, not on a LAN, where loss is close to zero. The server core doesn't care about the transport, so this is one more adapter, the way UDP was in Phase 5.
+- **Input redundancy back on with that transport.** Over WebSocket it stays off, because TCP already resends lost packets and redundancy would only add bytes. Over datagrams it pays: Q5 showed 0 corrections under loss with redundancy on.
 
 ### Definition of Done (all phases)
 
@@ -351,6 +398,7 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 - [x] G4: Presenter mode runs the whole talk; screenshots pass the visual checklist; textures and sounds drop in through the manifest (Phase 2.5). *(Q1–Q13 and C1–C7; timed run-through at ≈ 60 fps, `docs/REHEARSAL.md`.)*
 - [x] `npm run demo`, `npm test`, `npm run typecheck`, `npm run smoke` and `npm run shots` pass from a fresh clone. *(Fresh copy on the development laptop, 2026-10-12: install, test, typecheck, smoke and the demo in Chrome; shots in the working tree — `docs/PHASE6_PLAN.md` X6.)*
 - [ ] The owner's rehearsal on the presentation laptop (`docs/REHEARSAL.md` §3–§4).
+- [x] Phase 7: players on the LAN join in a browser (quick match or private room) from the game edition, which carries none of the demo's tools. *(Checked from this laptop's LAN address; a second machine is the owner's check.)*
 
 ---
 
@@ -358,7 +406,7 @@ Browsers cannot open UDP sockets, so the browser stays on WebSocket and the emul
 
 These are kept out unless the owner asks:
 
-- a WebRTC DataChannel or WebTransport client (browser-native unreliable datagrams)
+- a WebRTC DataChannel or WebTransport client (browser-native unreliable datagrams) — future option B of Phase 7
 - lag compensation and predicted projectiles
 - a TCP proxy mode
 - matchmaking, accounts and persistence

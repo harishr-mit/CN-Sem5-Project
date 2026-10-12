@@ -5,6 +5,9 @@
   "scripts": {
     "postinstall": "npm --prefix NoBu-Shooter install",
     "demo": "npm --prefix NoBu-Shooter run demo --",
+    "dev": "npm --prefix NoBu-Shooter run dev --",
+    "build": "npm --prefix NoBu-Shooter run build --",
+    "start": "npm --prefix NoBu-Shooter run start --",
     "emulator": "npm --prefix NoBu-Shooter run emulator --",
     "swarm": "npm --prefix NoBu-Shooter run swarm --",
     "udp-echo": "npm --prefix NoBu-Shooter run udp-echo --",
@@ -14,6 +17,7 @@
     "shots": "npm --prefix NoBu-Shooter run shots --",
     "typecheck": "npm --prefix NoBu-Shooter run typecheck",
     "install:all": "npm --prefix NoBu-Shooter install",
-    "pack-assets": "npm --prefix NoBu-Shooter run pack-assets"
+    "pack-assets": "npm --prefix NoBu-Shooter run pack-assets",
+    "assets": "npm --prefix NoBu-Shooter run assets --"
   }
 }

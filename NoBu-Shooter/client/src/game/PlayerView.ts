@@ -12,7 +12,7 @@
 import Phaser from 'phaser';
 import type { WeaponId } from '@nobu/shared/protocol';
 import GAME from '@nobu/shared/config/game';
-import { PLAYER_ATLAS, PLAYER_SPRITE_SCALE, TEX, has } from './assets.js';
+import { PLAYER_ATLAS, PLAYER_SPRITE_SCALE, TEX, has, invScale } from './assets.js';
 import { DEPTH } from './MapView.js';
 
 const P_RADIUS = GAME.player.radius;
@@ -107,8 +107,10 @@ export class PlayerView {
 
   constructor(private readonly scene: Phaser.Scene) {
     this.ring = scene.add.image(0, 0, 'player-ring').setDepth(DEPTH.ring);
-    this.feet = scene.add.sprite(0, 0, PLAYER_ATLAS).setScale(PLAYER_SPRITE_SCALE).setDepth(DEPTH.feet);
-    this.body = scene.add.sprite(0, 0, PLAYER_ATLAS).setScale(PLAYER_SPRITE_SCALE).setDepth(DEPTH.body);
+    // Lower Graphics Quality tiers store the atlas smaller (docs/PHASE7_PLAN.md D13)
+    const spriteScale = PLAYER_SPRITE_SCALE * invScale(scene, PLAYER_ATLAS);
+    this.feet = scene.add.sprite(0, 0, PLAYER_ATLAS).setScale(spriteScale).setDepth(DEPTH.feet);
+    this.body = scene.add.sprite(0, 0, PLAYER_ATLAS).setScale(spriteScale).setDepth(DEPTH.body);
     this.bubble = has(scene, TEX.shield) ? scene.add.image(0, 0, TEX.shield).setDepth(DEPTH.shield).setDisplaySize(62, 62) : null;
     this.marker = scene.add.image(0, 0, 'local-marker').setDepth(DEPTH.marker);
     this.chevron = scene.add.image(0, 0, 'aim-chevron').setDepth(DEPTH.ring);

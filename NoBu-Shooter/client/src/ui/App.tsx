@@ -1,21 +1,25 @@
+/**
+ * App.tsx — the demo edition (`npm run demo`): the shared landing form and
+ * match view (docs/PHASE7_PLAN.md D2) plus the Network Lab, packet strip and
+ * inspector, Compare and Presenter. The game edition is play/PlayApp.tsx.
+ */
 import React, { useState, useEffect } from 'react';
 import { NetClient } from '../net/NetClient.js';
+import { ALL_MODELS } from '../net/allModels.js';
 import { EmulatorClient } from '../net/EmulatorClient.js';
-import { bindStore } from '../net/bindStore.js';
+import { demoServiceUrl } from '../net/serverUrl.js';
 import { Landing } from './Landing.js';
-import { GameContainer } from '../game/GameContainer.js';
-import { Hud } from './Hud.js';
+import { MatchView } from './MatchView.js';
+import { DEMO_CONTROLS } from './demoControls.js';
 import { NetworkLab } from './NetworkLab.js';
 import { PacketFlowStrip } from './PacketFlowStrip.js';
 import { PacketInspector } from './PacketInspector.js';
 import { CompareView } from './compare/CompareView.js';
-import { SettingsPanel } from './SettingsPanel.js';
-import { ControlsOverlay } from './ControlsOverlay.js';
-import { loadSettings, saveSettings, applyUiScale, onSettingsChange, type UserSettings } from './settings.js';
-import { setSoundPrefs } from '../game/audio.js';
+import { loadSettings, applyUiScale, onSettingsChange, type UserSettings } from './settings.js';
 import { useGameStore } from './store.js';
 import { isTypingTarget } from '../game/input.js';
 import { DEV_TOOLS } from '../dev.js';
+import NET from '@nobu/shared/config/net';
 import { PresenterController } from '../presenter/controller.js';
 import { PRESENTER_SCRIPTS } from '../presenter/scripts.js';
 import type { PresenterScript } from '../presenter/types.js';
@@ -23,15 +27,15 @@ import { PresenterBar } from './presenter/PresenterBar.js';
 import { quickStage, compareStage } from './presenter/stages.js';
 import type { MapId } from '@nobu/shared/protocol';
 
-const EMULATOR_DATA_URL = 'ws://127.0.0.1:9000';
+/** Players go through the emulator's data route on the page's host (D5); its control port is this machine only. */
+const emulatorDataUrl = () => demoServiceUrl(window.location, NET.ports.emulatorData);
+const EMULATOR_CONTROL_URL = `ws://127.0.0.1:${NET.ports.emulatorControl}`;
 
 export const App: React.FC = () => {
   const [view, setView] = useState<'landing' | 'game' | 'compare'>('landing');
   const [playerName, setPlayerName] = useState('PILOT_01');
   const [isLabOpen, setIsLabOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 900 : true));
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isControlsOpen, setIsControlsOpen] = useState(false);
 
   // Presenter mode (PHASES.md P1): which script runs, its controller, caption shown
   const [presenterId, setPresenterId] = useState<PresenterScript['id'] | null>(null);
@@ -48,14 +52,15 @@ export const App: React.FC = () => {
   const [netClient, setNetClient] = useState<NetClient | null>(null);
   const [emulatorClient, setEmulatorClient] = useState<EmulatorClient | null>(null);
 
-  const handleStartQuickMatch = (name: string) => {
+  /** Quick match (`main`), a new private room (`new`) or a room code (D9). */
+  const handlePlay = (name: string, room: string) => {
     setPlayerName(name);
 
     // Initialize network clients
     // Saved ghost preference and sync model (Network Lab, `Y`)
     const initialSettings = loadSettings();
-    const net = new NetClient({ url: EMULATOR_DATA_URL, name, room: 'main', sync: initialSettings.syncModel });
-    const emu = new EmulatorClient('ws://127.0.0.1:9001');
+    const net = new NetClient({ models: ALL_MODELS, url: emulatorDataUrl(), name, room, sync: initialSettings.syncModel });
+    const emu = new EmulatorClient(EMULATOR_CONTROL_URL);
     net.toggles.ghost = initialSettings.showGhost;
 
     setNetClient(net);
@@ -75,7 +80,7 @@ export const App: React.FC = () => {
     setPresetRequest(undefined);
     setRestartRequest(undefined);
     setPresenterId(id);
-    if (PRESENTER_SCRIPTS[id].view === 'game') handleStartQuickMatch(name);
+    if (PRESENTER_SCRIPTS[id].view === 'game') handlePlay(name, 'main');
     else handleStartCompare(name);
   };
 
@@ -83,8 +88,6 @@ export const App: React.FC = () => {
   // removes the player) and close the emulator control socket.
   const handleLeaveMatch = () => {
     setPresenterId(null);
-    setIsSettingsOpen(false);
-    setIsControlsOpen(false);
     setIsInspectorOpen(false);
     setNetClient(null);
     setEmulatorClient(null);
@@ -96,48 +99,6 @@ export const App: React.FC = () => {
     applyUiScale(loadSettings().uiScale);
     return onSettingsChange((s) => applyUiScale(s.uiScale));
   }, []);
-
-  // Keyboard shortcut listener for Escape and F1 / ? (match view only, so a
-  // stray Esc on the landing page doesn't open settings in the next match)
-  useEffect(() => {
-    if (view !== 'game') return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target)) return;
-
-      if (e.key === 'Escape') {
-        if (isControlsOpen) {
-          setIsControlsOpen(false);
-        } else {
-          setIsSettingsOpen((prev) => !prev);
-        }
-      } else if (e.key === 'F1' || e.key === '?') {
-        e.preventDefault();
-        setIsControlsOpen((prev) => !prev);
-      } else if (e.code === 'KeyM' && !e.repeat) {
-        // Mute / unmute sound effects (GAMERULES.md §18), remembered
-        const s = loadSettings();
-        const next = { ...s, muted: !s.muted };
-        saveSettings(next);
-        setSoundPrefs(next.soundVolume / 100, next.muted);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isControlsOpen, view]);
-
-  // Bind the main client to the HUD store; clean up on unmount
-  useEffect(() => {
-    if (!netClient) return;
-    const unbind = bindStore(netClient);
-    netClient.connect();
-    return () => {
-      unbind();
-      netClient.disconnect();
-      // Next match starts from a clean HUD (no old scoreboard / kill feed / packets)
-      useGameStore.getState().resetSession();
-    };
-  }, [netClient]);
 
   useEffect(() => () => emulatorClient?.close(), [emulatorClient]);
 
@@ -162,7 +123,10 @@ export const App: React.FC = () => {
     c.onChange = () => setPresenterVersion((v) => v + 1);
     c.start();
     setPresenter(c);
+    // Presenter Quick Match never waits for the join window (D10; honoured under npm run demo)
+    const offWelcome = script.view === 'game' && netClient ? netClient.on('welcome', () => netClient.start()) : () => {};
     return () => {
+      offWelcome();
       c.stop();
       setPresenter(null);
     };
@@ -203,13 +167,12 @@ export const App: React.FC = () => {
 
   const handleSettingsChange = (newSettings: UserSettings) => {
     netClient?.setToggles({ ghost: newSettings.showGhost });
-    setSoundPrefs(newSettings.soundVolume / 100, newSettings.muted);
   };
 
   if (view === 'landing') {
     return (
       <Landing
-        onStartQuickMatch={handleStartQuickMatch}
+        onPlay={handlePlay}
         onStartCompare={handleStartCompare}
         onStartPresenter={handleStartPresenter}
       />
@@ -235,59 +198,38 @@ export const App: React.FC = () => {
   if (!netClient || !emulatorClient) return null;
 
   return (
-    <div className="app-root" id="nobu-shooter-app">
-      <div className="app-main">
-        {/* Arena + HUD + Packet Strip + Drawer */}
-        <div className="arena-wrapper">
-          <div className="arena-canvas-container">
-            <GameContainer netClient={netClient} id="game-canvas" />
-            <Hud
-              netClient={netClient}
-              onOpenSettings={() => setIsSettingsOpen(true)}
-              onOpenControls={() => setIsControlsOpen(true)}
-              onLeave={handleLeaveMatch}
-            />
-          </div>
+    <MatchView
+      netClient={netClient}
+      onLeave={handleLeaveMatch}
+      edition="demo"
+      extraControls={DEMO_CONTROLS}
+      onSettingsChange={handleSettingsChange}
+      below={<>
+        {/* Presenter caption (in the flow, so it never covers the arena) */}
+        {presenterBar}
 
-          {/* Presenter caption (in the flow, so it never covers the arena) */}
-          {presenterBar}
+        {/* Packet Flow Strip (YOU ── [EMULATOR] ── SERVER) */}
+        <PacketFlowStrip
+          isInspectorOpen={isInspectorOpen}
+          sessionLabel={netClient.label}
+          onToggleInspector={() => setIsInspectorOpen((open) => !open)}
+        />
 
-          {/* Packet Flow Strip (YOU ── [EMULATOR] ── SERVER) */}
-          <PacketFlowStrip
-            isInspectorOpen={isInspectorOpen}
-            sessionLabel={netClient.label}
-            onToggleInspector={() => setIsInspectorOpen((open) => !open)}
-          />
-
-          {/* Packet Inspector Drawer (P1) */}
-          <PacketInspector
-            isOpen={isInspectorOpen}
-            onClose={() => setIsInspectorOpen(false)}
-          />
-        </div>
-
-        {/* Network Lab Collapsible Panel */}
+        {/* Packet Inspector Drawer (P1) */}
+        <PacketInspector
+          isOpen={isInspectorOpen}
+          onClose={() => setIsInspectorOpen(false)}
+        />
+      </>}
+      side={
+        /* Network Lab Collapsible Panel */
         <NetworkLab
           netClient={netClient}
           emulatorClient={emulatorClient}
           isOpen={isLabOpen}
           onToggleOpen={() => setIsLabOpen((open) => !open)}
         />
-      </div>
-
-      {/* Settings Modal (Esc) */}
-      <SettingsPanel
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        onSettingsChange={handleSettingsChange}
-        onLeave={handleLeaveMatch}
-      />
-
-      {/* Controls Overlay Modal (F1 / ?) */}
-      <ControlsOverlay
-        isOpen={isControlsOpen}
-        onClose={() => setIsControlsOpen(false)}
-      />
-    </div>
+      }
+    />
   );
 };

@@ -13,7 +13,7 @@
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import {
-  spawnTs, spawnNode, assertPortsFree, assertUdpPortsFree, waitForPort, waitForUdpPort, cleanupOnExit,
+  spawnTs, spawnNode, assertPortsFree, assertUdpPortsFree, waitForPort, waitForUdpPort, cleanupOnExit, buildAssets,
 } from './lib/procs.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -29,6 +29,7 @@ console.log(`\x1b[36m${line}\n  NOBU SHOOTER — NETWORK MECHANICS DEMO ENVIRONM
 
 await assertPortsFree(Object.values(PORTS));
 await assertUdpPortsFree(Object.values(UDP_PORTS));
+buildAssets(rootDir);
 // Developer tools (invincibility toggle in the Network Lab) exist only in the
 // demo: the server honours `dev` messages and the client shows the switch.
 process.env.NOBU_DEV = '1';

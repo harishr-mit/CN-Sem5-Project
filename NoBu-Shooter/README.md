@@ -14,6 +14,12 @@ npm install
 npm run demo
 npm run demo -- --swarm 3      # plus 3 network players over UDP
 
+# The game edition for players on this machine and the LAN (no emulator or demo tools):
+npm run build                  # → dist/game
+npm start                      # page + game on :8080; players open http://<this machine's IP>:8080
+npm run dev                    # the same with hot reload on :5173 (also reachable from the LAN)
+npm run assets                 # regenerate the art/sound tiers in assets-build/ (demo, dev and build do it)
+
 # Network players beside a running demo (--n, --sync, --room, --direct, --duration)
 npm run swarm
 
@@ -28,7 +34,8 @@ npm test
 # Type-check server, emulator, shared, tests and client
 npm run typecheck
 
-# Run the headless smoke test (through the emulator, Nightmare preset; incl. one UDP network player and two lockstep players)
+# Run the headless smoke test (through the emulator, Nightmare preset; incl. one UDP network player, two lockstep players,
+# and the built game on its own server: a quick match through the join window and a private room)
 npm run smoke
 
 # Screenshot every screen at 1280×720 and 1920×1080 (local Chrome; output in artifacts/shots/)

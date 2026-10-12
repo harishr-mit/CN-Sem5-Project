@@ -1,6 +1,8 @@
 /**
  * room.ts — the authoritative game room.
- * One Room instance per room name ('main' | 'lab').
+ * One Room instance per room: 'main' (quick match), 'lab' (demo sandbox) and
+ * private rooms named by their code (docs/PHASE7_PLAN.md D9), which play by
+ * the 'main' rules but wait for their host's START.
  * SPEC.md §9, GAMERULES.md §2–§14.
  */
 
@@ -50,6 +52,16 @@ const PICKUP_RESPAWN_TICKS = Math.round(GAME.powerups.respawnMs * SIM_HZ / 1000)
 /** A move longer than this in one tick is a teleport (respawn, perturb), not velocity. */
 const MAX_STEP_PX = 30;
 const HASH_EVERY_TICKS = NET.lockstep.hashEveryTicks;
+/**
+ * Join window of `main` (GAMERULES.md §2, docs/PHASE7_PLAN.md D10).
+ * NOBU_JOIN_WINDOW_MS overrides it (tests and smoke use 0: the old instant start).
+ */
+function defaultJoinWindowMs(): number {
+  const env = typeof process !== 'undefined' ? process.env.NOBU_JOIN_WINDOW_MS : undefined;
+  const n = env !== undefined && env !== '' ? Number(env) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : GAME.match.joinWindowMs;
+}
+
 /** Developer switches (dev message) are honoured only under `npm run demo` (read per call, so tests can set it). */
 const devMode = (): boolean => typeof process !== 'undefined' && process.env.NOBU_DEV === '1';
 
@@ -108,9 +120,25 @@ interface RoomCfg {
   spawn?: { x: number; y: number };
 }
 
+export type RoomKind = 'main' | 'lab' | 'private';
+
+export interface RoomOptions {
+  /** Default: the name's own config ('main', 'lab'); any other name is a private room. */
+  kind?: RoomKind;
+  /** `main` only; default GAME.match.joinWindowMs (or NOBU_JOIN_WINDOW_MS). */
+  joinWindowMs?: number;
+}
+
 export class Room {
   readonly name: string;
+  readonly kind: RoomKind;
   readonly roomCfg: RoomCfg;
+  /** WAITING ticks a `main` room waits for more humans once one is in (0 = start at once). */
+  private readonly joinWindowTicks: number;
+  /** Join window running: ticks left (null = not running). */
+  private waitTicksLeft: number | null = null;
+  /** Private rooms: the human who may START (the creator, then the longest-connected human). */
+  private host: number | null = null;
 
   private state: RoomState;
   private botCtrl: BotController;
@@ -149,12 +177,18 @@ export class Room {
   constructor(
     name: string,
     sendFn: SendFn,
-    spectatorFn: SpectatorFn
+    spectatorFn: SpectatorFn,
+    opts: RoomOptions = {},
   ) {
     this.name = name;
-    this.roomCfg = (GAME.rooms as Record<string, RoomCfg>)[name] ?? {
+    const configs = GAME.rooms as Record<string, RoomCfg>;
+    this.kind = opts.kind ?? (name === 'main' || name === 'lab' ? name : 'private');
+    this.roomCfg = configs[this.kind === 'private' ? 'main' : name] ?? {
       bots: false, firing: false, timed: false, movers: false, powerups: false,
     };
+    this.joinWindowTicks = this.kind === 'main'
+      ? Math.round((opts.joinWindowMs ?? defaultJoinWindowMs()) * SIM_HZ / 1000)
+      : 0;
     this.sendFn = sendFn;
     this.spectatorFn = spectatorFn;
     this.rotation = this.roomCfg.map && isMapId(this.roomCfg.map) ? [this.roomCfg.map] : mapRotation();
@@ -188,6 +222,15 @@ export class Room {
   // ── Public API ───────────────────────────────────────────────
 
   get playerCount(): number { return this.state.players.size; }
+  /** Human players (not bots, not movers). */
+  get humanCount(): number {
+    let n = 0;
+    for (const p of this.state.players.values()) if (!p.bot) n++;
+    return n;
+  }
+  /** Private rooms: the host's player id (null in other rooms, or with no humans). */
+  get hostId(): number | null { return this.host; }
+  get matchState(): MatchState { return this.state.matchState as MatchState; }
   get spectatorCount(): number { return this.spectators; }
   get activeMovers(): MoverPattern[] { return [...this.movers.keys()]; }
   get mapId(): MapId { return this.map.id; }
@@ -264,6 +307,8 @@ export class Room {
     if (isBot) {
       this.botCtrl.addBot(id);
       this.botSeqMap.set(id, 0);
+    } else if (this.kind === 'private' && this.host === null) {
+      this.host = id;
     }
     this.emitEvent({ type: 'PLAYER_JOIN', playerId: id });
     this.markKeyframe();
@@ -289,6 +334,12 @@ export class Room {
     this.markKeyframe();
     this.metrics.counters.playerLeaves++;
 
+    // The host left: the longest-connected human takes over (players keep join order)
+    if (this.host === id) {
+      this.host = null;
+      for (const pl of this.state.players.values()) if (!pl.bot) { this.host = pl.id; break; }
+    }
+
     // If last human leaves, clear bots and return to WAITING
     const hasHumans = [...this.state.players.values()].some(pl => !pl.bot);
     if (!hasHumans && this.roomCfg.bots) {
@@ -296,6 +347,7 @@ export class Room {
         if (bp.bot) this.removePlayer(bid);
       }
       this.state.matchState = 'WAITING';
+      this.waitTicksLeft = null;
     }
     // A presenter who closed the tab must not leave the room without a clock
     if (!hasHumans) this.endless = false;
@@ -351,6 +403,8 @@ export class Room {
         : 0,
       results: matchState === 'ENDED' ? this._matchResults : null,
       ...(this.endless && this.roomCfg.timed ? { endless: true as const } : {}),
+      ...(matchState === 'WAITING' && this.waitTicksLeft !== null ? { waitMsLeft: this.waitTicksLeft * 1000 / SIM_HZ } : {}),
+      ...(this.kind === 'private' ? { code: this.name, ...(this.host !== null ? { hostId: this.host } : {}) } : {}),
     };
     const projSnaps: ProjectileSnap[] = [...projectiles.values()].map(proj => ({
       id: proj.id,
@@ -816,17 +870,44 @@ export class Room {
     this.metrics.counters.respawns++;
   }
 
+  /**
+   * WAITING → COUNTDOWN (GAMERULES.md §2). Rooms without bots need
+   * `minParticipants`. `main` waits a join window once a human is in, ending
+   * early with `bots.targetParticipants` humans; a private room waits for its
+   * host's START (docs/PHASE7_PLAN.md D9, D10).
+   */
   private checkMatchTransition(): void {
-    const total = this.state.players.size;
-    const minNeeded = this.roomCfg.bots ? 1 : MIN_PARTICIPANTS;
-    if (this.state.matchState === 'WAITING' && total >= minNeeded) {
-      this.startCountdown();
+    if (this.state.matchState !== 'WAITING') return;
+    if (!this.roomCfg.bots) {
+      if (this.state.players.size >= MIN_PARTICIPANTS) this.startCountdown();
+      return;
     }
+    const humans = this.humanCount;
+    if (humans === 0 || this.kind === 'private') return;
+    if (this.joinWindowTicks <= 0 || humans >= TARGET_BOTS) {
+      this.startCountdown();
+      return;
+    }
+    this.waitTicksLeft ??= this.joinWindowTicks;
+  }
+
+  /**
+   * START (`start` message): a private room's host while it waits, or — only
+   * under `npm run demo` — anyone in `main` (Presenter Quick Match skips the
+   * join window). Returns whether the countdown began.
+   */
+  start(playerId: number | null): boolean {
+    if (this.state.matchState !== 'WAITING' || !this.roomCfg.timed || this.humanCount === 0) return false;
+    const allowed = this.kind === 'private' ? playerId !== null && playerId === this.host : devMode();
+    if (!allowed) return false;
+    this.startCountdown();
+    return true;
   }
 
   /** `map` (Presenter) replaces the next rotation map without advancing the rotation. */
   private startCountdown(map?: MapId): void {
     this.state.matchState = 'COUNTDOWN';
+    this.waitTicksLeft = null;
     this.state.countdownTicksLeft = COUNTDOWN_TICKS;
 
     // Next map in the rotation (GAMERULES.md §3); the first match plays rotation[0]
@@ -916,7 +997,9 @@ export class Room {
 
   private stepMatchState(): void {
     switch (this.state.matchState) {
-      case 'WAITING': break;
+      case 'WAITING':
+        if (this.waitTicksLeft !== null && --this.waitTicksLeft <= 0) this.startCountdown();
+        break;
 
       case 'COUNTDOWN':
         this.state.countdownTicksLeft--;

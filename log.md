@@ -27,8 +27,9 @@ Shared context for every agent working in this directory. Read this file **befor
   - The hash check found Chrome vs Node `Math.cos` / `Math.sin` 1-bit differences → movers use a deterministic `dsin` / `dcos` (`shared/src/sim/dtrig.ts`).
   - Dress rehearsal (fresh copy + timed run-through, ≈ 60 fps) → `docs/REHEARSAL.md`. Talk order changed: network players start at **Q13** (`npm run swarm -- --n 3`).
   - **222 tests**, typecheck, smoke (**8 steps**, step 8 = lockstep over real sockets), `npm run shots` (**25 screens × 2**, 0 console errors).
-  - **Remaining:** the owner's rehearsal on the presentation laptop (`docs/REHEARSAL.md` §3–§4); Phase 7 is a candidate.
-  - Branch `phase6`; nothing committed by the agent.
+  - **Remaining:** the owner's rehearsal on the presentation laptop (`docs/REHEARSAL.md` §3–§4).
+  - **Phase 7 done 2026-10-12 (T107–T114; plan `docs/PHASE7_PLAN.md`, D1–D16, deviations X1–X10):** LAN play in the browser. **Game edition** (`npm run dev` HMR on 5173 + `/ws` proxy, `npm run build` → `dist/game` with a bundle guard, `npm start` = one port 8080 for page + `/ws`): fixed best settings (Delta, prediction + reconciliation + interpolation, redundancy off), no Lab / Compare / Presenter / emulator / State / Lockstep code; game server (`--game`) refuses operator messages. **Private rooms** (two-word codes like BLUE FOX, host START, 60 s grace, 32 max) and a 10 s **join window** in `main` (Presenter skips it) in every edition. **Ping** chip. **Graphics Quality** tiers: `npm run assets` → `assets-build/{low,medium,high}` (WebP / OGG; 191 / 359 / 645 kB, was ≈ 4.7 MB; `stone_beige` 2.2 MB → 141 kB); raw frames moved to `assets-src/`. Latin-only fonts. Game build 3.2 MB (demo build was 16 MB), JS brotli 332 kB. **267 tests**, typecheck, smoke **10 steps**, shots **34 × 2**. Ports: demo as before; game 8080 (+5173 in dev). Option B (internet: TLS, M4 hardening, browser datagrams + redundancy) is future scope. Remaining: the owner's check from a second machine.
+  - Branch `phase7`: pre-implementation commit `879d0f0` by the agent (owner-requested); the implementation is uncommitted.
 * **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot-vs-state sync models, and a standalone network emulator (latency, jitter, loss, bandwidth, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (`main` holds everything as of T49; earlier work branches: `game`, `game-phase2plus`).
 * **Plan:** `PHASES.md` — six phases, each with a demo checkpoint and exit criteria. `GAMERULES.md` = gameplay rules. v1 spec archived at `docs/archive/SPEC-v1.md`.
 * **Architecture:** Browser (Phaser + React) ⇄ Emulator (:9000 data, :9001 control) ⇄ Authoritative server (:8080). Server core is transport-agnostic (`server/src/core.ts`); `NetClient` is headless (injectable transport/clock).
@@ -155,12 +156,76 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T105: Phase 6 step 7 — rehearsal (L5): fresh-copy cold start, timed headless Presenter run-through, `docs/REHEARSAL.md` checklist for the presentation laptop; fix anything that stutters
 * [x] T106: Phase 6 step 8 — phase exit + Definition of Done
 
+* [x] T107: Phase 7 scoping discussion with the owner: record the decisions so far in PHASES.md (Phase 7 section), GAMERULES.md (planned join window), assets/README.md (planned quality tiers), README.md, log.md. No code.
+* [x] T108: Phase 7 implementation plan (`docs/PHASE7_PLAN.md`, D1–D16) + owner decisions (rooms with codes, OGG, stone_beige, raw frames) synced to PHASES / GAMERULES / assets README; pre-implementation commit
+* [x] T109: Phase 7 step 1 — assets: raw frames → `assets-src/`, `build-assets` (sharp + ffmpeg-static; WebP, OGG, tiers, budgets), publicDir → `assets-build/`, Graphics Quality + progressive swap, latin fonts (plan tests 7–8)
+* [x] T110: Phase 7 step 2 — server: join window + `start`, private rooms + codes + host, game mode, static server, flags (plan tests 1–5)
+* [x] T111: Phase 7 step 3 — client shared: `serverUrl`, pluggable sync models, `MatchView` / `LandingForm`, rooms UI, waiting overlay, ping, Presenter `start` (plan tests 6, 9)
+* [x] T112: Phase 7 step 4 — game edition: `client/play`, `vite.play.config.ts`, `npm run dev` / `build` / `start`, bundle guard (plan test 10)
+* [x] T113: Phase 7 step 5 — verification: smoke steps 9–10, shots, LAN check, bundle numbers
+* [x] T114: Phase 7 step 6 — docs + phase exit
+
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
 
 ## Change Log
 
 <!-- Newest first. Copy the template below for each entry. -->
+
+### 2026-10-12 — Claude (Opus 5.5) — Phase 7 implementation (T109–T114)
+
+* **Task:** Owner: implement Phase 7 (option A) after the pre-implementation commit; ask for critical decisions, fix bugs found, add tests. No question needed asking mid-run.
+* **Status:** DONE. Plan deviations X1–X10 in `docs/PHASE7_PLAN.md` §8. Remaining: the owner's check from a second machine on the same network. Nothing committed by the agent after the pre-implementation commit `879d0f0`.
+* **Dependencies:** `sharp@0.33.5`, `ffmpeg-static@5.2.0` (NoBu-Shooter devDependencies, local; owner-approved). No global installs.
+
+* **T109 (step 1, assets) — DONE:**
+  * **Dependencies (owner-approved, local devDependencies):** `sharp@0.33.5` (prebuilt win32 binary), `ffmpeg-static@5.2.0` (downloads `ffmpeg.exe` into node_modules on install; npm 11 lists both under "allow-scripts", the binaries were present and work). `.gitignore` (NoBu-Shooter): `assets-build/`.
+  * Raw player frames `git mv` → `NoBu-Shooter/assets-src/player/` (pack-assets input; output unchanged, verified by re-packing).
+  * `scripts/build-assets.mjs` (`npm run assets`, root too): WebP / OGG tiers into `assets-build/{low,medium,high}`, the atlas re-packed per frame with fresh padding, budgets, incremental stamp, manifest. Config `client/src/game/assetTiers.json`. Served art + sound: **high 645 kB, medium 359 kB, low 191 kB** (was ≈ 4.7 MB loaded, 16 MB built); `stone_beige` 2.2 MB → 141 kB; atlas 1.6 MB → 288 kB; sounds 432 → ≈ 100 kB.
+  * Client: `game/tiers.ts` (pure mapping), `assets.ts` rewritten (tier URLs, `invScale`, `loadTier`, `swapTier`, runtime map art included), draw sites scaled (player sprites, floor tile, muzzle), `ArenaScene` starts on low and upgrades by scene restart (state reset in `init`), Compare panes fixed at medium; Settings → Graphics Quality (`Choice` component shared with UI Scale; `demoRows` prop hides the ghost row in the game); `vite.config.ts` publicDir → `assets-build`; `demo.mjs` runs the assets step (`buildAssets` in `scripts/lib/procs.mjs`); latin-only fonts (`styles/fonts.ts`).
+  * Checked in Chrome (scratch Playwright): low → high upgrade, high → low → medium → high live, sizes unchanged, 0 console errors. `tests/assets.test.ts` (9 tests). 231 tests, typecheck clean.
+* **T110 (step 2, server) — DONE:**
+  * Shared: `shared/src/rooms/codes.ts` (40 adjectives × 40 animals = 1 600 two-word codes, `normalizeCode` / `formatCode` / `newCode`; package export `./rooms/*`); protocol: `hello.room` string (`main` / `lab` / `new` / code, made canonical by the validator), `MsgStart`, welcome `code` / `host`, `MatchSnap.waitMsLeft` / `code` / `hostId`, errors `ROOM_NOT_FOUND` / `ROOM_LIMIT` / `NOT_ALLOWED` / `SYNC_FIXED`; `game.json` + `game.ts`: `match.joinWindowMs` 10000, `privateRooms` { max 32, emptyGraceMs 60000 }.
+  * `room.ts`: `kind` main / lab / private (private = main rules), join window in WAITING (ends early at 4 humans; `NOBU_JOIN_WINDOW_MS` override), `start()` (host in private rooms; `main` only under NOBU_DEV), host handover, snapshot fields.
+  * `core.ts`: `GameServerOptions` (mode demo / game, joinWindowMs, maxPrivateRooms, emptyGraceMs, random), `roomFor` (create / join / errors), empty-room sweep in `checkTimeouts`, game mode (Delta only + SYNC_FIXED; dev / perturb / lab / spectate / lab room → NOT_ALLOWED; `start` in main never). **Bug found while testing:** `start` in `main` would have been honoured on a game server started with NOBU_DEV=1 — now blocked in the core, and `main.ts` refuses to run `--game` with NOBU_DEV.
+  * `http.ts` (new: HTTP + WebSocket on `/ws` and `/`, 64 kB max message, used by main.ts and tests), `static.ts` (new: D7), `main.ts` flags `--game` / `--static` / `--port` / `--udp` (+ `NOBU_MODE`, `PORT`), LAN addresses printed.
+  * Tests: `tests/rooms.test.ts` (18), `tests/gamemode.test.ts` (11); vitest env `NOBU_JOIN_WINDOW_MS=0`, smoke and shots set it too. 260 tests, typecheck clean.
+* **T111 (step 3, client shared) — DONE:**
+  * `NetClient`: optional `models` (`SyncModules`: extrapolator + lockstep factories; `net/allModels.ts` = `ALL_MODELS`, passed by the demo, Compare, tests and tools), `supports()`, `room` is a string (code after the welcome), `code`, `isHost`, `serverError`, `start()`; a refused hello stops retrying; SYNC_FIXED / NOT_ALLOWED after the welcome are not fatal.
+  * `net/serverUrl.ts` (game `/ws` on the page host, `?server=` override, demo services on the page host, `?room=` links). Demo + Compare no longer hard-code 127.0.0.1 for the data route / server (control port stays local).
+  * Shared UI: `ui/LandingForm.tsx` (callsign, QUICK MATCH, CREATE ROOM, JOIN ROOM with code check, credits), `ui/MatchView.tsx` (arena + HUD + Settings + Controls + Esc / F1 / M + connect life cycle); `Landing.tsx` and `App.tsx` rebuilt on them; `Hud.tsx`: ping chip, join-window overlay, private-room lobby (code, link, COPY, players, START for the host), room error texts, `offlineHint`; `ControlsOverlay` takes edition groups (`ui/demoControls.ts`); Presenter Quick Match sends `start` on welcome.
+  * Tests: `tests/serverUrl.test.ts` (7, incl. a Delta match with no optional models).
+* **T112 (step 4, game edition) — DONE:**
+  * `client/play/index.html` + `client/play/main.tsx` (entry in the play root — **bug found:** with the entry under `src/` the dev server couldn't resolve `../src/...` from the `client/play` root, though `vite build` could), `src/play/PlayApp.tsx`, `client/vite.play.config.ts` (root `client/play`, `host: true`, `/ws` proxy → 8080, out `dist/game`); `client/tsconfig.json` includes `play`.
+  * Scripts: `scripts/dev.mjs` (`npm run dev`), `scripts/build.mjs` (`npm run build`, bundle guard + size report — the guard lives here instead of a vitest test, deviation X1), `scripts/start.mjs` (`npm start`), `vite-dev.mjs --game`; root + NoBu-Shooter `package.json` scripts. Both `index.html` files get an inline SVG favicon (the demo's `/favicon.svg` never existed: a 404 per page load).
+  * **Fonts bug:** `global.css` imported every `@fontsource` subset itself; now Latin-only there (no separate fonts file).
+  * Demo key groups moved out of `ControlsOverlay` into `ui/demoControls.ts` (their text had been in the game bundle).
+  * Build: **JS 1 689 kB (brotli 332 kB), CSS 27 kB (brotli 5 kB), fonts 142 kB, art + sound 191 / 359 / 645 kB, 3.2 MB on disk** (demo build before Phase 7: 16 MB, JS 1 798 kB / gzip 443 kB). No demo marker in the game JS.
+  * Checked in Chrome via the LAN address 192.168.0.9: `npm start` (join window → match, ping, no Lab; create room → code + link, second player joins by typed code, only the host has START, bots fill; bad / unknown code messages; `?room=` prefill) and `npm run dev` (HMR in place, `/ws` proxy).
+* **T113 (step 5, verification):**
+  * `npm run shots`: **34 screens × 2, 0 console errors** (game-room-guest at ≈ 30 fps: two arenas render in one headless browser; noted in the checklist). Reviewed 26–34 against `docs/VISUAL_CHECKLIST.md`: OK.
+  * Demo with the real window (no env override): Quick Match waits 10 s, counts down, plays; Presenter Quick Match starts at once (∞). `npm start`: only TCP 8080 listening (UDP closed); `--game` with NOBU_DEV=1 refused.
+  * Final: **267 tests**, typecheck clean, smoke 10/10. All processes stopped, ports 5173/8080/8081/8090/9000/9001/9100 free. ESLint has no config in this repo (pre-existing), not run.
+  * `scripts/game-clients.ts` + smoke steps 9–10 (build; game server on 127.0.0.1:8090 with a 3 s join window; page / brotli / immutable / 404 outside the build; NOT_ALLOWED / SYNC_FIXED; quick match WAITING → COUNTDOWN → RUNNING with the game's client, 180 deltas; private room create / join by code / guest START ignored / host START / bots / ROOM_NOT_FOUND). **Smoke: 10/10 PASSED.**
+  * `scripts/shots.mjs`: builds the game, serves it on 127.0.0.1:8090 (10-min join window), 9 game screens (26–34); `screen.url`.
+* **T114 (step 6, docs) — DONE:** README (status, §3 join window + rooms, new §4 "Play with friends on your network", command tables, controls, structure, architecture, troubleshooting), NoBu-Shooter/README, PROTOCOL (§1 transport row, hello rooms, §2.6a `start`, welcome / match fields, errors, new §6 game server), GAMERULES (revision 3, §2 join window + private rooms implemented, §12, §14, §15 constants, §17 Graphics Quality + ping, §18 OGG, §19), ASSUMPTIONS #110–#125 (+ #91 wording), DEMO_SCRIPT (§1 join window, §12 Presenter skip, new §15 LAN), VISUAL_CHECKLIST (rows 01/03/06/07, 26–34), assets/README (served files and tiers), emulator/README (in front of the game edition), PHASES (Phase 7 done, items, DoD), PHASE7_PLAN (status, deviations X1–X10).
+
+### 2026-10-12 — Claude (Opus 5.5) — T108: Phase 7 implementation plan + pre-implementation commit
+
+* **Task:** Owner: plan Phase 7 (option A), then make the pre-implementation commit before implementing.
+* **Owner answers:** 10 s join window OK; Presenter skips it; `sharp` + `ffmpeg-static` as local dev dependencies OK; command names `dev` / `build` / `start` OK; ping-only HUD; **private rooms joined with a short, memorable room id** (new, M6 now in); compress `stone_beige.png` to the size of the other floors; convert all sounds to OGG; the raw player frames should not be served by any edition (demo included).
+* **Decisions taken without asking (plan §1):** two client editions from one code base (`client/play` entry + shared `MatchView` / `LandingForm`); pluggable sync models in `NetClient` (game bundle without lockstep / extrapolation); `/ws` on the page's host + `?server=` override; one server binary with `--game` / `--static` / `--port` / `--udp`; Node-only static server with brotli/gzip and immutable caching; two-word room codes (`BLUE FOX`), host START, 32 rooms max, 60 s grace; WebP textures + OGG sounds generated into git-ignored `assets-build/{high,medium,low}` with budgets (≤ 300 kB per file, `stone_beige` ≤ 160 kB); masters stay in `assets/`; progressive tier upgrade by scene restart; latin-only font subsets; bundle guard test.
+* **Baseline measured:** demo `vite build` (scratchpad output, deleted) = 16 MB on disk: JS 1,798 kB (gzip 443 kB), CSS 80 kB, fonts ≈ 3 MB (all subsets), raw frames 7.6 MB, atlas 1.6 MB, `stone_beige` 2.2 MB, sounds 432 kB.
+* **Status:** DONE (plan + docs; no code changed). No processes left, no dependency changes.
+* **Files:** created `docs/PHASE7_PLAN.md`; edited `PHASES.md` (status, overview row, Phase 7 decisions: join window details, private rooms, assets; M6 → in), `GAMERULES.md` §2 (join window details, private rooms — planned), `NoBu-Shooter/assets/README.md` (tier plan: WebP / OGG, budgets, raw frames move), `log.md` (T108–T114, status, this entry).
+
+### 2026-10-12 — Claude (Opus 5.5) — T107: Phase 7 scoping (owner decisions recorded, no code)
+
+* **Task:** Owner discussion of how players would download and play the game (native vs web client, dedicated vs listen server, P2P), then Phase 7 scope.
+* **Owner decisions:** option A (LAN, browser, laptops/PCs only; no phones); option B (internet) is future scope. Players connect straight to the server; the operator can put the game-agnostic emulator in front by hand. WebSocket transport. Game edition with the best measured settings (Delta, prediction + reconciliation + smoothing, interpolation 100 ms, input redundancy off) and no demo tools in its bundle. Commands `npm run dev` (HMR) / `npm run build` / `npm start`. Bots fill empty slots after a **join window** before the match (all editions). Ping-only HUD. Graphics Quality setting with lower-resolution / lower-bitrate asset tiers. Demo, emulator and game share one code base. Future option B: TLS / `wss://`, M4 hardening, a browser datagram transport (WebRTC DataChannel or WebTransport), and input redundancy back on with it (owner asked to record this).
+* **Found while checking:** no Graphics Quality setting exists any more (the bloom it controlled went in T86); Vite's `publicDir` is the whole `assets/` folder, so a build would also copy the ≈ 7.6 MB of raw `sprites/player/**` frames that only feed `pack-assets`; with bots on, one human starts the countdown at once (`room.ts` `checkMatchTransition`).
+* **Status:** DONE (docs only). No processes started, no dependency changes.
+* **Files:** `PHASES.md` (status line, intro, overview row 7, Phase 7 section rewritten: owner decisions, best-settings table, editions table, items M1–M9, future option B; out-of-scope datagram bullet points to option B), `GAMERULES.md` §2 (planned join window), `NoBu-Shooter/assets/README.md` (planned quality tiers), `README.md` (status line, firewall note), `docs/ASSUMPTIONS.md` #91 (Phase 7 wording), `log.md` (T107, Current Status, this entry).
 
 ### 2026-10-12 — Claude (Opus 5.5) — Phase 6 implementation (T35, T99–T106)
 

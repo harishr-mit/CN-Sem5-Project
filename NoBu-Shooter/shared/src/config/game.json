@@ -5,7 +5,8 @@
     "countdownMs": 3000,
     "endedMs": 10000,
     "minParticipants": 2,
-    "maxParticipants": 8
+    "maxParticipants": 8,
+    "joinWindowMs": 10000
   },
   "arena": { "width": 1280, "height": 720 },
   "player": {
@@ -159,6 +160,7 @@
     "sightRange": 700,
     "seed": 1337
   },
+  "privateRooms": { "max": 32, "emptyGraceMs": 60000 },
   "rooms": {
     "main": { "bots": true,  "firing": true,  "timed": true,  "movers": false, "powerups": true },
     "lab":  { "bots": false, "firing": false, "timed": false, "movers": true,  "powerups": false, "map": "neon", "spawn": { "x": 880, "y": 360 } }

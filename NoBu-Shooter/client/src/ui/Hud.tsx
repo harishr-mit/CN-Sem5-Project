@@ -4,6 +4,9 @@ import { mapDef } from '@nobu/shared/config/game';
 import type { NetClient, CombatView } from '../net/NetClient.js';
 import { soundPrefs } from '../game/audio.js';
 import { playerColor, cssColor } from '../game/playerColors.js';
+import { formatCode } from '@nobu/shared/rooms/codes.js';
+import { roomLink } from '../net/serverUrl.js';
+import type { MsgSnap } from '@nobu/shared/protocol';
 
 const WEAPON_LABEL: Record<string, string> = { handgun: 'HANDGUN', rifle: 'RIFLE', shotgun: 'SHOTGUN' };
 
@@ -63,9 +66,87 @@ const WeaponPanel: React.FC<{ net: NetClient }> = ({ net }) => {
   );
 };
 
+/** Ping (docs/PHASE7_PLAN.md D14): round-trip time, green < 60, amber < 150, red ≥ 150 ms. */
+const PingChip: React.FC<{ net: NetClient }> = ({ net }) => {
+  const [rtt, setRtt] = useState(net.metrics.rttMs);
+  useEffect(() => {
+    const t = setInterval(() => setRtt(net.metrics.rttMs), 1000);
+    return () => clearInterval(t);
+  }, [net]);
+  const color = rtt <= 0 ? 'var(--c-text-muted)' : rtt < 60 ? 'var(--c-green)' : rtt < 150 ? 'var(--c-amber)' : 'var(--c-red)';
+  return (
+    <div id="hud-ping" style={{ ...quickButtonStyle, cursor: 'default', color }} title="Round-trip time to the server">
+      PING {rtt > 0 ? `${rtt} ms` : '–'}
+    </div>
+  );
+};
+
+/**
+ * WAITING (GAMERULES.md §2): `main` counts down its join window; a private
+ * room shows its code and link, and its host gets START (docs/PHASE7_PLAN.md D9, D10).
+ */
+const WaitingOverlay: React.FC<{ snap: MsgSnap | null; myId: number | null; net?: NetClient }> = ({ snap, myId, net }) => {
+  const [copied, setCopied] = useState(false);
+  const humans = snap ? snap.players.filter((p) => !p.bot) : [];
+  const code = snap?.match.code;
+  if (!code) {
+    const wait = snap?.match.waitMsLeft;
+    return (
+      <div className="overlay" id="hud-waiting">
+        <div className="overlay-text text-glow-cyan">WAITING FOR PLAYERS</div>
+        <div className="overlay-sub">
+          {wait !== undefined
+            ? <>Match starts in <b id="hud-wait-seconds" style={{ color: 'var(--c-cyan)' }}>{Math.max(0, Math.ceil(wait / 1000))} s</b> · {humans.length} player{humans.length === 1 ? '' : 's'} connected<br />Bots fill the empty slots</>
+            : 'Bots and competitors stand by...'}
+        </div>
+      </div>
+    );
+  }
+  const isHost = myId !== null && snap?.match.hostId === myId;
+  const hostName = snap?.players.find((p) => p.id === snap.match.hostId)?.name ?? 'the host';
+  const link = typeof window !== 'undefined' ? roomLink(window.location, code) : '';
+  const copy = () => {
+    void navigator.clipboard?.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }, () => {});
+  };
+  return (
+    <div className="overlay" id="hud-room-lobby" style={{ pointerEvents: 'auto', background: 'rgba(5, 5, 15, 0.55)' }}>
+      <div className="overlay-sub" style={{ letterSpacing: '0.2em' }}>PRIVATE ROOM</div>
+      <div className="overlay-text text-glow-cyan" id="hud-room-code">{formatCode(code)}</div>
+      <div className="overlay-sub" style={{ fontSize: '0.95rem' }}>
+        Friends join with this code, or the link:{' '}
+        <span className="font-mono" style={{ color: 'var(--c-cyan)' }}>{link}</span>{' '}
+        <button className="btn-ghost" style={{ fontSize: '0.7rem', padding: '2px 8px' }} onClick={copy}>{copied ? 'COPIED' : 'COPY'}</button>
+      </div>
+      <div className="overlay-sub" style={{ fontSize: '1rem' }} id="hud-room-players">
+        {humans.length} in the room: {humans.map((p) => p.name + (p.id === snap?.match.hostId ? ' (host)' : '')).join(', ')}
+      </div>
+      {isHost
+        ? <button id="hud-room-start" className="btn-primary" style={{ minWidth: '240px' }} onClick={() => net?.start()}>START MATCH</button>
+        : <div className="overlay-sub">Waiting for {hostName} to start · bots fill the empty slots</div>}
+    </div>
+  );
+};
+
+/** What a connection error means, for the player (the room code errors from the server, D9). */
+function errorText(net: NetClient | undefined): string | null {
+  const e = net?.serverError;
+  if (!e) return null;
+  switch (e.code) {
+    case 'ROOM_NOT_FOUND': return `${e.msg}. Check the code, or create a new room.`;
+    case 'ROOM_FULL': return 'That room is full (8 players).';
+    case 'ROOM_LIMIT': return 'This server has too many rooms open right now. Try again later.';
+    default: return e.msg || e.code;
+  }
+}
+
 interface HudProps {
   /** The match client, for the predicted weapon state. */
   netClient?: NetClient;
+  /**
+   * What to tell the player when the server can't be reached: the demo names
+   * `npm run demo`; the game asks the host to check the server.
+   */
+  offlineHint?: React.ReactNode;
   onOpenSettings?: () => void;
   onOpenControls?: () => void;
   /** Leave the match and return to the landing page. */
@@ -87,7 +168,16 @@ const quickButtonStyle: React.CSSProperties = {
   backdropFilter: 'blur(4px)',
 };
 
-export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenControls, onLeave }) => {
+const DEMO_OFFLINE_HINT = (
+  <>
+    Please ensure both the backend server and network emulator are running:
+    <div style={{ marginTop: '6px', color: 'var(--c-cyan)', background: 'rgba(0,0,0,0.4)', padding: '6px 10px', borderRadius: '4px' }}>
+      npm run demo
+    </div>
+  </>
+);
+
+export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenControls, onLeave, offlineHint = DEMO_OFFLINE_HINT }) => {
   const snap = useGameStore((s) => s.snap);
   const myPlayerId = useGameStore((s) => s.playerId);
   const killFeed = useGameStore((s) => s.killFeed);
@@ -175,12 +265,7 @@ export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenContr
       </div>
 
       {/* In-Game State Overlays */}
-      {matchState === 'WAITING' && (
-        <div className="overlay">
-          <div className="overlay-text text-glow-cyan">WAITING FOR PLAYERS</div>
-          <div className="overlay-sub">Bots and competitors stand by...</div>
-        </div>
-      )}
+      {matchState === 'WAITING' && connStatus === 'connected' && <WaitingOverlay snap={snap} myId={myPlayerId} net={netClient} />}
 
       {matchState === 'COUNTDOWN' && (
         <div className="overlay">
@@ -278,14 +363,11 @@ export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenContr
               {connStatus === 'connecting' && 'CONNECTING TO SIMULATION...'}
               {connStatus === 'disconnected' && 'CONNECTION LOST — RECONNECTING...'}
               {connStatus === 'timeout' && 'CONNECTION TIMED OUT'}
-              {connStatus === 'error' && 'COMMUNICATION ERROR'}
+              {connStatus === 'error' && (errorText(netClient) ? 'CANNOT JOIN' : 'COMMUNICATION ERROR')}
             </div>
             {(connStatus === 'timeout' || connStatus === 'error') && (
-              <div style={{ fontSize: '0.82rem', color: 'var(--c-text-muted)', lineHeight: '1.5', fontFamily: 'var(--font-mono)' }}>
-                Please ensure both the backend server and network emulator are running:
-                <div style={{ marginTop: '6px', color: 'var(--c-cyan)', background: 'rgba(0,0,0,0.4)', padding: '6px 10px', borderRadius: '4px' }}>
-                  npm run demo
-                </div>
+              <div id="hud-error-text" style={{ fontSize: '0.82rem', color: 'var(--c-text-muted)', lineHeight: '1.5', fontFamily: 'var(--font-mono)' }}>
+                {errorText(netClient) ?? offlineHint}
               </div>
             )}
             {onLeave && (
@@ -337,6 +419,7 @@ export const Hud: React.FC<HudProps> = ({ netClient, onOpenSettings, onOpenContr
             <span>⚙</span> SETTINGS [ESC]
           </button>
         )}
+        {netClient && connStatus === 'connected' && <PingChip net={netClient} />}
       </div>
     </div>
   );

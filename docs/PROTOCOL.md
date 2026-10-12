@@ -13,6 +13,9 @@ Every message is UTF-8 JSON carrying exactly one message, with a type field `"t"
 |---|---|---|---|
 | **WebSocket** | the browser (and the Node smoke clients) | client → emulator route `ws:9000` → server `:8080` | one text frame |
 | **UDP** | network players (`npm run swarm`), tests | client → emulator route `udp:9100` → server `:8081` | one datagram, or several **fragments** (§1.1) |
+| **WebSocket, game edition** (Phase 7) | players' browsers (`npm start` / `npm run dev`) | client → server `/ws` on the port that served the page (8080; `npm run dev`: Vite's 5173 forwards `/ws` to 8080) | one text frame |
+
+The server accepts WebSocket upgrades on `/ws` and `/` (any other path: 404); messages are at most 64 kB. With `--static <dir>` (`npm start`) the same port also serves the built game over HTTP (§6).
 
 > **Transport caveat (WebSocket):** the browser's links are loopback TCP connections, and TCP never drops or reorders. The standalone **Network Emulator** is the only place that drops, delays, duplicates or reorders. It treats every frame as a datagram, so the game sees UDP-like behaviour without head-of-line blocking. Over the **UDP** transport the datagrams are real; on loopback the emulator is still the only source of loss.
 
@@ -56,10 +59,14 @@ Resent every 250 ms until an authoritative `welcome` message is received.
 ```
 - `v`: Protocol version (`number`, must be 1).
 - `name`: Callsign string (truncated to 12 chars by the server, GAMERULES.md §4).
-- `room`: `"main"` (full match with bots) or `"lab"` (movement-only sandbox used by the Compare view; every lab player spawns at the same point, `rooms.lab.spawn`, so all panes' players start together).
+- `room`: one of
+  - `"main"`: the quick match (bots, a join window before the first countdown, `GAMERULES.md` §2);
+  - `"lab"`: the movement-only sandbox used by the Compare view (demo only; every lab player spawns at the same point, `rooms.lab.spawn`, so all panes' players start together);
+  - `"new"` (Phase 7): create a **private room**; the welcome carries its `code`;
+  - a **room code** (Phase 7), e.g. `"blue-fox"`: join that private room. Codes are an adjective and an animal from fixed lists (`shared/src/rooms/codes.ts`, 1 600 codes); the server accepts any case and a space, a dash or nothing between the words (`"Blue Fox"`, `"BLUEFOX"`) and uses the canonical `blue-fox`. No such room → `error ROOM_NOT_FOUND`; too many rooms → `ROOM_LIMIT` (32).
 - `nonce`: Unique client-generated session identifier for idempotent handshake retry.
 - `spectate` (optional, boolean): join as a **spectator** — the connection receives snapshots but gets no player, doesn't count toward the room's player cap, and its `input`/`perturb` messages are ignored. The Compare view's reference pane uses this, connecting directly to the server (no emulator).
-- `sync` (optional, Phase 3): the connection's **sync model**, `{ "model": "full" | "delta" | "state" | "lockstep", "hz"?: 10 | 30, "rd"?: boolean }` (`hz` only for `state`, default 10; `rd` only for `lockstep`, default false). Omitted = `full`. Spectators always get full snapshots. `lockstep` is accepted in the lab room only (else `error LOCKSTEP_LAB_ONLY`, and the player joins with `full`). It can be changed later with `sync` (§2.8). See §3.5 for what each model sends.
+- `sync` (optional, Phase 3; ignored by the game server, which keeps everyone on `delta`): the connection's **sync model**, `{ "model": "full" | "delta" | "state" | "lockstep", "hz"?: 10 | 30, "rd"?: boolean }` (`hz` only for `state`, default 10; `rd` only for `lockstep`, default false). Omitted = `full`. Spectators always get full snapshots. `lockstep` is accepted in the lab room only (else `error LOCKSTEP_LAB_ONLY`, and the player joins with `full`). It can be changed later with `sync` (§2.8). See §3.5 for what each model sends.
 
 ### 2.2 `input` (Player Movement & Fire)
 Flushed at 30 Hz. Contains one or more 60 Hz input samples.
@@ -135,6 +142,13 @@ Honoured only when the server runs with `NOBU_DEV=1` (`npm run demo`); ignored o
 
 Room commands may also come from a spectator (the Compare reference pane); player switches need a player.
 
+### 2.6a `start` (Start the Match Now, Phase 7)
+```json
+{ "t": "start" }
+```
+- In a **private room** that is `WAITING`: honoured from the room's **host** only (the creator; when the host leaves, the longest-connected human). The countdown begins and bots fill the empty slots. Ignored from anyone else and in any other state.
+- In `main`: honoured only under `npm run demo` (`NOBU_DEV=1`) — Presenter Quick Match sends it after the welcome to skip the join window. Never on the game server.
+
 ### 2.7 `lab` (Scripted Movers)
 Selects the active scripted movers (PHASES.md C3). Accepted only in rooms with `movers: true` in `game.json` (only `lab`); ignored elsewhere. Any connection in the room may send it, spectators included.
 ```json
@@ -186,7 +200,9 @@ Selects the active scripted movers (PHASES.md C3). Accepted only in rooms with `
 }
 ```
 - `playerId`: Unique positive integer assigned to the client (`0` for spectators).
+- `room`: the room joined — `main`, `lab`, or the private room's code.
 - `spectator` (only for spectators): `true`.
+- `code`, `host` (private rooms only, Phase 7): the room code (`"blue-fox"`, shown as `BLUE FOX`) and whether this player is the host. The host can change later; snapshots carry the current one (`match.hostId`).
 - `simHz`: Authoritative simulation tick frequency (60 Hz).
 - `snapshotHz`: World state broadcast frequency (30 Hz).
 
@@ -267,6 +283,8 @@ While a Presenter has stopped the match clock (`dev.endless`, §2.6), `match` al
 - `tick`: Monotonic simulation tick. Snapshots with `tick <= lastAppliedTick` are dropped.
 - `ack`: Highest input sequence processed for the recipient client (`0` in spectator snapshots).
 - `players[].mover` (optional): set only on scripted lab movers (`"circle"`, `"zigzag"`, `"reversal"`, `"stopgo"`). Movers look like remote players (`bot: true`, `alive: true`, `life: 1`, `score: 0`) so interpolation treats them like any other remote entity. Their position is exactly `moverPath(pattern, tick / 60)` from `shared/src/sim/movers.ts`, so clients can compute the true position at any server time.
+- `match.waitMsLeft` (Phase 7, `main` only, while `WAITING` with a human in it): the join window's time left (`match.joinWindowMs`, 10 s; it ends early once `bots.targetParticipants` humans are in). Absent otherwise.
+- `match.code`, `match.hostId` (Phase 7, private rooms only): the room code and the host's player id (who may `start`).
 - `match.map`: the map being played (`neon`, `warehouse`, `plaza`, `overgrown`; `GAMERULES.md` §3). It changes only at `COUNTDOWN`; the client switches its art and its prediction geometry when it does.
 - `players[]`: `aim` (radians, sprite rotation), `weapon` (`handgun` | `rifle` | `shotgun`), `reloading`, `shield` (Shield power-up), `fast` (Speed power-up), `invincible: true` (developer toggle; omitted when off). Movers send `aim: 0`, `weapon: "handgun"` and `false` flags.
 - `projectiles[].pierce: true` (omitted when false): fired under the Piercing power-up, passes through obstacles.
@@ -322,6 +340,7 @@ While a Presenter has stopped the match clock (`dev.endless`, §2.6), `match` al
 }
 ```
 - Codes: `ROOM_FULL`, `BAD_VERSION`, `BAD_MESSAGE` (the client stops), and `LOCKSTEP_LAB_ONLY` (Phase 6: a lockstep request outside the lab room; not fatal — the connection keeps its previous model and the client switches back to it).
+- Phase 7: `ROOM_NOT_FOUND` (no private room with that code — it may have closed 60 s after its last human left) and `ROOM_LIMIT` (the server has `privateRooms.max` rooms) answer a `hello`; the client stops retrying and shows the reason. On the game server, `NOT_ALLOWED` answers an operator message (`dev`, `perturb`, `lab`, `spectate`, the `lab` room) and `SYNC_FIXED` a `sync` to anything but `delta`; after the welcome both are not fatal (the request is just refused).
 
 ### 3.5 Sync models (Phase 3)
 
@@ -444,3 +463,20 @@ Link config fields (defaults): `latencyMs` 0, `jitterMs` 0, `jitterDist` `"norma
 ### 5.3 Server UDP adapter (`:8081`)
 
 `server/src/udp.ts` gives every remote `address:port` its own connection in the `GameServer` core, with fragments both ways (§1.1). `bye` or 5 s of silence removes the connection, and its address is forgotten; a later datagram from it starts a new connection (a new `hello` is needed). The Node client transport is `scripts/lib/udp-transport.ts` (`udp://host:port`); it is never part of the browser bundle.
+
+## 6. The game server (Phase 7)
+
+`npm run dev` and `npm start` run the same server (`server/src/main.ts`) with `--game` (docs/PHASE7_PLAN.md D3, D6, D7):
+
+| | Demo server (`npm run demo`) | Game server (`--game`) |
+|---|---|---|
+| Rooms | `main`, `lab`, private rooms | `main`, private rooms (`lab` → `NOT_ALLOWED`) |
+| Sync models | any, per connection (`hello.sync`, `sync`) | `delta` for everyone (`sync` → `SYNC_FIXED`) |
+| `dev`, `perturb`, `lab`, spectators | yes (`dev` only with `NOBU_DEV=1`) | `NOT_ALLOWED`; refuses to start at all with `NOBU_DEV=1` |
+| `start` | private-room hosts; `main` with `NOBU_DEV=1` | private-room hosts only |
+| UDP `:8081` | yes | only with `--udp` |
+| HTTP | 426 (WebSocket only) | with `--static <dir>`: the built game (below) |
+
+**Static files** (`--static`, `server/src/static.ts`, Node built-ins only): `GET` / `HEAD` only (others → 405); paths are resolved inside the directory, symlinks included (no `..`; anything else → 404); `/` → `index.html`. Vite's hashed files under `/assets/` get `Cache-Control: public, max-age=31536000, immutable`, everything else `no-cache`. HTML, JS, CSS, JSON and SVG are compressed with brotli (or gzip, by `Accept-Encoding`) once and kept in memory; images (WebP) and sounds (OGG) are sent as they are. The art lives under `/low/`, `/medium/` and `/high/` (Graphics Quality tiers, `npm run assets`).
+
+**Client address:** the game connects to `ws(s)://<page host>/ws` (`wss` when the page is `https`); `?server=host:port` (or a full `ws://` URL) on the page address overrides it — e.g. to route players through the standalone emulator. A share link `?room=blue-fox` fills in the JOIN ROOM code.

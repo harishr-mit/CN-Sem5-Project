@@ -3,16 +3,20 @@
    Dark neon / synthwave-Tron theme. SPEC.md §13.1.
    ═══════════════════════════════════════════════════════════════ */
 
-/* ── Fonts (bundled via @fontsource) ─────────────────────────── */
-@import '@fontsource/orbitron/400.css';
-@import '@fontsource/orbitron/700.css';
-@import '@fontsource/orbitron/900.css';
-@import '@fontsource/rajdhani/400.css';
-@import '@fontsource/rajdhani/500.css';
-@import '@fontsource/rajdhani/600.css';
-@import '@fontsource/rajdhani/700.css';
-@import '@fontsource/jetbrains-mono/400.css';
-@import '@fontsource/jetbrains-mono/500.css';
+/* ── Fonts (bundled via @fontsource; SPEC.md §4, §13.1: no remote CDN fonts)
+   Latin subsets only (docs/PHASE7_PLAN.md D15): the full packages also ship
+   Latin-ext, Vietnamese and Devanagari files the UI never uses; other
+   characters fall back to a system font. Both editions use this file. ── */
+@import '@fontsource/orbitron/latin-400.css';
+@import '@fontsource/orbitron/latin-700.css';
+@import '@fontsource/orbitron/latin-900.css';
+@import '@fontsource/rajdhani/latin-400.css';
+@import '@fontsource/rajdhani/latin-500.css';
+@import '@fontsource/rajdhani/latin-600.css';
+@import '@fontsource/rajdhani/latin-700.css';
+@import '@fontsource/jetbrains-mono/latin-400.css';
+@import '@fontsource/jetbrains-mono/latin-500.css';
+@import '@fontsource/jetbrains-mono/latin-700.css';
 
 /* ── CSS Custom Properties ─────────────────────────────────────
    Single source for every colour and spacing value.
@@ -1180,3 +1184,22 @@ input[type="range"]:hover::-webkit-slider-thumb {
 .presenter-restart { border-color: var(--c-cyan) !important; color: var(--c-cyan) !important; }
 .presenter-restart:hover { background: var(--c-cyan); color: #07070f !important; }
 .hud-timer-endless { display: inline-block; font-family: var(--font-mono); font-size: 1.6em; line-height: 0.9; }
+
+/* ── Private rooms on the landing page (Phase 7, docs/PHASE7_PLAN.md D9) ── */
+.landing-rooms { grid-template-columns: auto 1fr; align-items: stretch; }
+.landing-rooms .btn-ghost { font-family: var(--font-display); font-size: 0.72rem; letter-spacing: 0.08em; }
+.landing-join { display: flex; gap: var(--sp-xs); min-width: 0; }
+.landing-form .landing-join input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.landing-error {
+  margin-top: calc(-1 * var(--sp-s));
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--c-red);
+  text-align: center;
+}
