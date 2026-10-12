@@ -20,6 +20,20 @@ Owner-supplied 2026-10-10; pruned and renamed in T51 and T57, wired in by Phase 
   (`death.ogg` and `dry_fire.mp3` are as supplied).
 - Every new file needs a line in `CREDITS.md`; the repo is public.
 
+## Quality tiers (planned, Phase 7)
+
+*Not implemented yet (owner, 2026-10-12; `PHASES.md` Phase 7 M9).* This folder stays the place
+where art and sound are edited (the masters). `npm run assets` will generate
+what every edition serves, in `NoBu-Shooter/assets-build/{high,medium,low}/`
+(git-ignored): textures as WebP and every sound as OGG, at full size in `high`,
+half in `medium` and a quarter in `low` (small and pixel-art images stay the
+same); no served file above 300 kB, and `stone_beige.png` (2.2 MB) at ≤ 160 kB.
+A **Graphics Quality** setting (low / medium / high) chooses the tier; a match
+starts on `low` and upgrades in the background. The raw frames under
+`sprites/player/**` (≈ 7.6 MB) only feed `npm run pack-assets`; they move to
+`NoBu-Shooter/assets-src/player/` and are served by no edition. Details:
+`docs/PHASE7_PLAN.md` D11–D13.
+
 ## Packed player atlas
 
 The game does **not** load `sprites/player/**` frame by frame: `npm run pack-assets`

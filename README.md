@@ -4,7 +4,7 @@ A real-time multiplayer arena shooter demonstrating client-side prediction, serv
 
 > The game is the demo application; the networking is the point.
 
-**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases (plus the owner's Phase 2.5), each ending with a demoable checkpoint, and **all six are complete**: 1 (correct core netcode), 2 (Compare view), 2.5 (gameplay + textures), 3 (sync models: full vs delta snapshots vs state sync with extrapolation), 4 (Presenter mode + polish), 5 (UDP transport, network players, standalone emulator with its dashboard) and 6 (deterministic lockstep in the Compare view, final talk track, rehearsal — `docs/REHEARSAL.md`). A candidate Phase 7 (multiplayer readiness) is described but not scheduled.
+**Project status:** see [`PHASES.md`](PHASES.md) — the project is built in six phases (plus the owner's Phase 2.5), each ending with a demoable checkpoint, and **all six are complete**: 1 (correct core netcode), 2 (Compare view), 2.5 (gameplay + textures), 3 (sync models: full vs delta snapshots vs state sync with extrapolation), 4 (Presenter mode + polish), 5 (UDP transport, network players, standalone emulator with its dashboard) and 6 (deterministic lockstep in the Compare view, final talk track, rehearsal — `docs/REHEARSAL.md`). Phase 7 (multiplayer readiness: LAN play in the browser, private rooms with short codes, a game-only edition with `npm run dev` / `npm run build` / `npm start`) is planned in `docs/PHASE7_PLAN.md`; nothing of it is implemented yet.
 
 ---
 
@@ -296,7 +296,7 @@ Emulator dashboard ────────┴──►  control API http/ws 127
 - **The dashboard says OFFLINE**:
   The emulator isn't running (start `npm run demo` or `npm run emulator`). The control API accepts browser pages only from `http://127.0.0.1:9001` / `localhost:9001` and the game (`localhost:5173`); add others with `npm run emulator -- --allow-origin <url>`.
 - **Friends on the LAN can't join / Windows asks about `node.exe`**:
-  The game server and the emulator's data routes listen on all interfaces, so the first run may show a Windows Defender Firewall prompt; local play works whatever you answer. The client still connects to `127.0.0.1` (playing from another machine is the candidate Phase 7 in `PHASES.md`). Don't expose the UDP ports to the internet.
+  The game server and the emulator's data routes listen on all interfaces, so the first run may show a Windows Defender Firewall prompt; local play works whatever you answer. The client still connects to `127.0.0.1` (playing from another machine is the planned Phase 7 in `PHASES.md`). Don't expose the UDP ports to the internet.
 - **Canvas render error or blank page**:
   Hard refresh the browser (`Ctrl + F5`) to clear Vite cache. Ensure your browser supports WebGL / HTML5 Canvas.
 

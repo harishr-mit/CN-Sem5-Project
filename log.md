@@ -27,7 +27,8 @@ Shared context for every agent working in this directory. Read this file **befor
   - The hash check found Chrome vs Node `Math.cos` / `Math.sin` 1-bit differences → movers use a deterministic `dsin` / `dcos` (`shared/src/sim/dtrig.ts`).
   - Dress rehearsal (fresh copy + timed run-through, ≈ 60 fps) → `docs/REHEARSAL.md`. Talk order changed: network players start at **Q13** (`npm run swarm -- --n 3`).
   - **222 tests**, typecheck, smoke (**8 steps**, step 8 = lockstep over real sockets), `npm run shots` (**25 screens × 2**, 0 console errors).
-  - **Remaining:** the owner's rehearsal on the presentation laptop (`docs/REHEARSAL.md` §3–§4); Phase 7 is a candidate.
+  - **Remaining:** the owner's rehearsal on the presentation laptop (`docs/REHEARSAL.md` §3–§4).
+  - **Phase 7 (being scoped, T107, 2026-10-12):** LAN play in the browser (laptops/PCs), WebSocket, players straight to the server; a game-only edition (`npm run dev` with HMR, `npm run build`, `npm start`) with fixed best settings (Delta, prediction + reconciliation + smoothing, 100 ms interpolation, redundancy off), ping HUD, join window before a match (all editions), Graphics Quality asset tiers; demo and emulator unchanged; one shared code base. Internet play, TLS, browser datagrams and redundancy-on are future option B. Decisions in `PHASES.md` Phase 7. **Plan done (T108): `docs/PHASE7_PLAN.md`** (D1–D16, steps T109–T114) — adds private rooms with two-word codes, WebP/OGG asset tiers, raw frames out of the served folder. Pre-implementation commit made; implementation not started (owner choosing the model for it).
   - Branch `phase6`; nothing committed by the agent.
 * **Project:** NoBu Shooter — real-time multiplayer arena shooter demonstrating client-side prediction, server reconciliation, snapshot-vs-state sync models, and a standalone network emulator (latency, jitter, loss, bandwidth, duplication, reordering) controlled from an in-game Network Lab. Repo: https://github.com/harishr-mit/CN-Sem5-Project (`main` holds everything as of T49; earlier work branches: `game`, `game-phase2plus`).
 * **Plan:** `PHASES.md` — six phases, each with a demo checkpoint and exit criteria. `GAMERULES.md` = gameplay rules. v1 spec archived at `docs/archive/SPEC-v1.md`.
@@ -155,12 +156,38 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T105: Phase 6 step 7 — rehearsal (L5): fresh-copy cold start, timed headless Presenter run-through, `docs/REHEARSAL.md` checklist for the presentation laptop; fix anything that stutters
 * [x] T106: Phase 6 step 8 — phase exit + Definition of Done
 
+* [x] T107: Phase 7 scoping discussion with the owner: record the decisions so far in PHASES.md (Phase 7 section), GAMERULES.md (planned join window), assets/README.md (planned quality tiers), README.md, log.md. No code.
+* [x] T108: Phase 7 implementation plan (`docs/PHASE7_PLAN.md`, D1–D16) + owner decisions (rooms with codes, OGG, stone_beige, raw frames) synced to PHASES / GAMERULES / assets README; pre-implementation commit
+* [ ] T109: Phase 7 step 1 — assets: raw frames → `assets-src/`, `build-assets` (sharp + ffmpeg-static; WebP, OGG, tiers, budgets), publicDir → `assets-build/`, Graphics Quality + progressive swap, latin fonts (plan tests 7–8)
+* [ ] T110: Phase 7 step 2 — server: join window + `start`, private rooms + codes + host, game mode, static server, flags (plan tests 1–5)
+* [ ] T111: Phase 7 step 3 — client shared: `serverUrl`, pluggable sync models, `MatchView` / `LandingForm`, rooms UI, waiting overlay, ping, Presenter `start` (plan tests 6, 9)
+* [ ] T112: Phase 7 step 4 — game edition: `client/play`, `vite.play.config.ts`, `npm run dev` / `build` / `start`, bundle guard (plan test 10)
+* [ ] T113: Phase 7 step 5 — verification: smoke steps 9–10, shots, LAN check, bundle numbers
+* [ ] T114: Phase 7 step 6 — docs + phase exit
+
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
 
 ## Change Log
 
 <!-- Newest first. Copy the template below for each entry. -->
+
+### 2026-10-12 — Claude (Opus 5.5) — T108: Phase 7 implementation plan + pre-implementation commit
+
+* **Task:** Owner: plan Phase 7 (option A), then make the pre-implementation commit before implementing.
+* **Owner answers:** 10 s join window OK; Presenter skips it; `sharp` + `ffmpeg-static` as local dev dependencies OK; command names `dev` / `build` / `start` OK; ping-only HUD; **private rooms joined with a short, memorable room id** (new, M6 now in); compress `stone_beige.png` to the size of the other floors; convert all sounds to OGG; the raw player frames should not be served by any edition (demo included).
+* **Decisions taken without asking (plan §1):** two client editions from one code base (`client/play` entry + shared `MatchView` / `LandingForm`); pluggable sync models in `NetClient` (game bundle without lockstep / extrapolation); `/ws` on the page's host + `?server=` override; one server binary with `--game` / `--static` / `--port` / `--udp`; Node-only static server with brotli/gzip and immutable caching; two-word room codes (`BLUE FOX`), host START, 32 rooms max, 60 s grace; WebP textures + OGG sounds generated into git-ignored `assets-build/{high,medium,low}` with budgets (≤ 300 kB per file, `stone_beige` ≤ 160 kB); masters stay in `assets/`; progressive tier upgrade by scene restart; latin-only font subsets; bundle guard test.
+* **Baseline measured:** demo `vite build` (scratchpad output, deleted) = 16 MB on disk: JS 1,798 kB (gzip 443 kB), CSS 80 kB, fonts ≈ 3 MB (all subsets), raw frames 7.6 MB, atlas 1.6 MB, `stone_beige` 2.2 MB, sounds 432 kB.
+* **Status:** DONE (plan + docs; no code changed). No processes left, no dependency changes.
+* **Files:** created `docs/PHASE7_PLAN.md`; edited `PHASES.md` (status, overview row, Phase 7 decisions: join window details, private rooms, assets; M6 → in), `GAMERULES.md` §2 (join window details, private rooms — planned), `NoBu-Shooter/assets/README.md` (tier plan: WebP / OGG, budgets, raw frames move), `log.md` (T108–T114, status, this entry).
+
+### 2026-10-12 — Claude (Opus 5.5) — T107: Phase 7 scoping (owner decisions recorded, no code)
+
+* **Task:** Owner discussion of how players would download and play the game (native vs web client, dedicated vs listen server, P2P), then Phase 7 scope.
+* **Owner decisions:** option A (LAN, browser, laptops/PCs only; no phones); option B (internet) is future scope. Players connect straight to the server; the operator can put the game-agnostic emulator in front by hand. WebSocket transport. Game edition with the best measured settings (Delta, prediction + reconciliation + smoothing, interpolation 100 ms, input redundancy off) and no demo tools in its bundle. Commands `npm run dev` (HMR) / `npm run build` / `npm start`. Bots fill empty slots after a **join window** before the match (all editions). Ping-only HUD. Graphics Quality setting with lower-resolution / lower-bitrate asset tiers. Demo, emulator and game share one code base. Future option B: TLS / `wss://`, M4 hardening, a browser datagram transport (WebRTC DataChannel or WebTransport), and input redundancy back on with it (owner asked to record this).
+* **Found while checking:** no Graphics Quality setting exists any more (the bloom it controlled went in T86); Vite's `publicDir` is the whole `assets/` folder, so a build would also copy the ≈ 7.6 MB of raw `sprites/player/**` frames that only feed `pack-assets`; with bots on, one human starts the countdown at once (`room.ts` `checkMatchTransition`).
+* **Status:** DONE (docs only). No processes started, no dependency changes.
+* **Files:** `PHASES.md` (status line, intro, overview row 7, Phase 7 section rewritten: owner decisions, best-settings table, editions table, items M1–M9, future option B; out-of-scope datagram bullet points to option B), `GAMERULES.md` §2 (planned join window), `NoBu-Shooter/assets/README.md` (planned quality tiers), `README.md` (status line, firewall note), `docs/ASSUMPTIONS.md` #91 (Phase 7 wording), `log.md` (T107, Current Status, this entry).
 
 ### 2026-10-12 — Claude (Opus 5.5) — Phase 6 implementation (T35, T99–T106)
 
