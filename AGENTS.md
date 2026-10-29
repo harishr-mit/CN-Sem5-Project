@@ -15,6 +15,7 @@ Use the atomic index by default for symbol lookup, definitions, callers/callees 
 Whenever the owner changes requirements, goals, rules, controls, scope or phase order, update every affected document in the same run, before or alongside the code: `GAMERULES.md` (gameplay rules + constants), `PHASES.md` (goals/phases/order), `README.md`, `docs/*` (`PROTOCOL`, `DEMO_SCRIPT`, `ASSUMPTIONS`), `NoBu-Shooter/assets/README.md` (assets) and the "Current Status" in `log.md`. Mark not-yet-implemented rules as planned, record the change in the `log.md` Change Log, and never leave a doc describing superseded behaviour.
 
 ## Mid-run Behavior
+
 * Use the appropriate skills whenever possible.
 * Do not use any of the mattpocock-skills without explicit permission from the user.
 * Do not leave any download or dependancy artifact unhandled
@@ -22,8 +23,14 @@ Whenever the owner changes requirements, goals, rules, controls, scope or phase 
 * No dependany shall be tracked or pushed, unless absolutely necessary
 
 ## End of Run Behavior
+
 At the end of the run, before the fininshing summary, please ensure the following:
 
 * Ensure all running instances are terminated, unless explicitly requested for a running instance.
 * Ensure 0 background tasks and 0 open sockets remaining.
 * Review the docs related to the current task/bug and add/modify them to reflect changes/fixes made.
+
+## User Preferences
+
+* refer to .claude\user.md for user preferencec
+* if you find out that the user prefers a certain thing a certain way, update that to the markdown file
