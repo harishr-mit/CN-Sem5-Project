@@ -179,6 +179,12 @@ Shared context for every agent working in this directory. Read this file **befor
 
 <!-- Newest first. Copy the template below for each entry. -->
 
+### 2026-10-29 — Claude (Sonnet 5.5) — IEEE report for the course (B&W, 4 pages)
+
+* **Task:** [x] Owner's teacher asked for a printable IEEE-format report (4–6 pages, black and white, results analysis, no screenshots, focus on algorithms and technology). Title: "Multiplayer Game with Client-Side Prediction and Server Reconciliation on an Emulated Network".
+* **Files created:** `docs/report/REPORT.html` (source, inline SVG figures with hatching, no colour) and `docs/report/REPORT.pdf` (A4, two columns, printed with the installed Chrome headless; nothing installed). No code changed.
+* **Notes:** all numbers are taken from `docs/REHEARSAL.md`, `docs/DEMO_SCRIPT.md` and `docs/ASSUMPTIONS.md` (nothing re-measured). Author name, roll number, department and institution are placeholders in the header.
+
 ### 2026-10-13 — Claude (Sonnet 5.5) — Commit everything except docs/wiki
 
 * **Task:** Owner: commit everything but `docs/wiki/`, and add it to `.gitignore`.
