@@ -172,12 +172,27 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T119: Mobile / touch: layout (landscape + portrait), joystick (size setting), dash button with reveal animation, menu button + right-side buttons, demo Lab as an overlay; both editions
 * [x] T120: Tests, smoke, shots (touch screens), docs sync
 
+* [x] T121: Touch revision 2: floating move stick (left half) + aim stick (right half, auto-fire), buttons on the right, handheld-style portrait pad; both editions
+* [x] T122: Remote access: demo 8080 serves the game to non-local Hosts (game-mode server), 5173 / 9001 "Restricted" pages, dev 5173 `allowedHosts`, tests, docs
+
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
 
 ## Change Log
 
 <!-- Newest first. Copy the template below for each entry. -->
+
+### 2026-10-29 — Claude (Sonnet 5.5) — Touch revision 2 + remote access (T121–T122)
+
+* **Follow-up (owner):** the sticks look identical in portrait and landscape; the portrait D-pad / round-button styling was removed from `global.css` (the handheld pad body and buttons stay).
+
+* **Task:** Owner: mobile aiming + moving at once is hard → aim stick; floating sticks (left half moves, right half aims and auto-fires); power-up controls on the right; portrait = handheld-style pad with the same floating sticks; same in the game and the demo. Plus: a tablet on a forwarded 5173 / 9001 / 8080 got a broken page → restrict the demo's tools, serve only the game on 8080 (demo and dev).
+* **T121 — DONE:** `ui/TouchControls.tsx` (`FloatingStick` ×2, `DashButton` into the right column), `game/input.ts` (`aimStick`), `ArenaScene.ts` (no pointer aim / fire in the touch UI, except Compare), `LandingForm` hint, CSS (zones, hints, right column, portrait handheld pad, D-pad / round-button looks).
+* **T122 — DONE:** `shared/src/net/localHost.ts` (`isLocalHost`, `restrictedPage`); `server/src/http.ts` `remoteGame` (Host picks the server) + `main.ts` (`--static` without `--game` creates it, ticks both); `scripts/demo.mjs` (builds `dist/game` if missing, `--static`); `client/vite.config.ts` plugin (403 Restricted for non-local Hosts, before Vite's own host check); `emulator/src/control.ts` `hostAllowed` (page + WebSocket); `vite.play.config.ts` `allowedHosts: true`; dev 8080 HTTP text points to the game page.
+* **Tests:** `tests/remote-access.test.ts` (new, 4), `tests/touch.test.ts` (+2). **290 tests**, typecheck clean, `npm run build` passes the bundle guard.
+* **Checked (scratch Playwright, touch emulation + CDP two-finger):** landscape and portrait in a room: both sticks appear at the touch points and vanish on release, 0 console errors. Fake Host headers against a real `npm run demo`: 5173 → 403 Restricted, 9001 → 403 (127.0.0.1 → 200), 8080 → 200 game. `npm run dev`: 5173 with a tunnel Host → 200. All processes stopped, 0 listeners.
+* **Also run:** `npm run smoke` 10/10 passes. **Not checked:** a real tablet through a real forwarded port (only Host-header simulation); `npm run shots` was not re-run (its touch screens use `#touch-menu` / `#touch-dash`, unchanged, but the touch screenshots would now show the new layout).
+* **Docs:** GAMERULES §17 touch + new Remote access bullet, README (phones, tablet access, controls table), PHASES R5–R8, ASSUMPTIONS #137–#139, VISUAL_CHECKLIST 36–38.
 
 ### 2026-10-29 — Claude (Sonnet 5.5) — IEEE report for the course (B&W, 4 pages)
 

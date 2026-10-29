@@ -12,6 +12,9 @@
  *   --host <ip>       bind address (or NOBU_HOST; default all interfaces, so
  *                     other machines can join; docs/PHASE5_PLAN.md D15).
  *
+ * Without --game but with --static (`npm run demo`) the demo server also serves the
+ * game on this port to visitors whose Host is not this machine (remote tablets).
+ *
  * Without flags it is the demo's server: ws 8080 + udp 8081, everything on.
  */
 
@@ -57,7 +60,9 @@ function lanAddresses(): string[] {
 }
 
 const game = new GameServer(Date.now, { mode: GAME_MODE ? 'game' : 'demo' });
-const { http, close: closeHttp } = createGameHttp(game, { staticDir: STATIC_DIR });
+// The demo (with --static) also serves the game to remote visitors: a second, game-mode server (http.ts)
+const remoteGame = !GAME_MODE && STATIC_DIR ? new GameServer(Date.now, { mode: 'game' }) : undefined;
+const { http, close: closeHttp } = createGameHttp(game, { staticDir: STATIC_DIR, ...(remoteGame ? { remoteGame } : {}) });
 let udp: UdpServerHandle | null = null;
 
 http.on('error', (err: NodeJS.ErrnoException) => {
@@ -82,11 +87,12 @@ http.listen(PORT, HOST, async () => {
     }
   }
   let lastTimeoutCheck = 0;
-  await startFixedLoop(GAME.sim.hz, () => game.tick(), () => {
+  await startFixedLoop(GAME.sim.hz, () => { game.tick(); remoteGame?.tick(); }, () => {
     const t = Date.now();
     if (t - lastTimeoutCheck >= 250) {
       lastTimeoutCheck = t;
       game.checkTimeouts();
+      remoteGame?.checkTimeouts();
     }
   });
 });

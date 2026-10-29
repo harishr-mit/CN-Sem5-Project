@@ -108,7 +108,9 @@ npm start         # serves it: page + game on one port, 8080
 
 The HUD shows your **ping**; **Settings** (`Esc`) has **Graphics Quality** (Low / Medium / High): a match starts on small textures and upgrades to the chosen ones in the background.
 
-**On a phone or tablet** the game (and the demo) switches to a touch UI: touch the arena to aim and shoot, a **joystick** bottom-left to move (its size in Settings), a **DASH** button that pops up above it while you have the Dash power-up, and **RELOAD** and **☰ MENU** (settings, sound, leave) on the right. Landscape puts the controls over the arena; portrait puts the arena on top and the controls below. Add `?touch=1` to the address to try it on a desktop.
+**On a phone or tablet** the game (and the demo) switches to a touch UI with two **floating sticks**: touch anywhere on the **left half** to move, anywhere on the **right half** to aim — aiming **auto-fires** while held (stick size in Settings). **DASH** (only while you have the Dash power-up), **RELOAD** and **☰ MENU** (settings, sound, leave) sit on the right edge. Landscape puts the controls over the arena; portrait puts the arena on top and a handheld-style pad below. Add `?touch=1` to the address to try it on a desktop.
+
+**Playing from a tablet through a forwarded port (or the LAN):** forward / open **8080** only. While `npm run demo` runs, 8080 serves the game to any visitor that isn't this machine (a game-only server: fixed best settings, no Lab or operator messages); `npm start` and `npm run dev` serve it as before. The demo page (5173) and the emulator dashboard (9001) are for this machine and show a "Restricted" notice to anyone else.
 
 **While developing:** `npm run dev` runs the game server and a Vite dev server on `http://<host>:5173` (also reachable from the LAN) with hot reload: client edits appear at once.
 
@@ -258,7 +260,7 @@ Run these from the repository root; from `NoBu-Shooter/` the same `npm run …` 
 | **Projector** | Settings → **UI Scale** 100 / 115 / 130 % (all panels and text, not the arena; remembered) |
 | **Graphics Quality** | Settings → **Low / Medium / High** (default High; remembered): smaller textures and sounds at Low. A match starts on Low and upgrades in the background; changing it swaps the art live |
 | **Private rooms** | Landing page **CREATE ROOM** (you get a code like **BLUE FOX** and a link) / **JOIN ROOM** with a code. In the lobby the host sets map, max players, bots, power-up rate + max and always-on power-ups, then presses **START MATCH**; **◄ LEAVE** on every waiting page. Quick Match starts at once |
-| **Touch devices** | Joystick (bottom-left) = move, touch the arena = aim + fire, **DASH** (only with the Dash power-up), **RELOAD**, **☰ MENU** (Settings incl. **Joystick size**, mute, leave; demo: Network Lab, packet inspector, Presenter bar). `?touch=1` / `?touch=0` force it on / off |
+| **Touch devices** | Left half = move stick, right half = aim stick (auto-fires while held), both floating where you touch; **DASH** (only with the Dash power-up), **RELOAD**, **☰ MENU** on the right edge (Settings incl. **Joystick size**, mute, leave; demo: Network Lab, packet inspector, Presenter bar). `?touch=1` / `?touch=0` force it on / off |
 | **Ping** | Bottom-left of the HUD, next to Settings: round-trip time to the server (green / amber / red) |
 | **Network Lab sections** | Click a section title to fold it; the Lab remembers. Defaults fit 1920 × 1080 and 1280 × 720 without scrolling |
 | **Presenter mode** | Landing page **Presenter — Quick Match** (13 steps) / **Presenter — Compare** (7): `N` next step, `B` previous step, `H` hide the caption; bar buttons **⟲ RESTART**, **map** (Neon / Warehouse / Plaza / Overgrown — restarts the game there) and **END**; step 13 adds **OPEN DASHBOARD ↗** |

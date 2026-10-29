@@ -6,12 +6,19 @@
  *   3. Client (Vite dev server)    http://localhost:5173
  *   4. Optional: `--swarm N` network players over UDP (scripts/swarm.ts)
  *
+ * Other machines (a tablet on a forwarded port or the LAN) get only the game:
+ * port 8080 also serves the built game (dist/game, built here if missing) to
+ * any visitor whose Host is not this machine; 5173 and 9001 answer them
+ * "restricted" (shared/src/net/localHost.ts).
+ *
  * Ctrl+C stops everything and frees all ports. If this launcher is killed
  * outright, the children notice within ~1 s and exit by themselves.
  */
 
 import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
+import { dirname, resolve, join } from 'path';
+import { existsSync } from 'fs';
+import { spawnSync } from 'child_process';
 import {
   spawnTs, spawnNode, assertPortsFree, assertUdpPortsFree, waitForPort, waitForUdpPort, cleanupOnExit, buildAssets,
 } from './lib/procs.mjs';
@@ -30,6 +37,12 @@ console.log(`\x1b[36m${line}\n  NOBU SHOOTER — NETWORK MECHANICS DEMO ENVIRONM
 await assertPortsFree(Object.values(PORTS));
 await assertUdpPortsFree(Object.values(UDP_PORTS));
 buildAssets(rootDir);
+const GAME_DIST = join(rootDir, 'dist', 'game');
+if (!existsSync(join(GAME_DIST, 'index.html'))) {
+  console.log('Building the game for remote players (once; npm run build rebuilds it)...');
+  const b = spawnSync(process.execPath, ['scripts/build.mjs'], { cwd: rootDir, stdio: 'inherit' });
+  if (b.status !== 0) process.exit(b.status ?? 1);
+}
 // Developer tools (invincibility toggle in the Network Lab) exist only in the
 // demo: the server honours `dev` messages and the client shows the switch.
 process.env.NOBU_DEV = '1';
@@ -37,7 +50,7 @@ process.env.VITE_NOBU_DEV = '1';
 console.log('Starting services...\n');
 
 const children = [
-  spawnTs('SERVER', 'server/src/main.ts', [], { cwd: rootDir, color: '\x1b[32m' }),
+  spawnTs('SERVER', 'server/src/main.ts', ['--static', GAME_DIST], { cwd: rootDir, color: '\x1b[32m' }),
   spawnTs('EMULATOR', 'emulator/src/main.ts', [
     '--route', `ws:${PORTS.emuData}=ws://127.0.0.1:${PORTS.server}`,
     '--route', `udp:${UDP_PORTS.emuUdp}=127.0.0.1:${UDP_PORTS.serverUdp}`,
@@ -82,6 +95,7 @@ console.log(`  • Client UI:            http://localhost:${PORTS.client}`);
 console.log(`  • Emulator dashboard:   http://127.0.0.1:${PORTS.emuControl}/`);
 console.log(`  • Emulator routes:      ws:${PORTS.emuData} → ws://127.0.0.1:${PORTS.server}, udp:${UDP_PORTS.emuUdp} → 127.0.0.1:${UDP_PORTS.serverUdp}`);
 console.log(`  • Game server:          ws://127.0.0.1:${PORTS.server}, udp 127.0.0.1:${UDP_PORTS.serverUdp}`);
+console.log(`  • Phones / tablets:     forward or open port ${PORTS.server} only — it serves the game (nothing else is reachable from other machines)`);
 if (swarmN > 0) console.log(`  • Network players:      ${swarmN} over UDP (UDP-1 … UDP-${swarmN})`);
 else console.log('  • Network players:      none (npm run demo -- --swarm 3, or npm run swarm in another terminal)');
 console.log('  Press Ctrl+C to stop everything.');

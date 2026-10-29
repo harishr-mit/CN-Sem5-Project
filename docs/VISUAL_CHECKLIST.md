@@ -64,9 +64,9 @@ Before each screen the script resets every emulator route to Baseline (control A
 | 34 | game-quality-low | Graphics Quality Low: players, crates, floor and shields the **same size** as in 30 (only softer); no missing textures (no procedural fallbacks). |
 | 35 | game-room-not-found | "CANNOT JOIN" with "No room JOLLY ZEBRA. Check the code, or create a new room." and BACK TO MENU. |
 
-| 36 | touch-game-landing-portrait | Phone 390 × 844, once (not per viewport). Landing fits the width; the touch hint ("LEFT STICK: Move • TOUCH THE ARENA …") instead of keyboard keys. |
-| 37 | touch-game-match-landscape | Phone 844 × 390: arena fills the height; **joystick** bottom-left, **DASH** above it (Dash always on), **☰ MENU** and **RELOAD** on the right above the weapon panel; ping under the score; no LEAVE / CONTROLS / SETTINGS buttons; chips show ∞. |
-| 38 | touch-game-match-portrait | Phone 390 × 844: arena full width on top with the HUD; joystick bottom-left and RELOAD / MENU bottom-right in the space below; DASH above the joystick. |
+| 36 | touch-game-landing-portrait | Phone 390 × 844, once (not per viewport). Landing fits the width; the touch hint ("LEFT SIDE: Move • RIGHT SIDE: Aim + auto-fire …") instead of keyboard keys. |
+| 37 | touch-game-match-landscape | Phone 844 × 390: arena fills the height; idle hints **MOVE** / **AIM · FIRE** at the bottom corners (the floating sticks show only while touched), **DASH** (Dash always on), **RELOAD** and **☰ MENU** in a column on the right edge; ping under the score; no LEAVE / CONTROLS / SETTINGS buttons; chips show ∞. |
+| 38 | touch-game-match-portrait | Phone 390 × 844: arena full width on top with the HUD; handheld-style pad below (seam down the middle, MOVE / AIM hints); DASH / RELOAD / MENU at the top of its right half; the sticks look the same as in landscape (cyan move, pink aim). |
 | 39 | touch-game-lobby-portrait | The lobby fills the space **below** the arena (the map stays visible above it); no joystick or buttons while waiting; options and START / LEAVE reachable (scrolls if needed). |
 | 40 | touch-game-menu-landscape | The menu sheet: ⚙ SETTINGS, 🔇 MUTE, ◄ LEAVE MATCH (red), RESUME. |
 | 41 | touch-demo-quick-landscape | The **demo** on a phone: no Lab panel, no packet strip; the same joystick / RELOAD / MENU. |

@@ -28,6 +28,14 @@ const DASHBOARD_FILES: Record<string, { file: string; type: string }> = {
 };
 const DASHBOARD_DIR = fileURLToPath(new URL('../dashboard/', import.meta.url));
 
+const RESTRICTED_PAGE = `<!doctype html><meta charset="utf-8"><title>Restricted</title>
+<body style="font-family:system-ui;background:#0a081a;color:#e8e8ff;padding:2rem;max-width:34rem;margin:auto">
+<h1 style="color:#ff5a8c">Restricted</h1>
+<p>The emulator dashboard is a developer tool and is available on the host machine only.</p>
+<p>To play, open the game on port <b>8080</b> of this same address.</p>`;
+
+const LOOPBACK = /^(localhost|\[::1\]|127(\.\d{1,3}){3})$/;
+
 export interface ControlOptions {
   port: number;
   /** Default 127.0.0.1 (D7). */
@@ -55,7 +63,7 @@ export class ControlServer {
     this.http = createServer((req, res) => void this.serveStatic(req, res));
     this.wss = new WebSocketServer({
       server: this.http,
-      verifyClient: ({ origin }: { origin?: string }) => this.originAllowed(origin),
+      verifyClient: ({ origin, req }: { origin?: string; req: IncomingMessage }) => this.hostAllowed(req.headers.host) && this.originAllowed(origin),
     });
     this.wss.on('connection', (ws) => this.onClient(ws));
     routes.onChange = () => this.queueState();
@@ -88,6 +96,16 @@ export class ControlServer {
     });
   }
 
+  /**
+   * Loopback-bound (the default): only a Host naming this machine is served. A
+   * forwarded port arrives from 127.0.0.1 but carries the tunnel's Host, so
+   * this is what keeps the dashboard off tablets (and blocks DNS rebinding).
+   */
+  private hostAllowed(host: string | undefined): boolean {
+    if (!host || !['127.0.0.1', 'localhost', '::1'].includes(this.opts.host ?? '127.0.0.1')) return true;
+    return LOOPBACK.test(host.trim().toLowerCase().replace(/:\d+$/, ''));
+  }
+
   /** No Origin (Node tools) or an allowlisted browser origin (D7). */
   originAllowed(origin: string | undefined): boolean {
     if (!origin) return true;
@@ -100,6 +118,11 @@ export class ControlServer {
   }
 
   private async serveStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!this.hostAllowed(req.headers.host)) {
+      res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(RESTRICTED_PAGE);
+      return;
+    }
     const path = (req.url ?? '/').split('?')[0];
     const entry = req.method === 'GET' ? DASHBOARD_FILES[path] : undefined;
     if (!entry) {

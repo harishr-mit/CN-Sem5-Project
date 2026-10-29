@@ -20,6 +20,7 @@ import { acquireKeyboard, movementKeys, isTypingTarget } from './input.js';
 import { preloadAssets, setupAssets, has, invScale, loadTier, swapTier, currentTier, PLAYER_ATLAS, TEX, SFX } from './assets.js';
 import { START_TIER, isTier, type Tier } from './tiers.js';
 import { loadSettings, onSettingsChange } from '../ui/settings.js';
+import { isTouchUi } from '../ui/touch.js';
 import { MapView, DEPTH } from './MapView.js';
 import { PlayerView, bakePlayerTextures, type PlayerLook } from './PlayerView.js';
 import { Sfx } from './audio.js';
@@ -267,12 +268,14 @@ export class ArenaScene extends Phaser.Scene {
 
     // Input — pointer worldX/Y is already in arena space at any scale
     const driver = this.options.input;
-    this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => {
+    // Touch UI: the aim stick (TouchControls) aims and fires, not the arena
+    const touchUi = isTouchUi() && !driver;
+    if (!touchUi) this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => {
       this.pointerX = ptr.worldX;
       this.pointerY = ptr.worldY;
       driver?.setPointer(ptr.worldX, ptr.worldY);
     });
-    if (!driver) {
+    if (!driver && !touchUi) {
       this.input.on('pointerdown', (ptr: Phaser.Input.Pointer) => {
         if (ptr.leftButtonDown()) this.netClient.fireDown = true;
       });
