@@ -1277,29 +1277,39 @@ html.touch-ui input[type="text"] { -webkit-user-select: text; user-select: text;
 }
 
 .touch-pad { position: absolute; inset: 0; pointer-events: none; z-index: 40; }
-.touch-pad > * { pointer-events: none; }
-.touch-left { position: absolute; left: max(16px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom)); }
-.touch-right {
-  position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: 92px;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+/* Floating sticks: the left half moves, the right half aims and auto-fires */
+.touch-zone { position: absolute; top: 0; bottom: 0; width: 50%; pointer-events: auto; touch-action: none; }
+.touch-zone-move { left: 0; }
+.touch-zone-aim { right: 0; }
+.touch-zone-hint {
+  position: absolute; bottom: max(18px, env(safe-area-inset-bottom)); letter-spacing: 0.25em; font-size: 0.7rem;
+  font-family: var(--font-display); color: rgba(255, 255, 255, 0.22); pointer-events: none;
 }
-.touch-left > *, .touch-right > * { pointer-events: auto; }
+.touch-zone-move .touch-zone-hint { left: 24px; }
+.touch-zone-aim .touch-zone-hint { right: 24px; }
+/* DASH / RELOAD / MENU on the right edge, above the aim zone */
+.touch-right {
+  position: absolute; right: max(14px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: flex-end; gap: 10px; pointer-events: auto;
+}
 .touch-joystick {
-  position: relative; border-radius: 50%;
+  position: absolute; border-radius: 50%; pointer-events: none;
   display: flex; align-items: center; justify-content: center;
   background: radial-gradient(circle, rgba(0, 229, 255, 0.10), rgba(10, 8, 26, 0.45) 70%);
   border: 2px solid rgba(0, 229, 255, 0.45);
   box-shadow: 0 0 18px rgba(0, 229, 255, 0.15) inset;
-  touch-action: none;
 }
 .touch-joystick.active { border-color: var(--c-cyan); }
+.touch-joystick-aim, .touch-joystick-aim.active { border-color: rgba(255, 90, 140, 0.8); background: radial-gradient(circle, rgba(255, 90, 140, 0.10), rgba(10, 8, 26, 0.45) 70%); }
+.touch-joystick-aim .touch-joystick-thumb {
+  background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.9), #ff5a8c 45%, rgba(255, 90, 140, 0.4));
+  box-shadow: 0 0 14px #ff5a8c;
+}
 .touch-joystick-thumb {
   border-radius: 50%; pointer-events: none;
   background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.9), var(--c-cyan) 45%, rgba(0, 229, 255, 0.4));
   box-shadow: 0 0 14px var(--c-cyan);
-  transition: transform 60ms linear;
 }
-.touch-joystick.active .touch-joystick-thumb { transition: none; }
 .touch-btn {
   font-family: var(--font-display); font-weight: 700; letter-spacing: 0.1em; font-size: 0.72rem;
   color: #fff; border-radius: 999px; padding: 10px 16px; touch-action: none;
@@ -1309,7 +1319,7 @@ html.touch-ui input[type="text"] { -webkit-user-select: text; user-select: text;
 .touch-reload { min-width: 96px; height: 54px; border-color: var(--c-amber); color: var(--c-amber); }
 .touch-menu { min-width: 96px; }
 .touch-dash {
-  position: absolute; padding: 0; border-radius: 50%;
+  padding: 0; border-radius: 50%;
   border: 2px solid #2fd6ff; color: #2fd6ff; background: rgba(47, 214, 255, 0.12);
   animation: dash-reveal 520ms cubic-bezier(.2, 1.6, .4, 1) both;
 }
@@ -1338,13 +1348,21 @@ html.touch-ui input[type="text"] { -webkit-user-select: text; user-select: text;
 .touch-menu-item#touch-menu-leave { color: var(--c-red); border-color: var(--c-red); }
 .touch-menu-item.resume { text-align: center; background: var(--c-violet); color: #fff; border-color: var(--c-cyan); }
 
-/* Portrait: the arena at full width on top, the controls in the space below */
+/* Portrait: the arena at full width on top, a handheld-style control pad below */
 @media (orientation: portrait) {
   .touch-ui .arena-wrapper { flex-direction: column; }
   .touch-ui .arena-canvas-container { flex: 0 0 auto; width: 100%; aspect-ratio: 16 / 9; }
-  .touch-ui .touch-pad { position: relative; inset: auto; flex: 1; min-height: 190px; }
-  .touch-ui .touch-left { bottom: max(28px, env(safe-area-inset-bottom)); }
-  .touch-ui .touch-right { bottom: max(28px, env(safe-area-inset-bottom)); flex-direction: column-reverse; }
+  .touch-ui .touch-pad {
+    position: relative; inset: auto; flex: 1; min-height: 190px;
+    background: linear-gradient(180deg, #3a3d4d, #262833);
+    border-top: 6px solid #14151c; box-shadow: 0 -2px 0 #565a70 inset;
+  }
+  /* A seam down the middle, like the two halves of a handheld */
+  .touch-ui .touch-pad::before { content: ''; position: absolute; left: 50%; top: 14px; bottom: 14px; width: 2px; background: rgba(0, 0, 0, 0.35); }
+  .touch-ui .touch-zone-hint { color: rgba(255, 255, 255, 0.3); }
+  .touch-ui .touch-right { top: 10px; transform: none; flex-direction: row-reverse; flex-wrap: wrap; justify-content: flex-start; width: calc(50% - 20px); gap: 6px; }
+  .touch-ui .touch-btn { background: #1b1c25; border: 2px solid #0c0d12; box-shadow: 0 3px 0 #0c0d12; padding: 8px 12px; }
+  .touch-ui .touch-btn:active { background: #51325f; box-shadow: 0 1px 0 #0c0d12; transform: translateY(2px); }
   /* The lobby uses the space below the arena, so the map stays in view above it */
   .touch-ui .lobby { position: fixed; top: calc(100vw * 9 / 16 + 6px); left: 6px; right: 6px; bottom: 6px; width: auto; }
   .touch-ui .lobby-peek { position: fixed; top: calc(100vw * 9 / 16 + 6px); }

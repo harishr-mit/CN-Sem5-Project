@@ -133,6 +133,14 @@ export function joystickKeys(dx: number, dy: number, deadzone = 0.25): number {
   }
 }
 
+/**
+ * Aim stick offset (fraction of the radius, y down) → aim angle and whether to
+ * shoot: past the dead zone the stick aims (full 360°) and auto-fires.
+ */
+export function aimStick(dx: number, dy: number, deadzone = 0.25): { angle: number; fire: boolean } {
+  return { angle: Math.atan2(dy, dx), fire: Math.hypot(dx, dy) >= deadzone };
+}
+
 /** Current movement bitmask: the physical keyboard and the touch joystick. */
 export function movementKeys(): number {
   return keysFromCodes(held) | virtualKeys;

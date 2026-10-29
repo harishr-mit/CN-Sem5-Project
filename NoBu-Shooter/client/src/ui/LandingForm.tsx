@@ -10,7 +10,7 @@ import { normalizeCode } from '@nobu/shared/rooms/codes.js';
 import { roomFromUrl } from '../net/serverUrl.js';
 import { isTouchUi } from './touch.js';
 
-const TOUCH_HINT = 'LEFT STICK: Move • TOUCH THE ARENA: Aim + fire • RELOAD / DASH buttons • ☰ MENU: settings, sound, leave';
+const TOUCH_HINT = 'LEFT SIDE: Move • RIGHT SIDE: Aim + auto-fire • RELOAD / DASH buttons • ☰ MENU: settings, sound, leave';
 
 interface LandingFormProps {
   subtitle: string;

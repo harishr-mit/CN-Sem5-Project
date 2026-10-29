@@ -1,73 +1,90 @@
 /**
  * TouchControls.tsx — the on-screen controls of the touch UI (owner revision
- * of Phase 7, R5–R8; only when isTouchUi()):
- * - a movement joystick in the bottom-left corner (Settings → Joystick size);
- *   aiming and shooting stay as they were: touch the arena;
- * - a DASH button just above the joystick, only while the Dash power-up is
- *   on — it pops in when the power-up is picked up;
- * - on the right: RELOAD and MENU (the menu holds everything non-critical:
- *   settings, mute, leave, and the demo's tools).
- * In landscape these float over the arena; in portrait they sit in the
- * control pad under it (CSS, `.touch-pad`).
+ * of Phase 7, R5–R8 and the second touch revision; only when isTouchUi()):
+ * - two floating sticks (popular mobile-shooter layout): the left half of the
+ *   screen is MOVE, the right half is AIM. A stick appears wherever the finger
+ *   lands and vanishes on release; the aim stick aims over 360° and auto-fires
+ *   while held past its dead zone. Settings → Joystick size sets both;
+ * - on the right edge: DASH (only while the Dash power-up is on, it pops in
+ *   when picked up), RELOAD and MENU (settings, mute, leave, the demo's tools).
+ * Landscape floats over the arena; portrait uses the control pad under it,
+ * styled like a handheld (CSS, `.touch-pad`).
  */
 
 import React, { useEffect, useRef, useState } from 'react';
 import type { NetClient } from '../net/NetClient.js';
-import { joystickKeys, setVirtualKeys } from '../game/input.js';
+import { aimStick, joystickKeys, setVirtualKeys } from '../game/input.js';
 import { loadSettings, onSettingsChange } from './settings.js';
 import { JOYSTICK_PX } from './touch.js';
 
-/** The movement stick: pointer events on its own element, so the arena's touches (aim / fire) are separate. */
-const Joystick: React.FC<{ size: number }> = ({ size }) => {
-  const base = useRef<HTMLDivElement>(null);
-  const [thumb, setThumb] = useState({ x: 0, y: 0, active: false });
+/**
+ * One floating stick on its half of the screen. Pointer events on its own
+ * zone, with pointer capture, so the two sticks work with two fingers at once.
+ * `onStick` gets the thumb offset as a fraction of the radius (y down).
+ */
+const FloatingStick: React.FC<{
+  kind: 'move' | 'aim';
+  size: number;
+  onStick: (dx: number, dy: number) => void;
+  onEnd: () => void;
+}> = ({ kind, size, onStick, onEnd }) => {
+  const zone = useRef<HTMLDivElement>(null);
   const pointer = useRef<number | null>(null);
+  const [st, setSt] = useState({ ox: 0, oy: 0, x: 0, y: 0, active: false });
+  const origin = useRef({ x: 0, y: 0 });
 
-  useEffect(() => () => setVirtualKeys(0), []);
+  useEffect(() => onEnd, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const update = (e: React.PointerEvent) => {
-    const el = base.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const radius = r.width / 2;
-    let dx = (e.clientX - (r.left + radius)) / radius;
-    let dy = (e.clientY - (r.top + radius)) / radius;
+  const move = (e: React.PointerEvent) => {
+    const radius = size / 2;
+    let dx = (e.clientX - origin.current.x) / radius;
+    let dy = (e.clientY - origin.current.y) / radius;
     const len = Math.hypot(dx, dy);
     if (len > 1) { dx /= len; dy /= len; }
-    setThumb({ x: dx, y: dy, active: true });
-    setVirtualKeys(joystickKeys(dx, dy));
+    setSt((s) => ({ ...s, x: dx, y: dy }));
+    onStick(dx, dy);
   };
   const release = (e: React.PointerEvent) => {
     if (pointer.current !== e.pointerId) return;
     pointer.current = null;
-    setThumb({ x: 0, y: 0, active: false });
-    setVirtualKeys(0);
+    setSt((s) => ({ ...s, x: 0, y: 0, active: false }));
+    onEnd();
   };
 
   const thumbPx = size * 0.42;
   return (
     <div
-      ref={base}
-      className={`touch-joystick ${thumb.active ? 'active' : ''}`}
-      id="touch-joystick"
-      style={{ width: size, height: size }}
+      ref={zone}
+      className={`touch-zone touch-zone-${kind}`}
+      id={`touch-zone-${kind}`}
       onPointerDown={(e) => {
         if (pointer.current !== null) return;
         pointer.current = e.pointerId;
         e.currentTarget.setPointerCapture(e.pointerId);
-        update(e);
+        const r = e.currentTarget.getBoundingClientRect();
+        origin.current = { x: e.clientX, y: e.clientY };
+        setSt({ ox: e.clientX - r.left, oy: e.clientY - r.top, x: 0, y: 0, active: true });
       }}
-      onPointerMove={(e) => { if (pointer.current === e.pointerId) update(e); }}
+      onPointerMove={(e) => { if (pointer.current === e.pointerId) move(e); }}
       onPointerUp={release}
       onPointerCancel={release}
     >
-      <div
-        className="touch-joystick-thumb"
-        style={{
-          width: thumbPx, height: thumbPx,
-          transform: `translate(${thumb.x * (size - thumbPx) / 2}px, ${thumb.y * (size - thumbPx) / 2}px)`,
-        }}
-      />
+      {!st.active && <div className="touch-zone-hint">{kind === 'move' ? 'MOVE' : 'AIM · FIRE'}</div>}
+      {st.active && (
+        <div
+          className={`touch-joystick touch-joystick-${kind} active`}
+          id={`touch-joystick-${kind}`}
+          style={{ width: size, height: size, left: st.ox - size / 2, top: st.oy - size / 2 }}
+        >
+          <div
+            className="touch-joystick-thumb"
+            style={{
+              width: thumbPx, height: thumbPx,
+              transform: `translate(${st.x * (size - thumbPx) / 2}px, ${st.y * (size - thumbPx) / 2}px)`,
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };
@@ -94,7 +111,7 @@ const DashButton: React.FC<{ net: NetClient; size: number }> = ({ net, size }) =
       key={pop}
       className={`touch-btn touch-dash ${state.ready ? 'ready' : 'cooling'}`}
       id="touch-dash"
-      style={{ width: d, height: d, bottom: size + 18, left: (size - d) / 2 + 16 }}
+      style={{ width: d, height: d }}
       onPointerDown={(e) => { e.preventDefault(); net.requestDash(); }}
     >
       DASH
@@ -108,12 +125,24 @@ export const TouchControls: React.FC<{ net: NetClient; onMenu: () => void }> = (
 
   return (
     <div className="touch-pad" id="touch-pad">
-      <div className="touch-left">
-        <DashButton net={net} size={size} />
-        <Joystick size={size} />
-      </div>
+      <FloatingStick
+        kind="move"
+        size={size}
+        onStick={(dx, dy) => setVirtualKeys(joystickKeys(dx, dy))}
+        onEnd={() => setVirtualKeys(0)}
+      />
+      <FloatingStick
+        kind="aim"
+        size={size}
+        onStick={(dx, dy) => {
+          const a = aimStick(dx, dy);
+          if (a.fire) net.aimAngle = a.angle;
+          net.fireDown = a.fire;
+        }}
+        onEnd={() => { net.fireDown = false; }}
+      />
       <div className="touch-right">
-        <button className="touch-btn touch-menu" id="touch-menu" onClick={onMenu} aria-label="Menu">☰ MENU</button>
+        <DashButton net={net} size={size} />
         <button
           className="touch-btn touch-reload"
           id="touch-reload"
@@ -121,6 +150,7 @@ export const TouchControls: React.FC<{ net: NetClient; onMenu: () => void }> = (
         >
           RELOAD
         </button>
+        <button className="touch-btn touch-menu" id="touch-menu" onClick={onMenu} aria-label="Menu">☰ MENU</button>
       </div>
     </div>
   );

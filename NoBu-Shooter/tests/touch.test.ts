@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { decideTouchUi, JOYSTICK_PX, isJoystickSize } from '../client/src/ui/touch.js';
-import { joystickKeys, setVirtualKeys, movementKeys } from '../client/src/game/input.js';
+import { joystickKeys, aimStick, setVirtualKeys, movementKeys } from '../client/src/game/input.js';
 import { KEY } from '../shared/src/sim/movement.js';
 import { canStartWith, botsFor, defaultRoomOptions } from '../shared/src/rooms/options.js';
 
@@ -47,6 +47,18 @@ describe('joystick → movement keys', () => {
     expect(movementKeys()).toBe(KEY.LEFT | KEY.UP);
     setVirtualKeys(0);
     expect(movementKeys()).toBe(0);
+  });
+});
+
+describe('aim stick', () => {
+  it('no fire inside the dead zone', () => {
+    expect(aimStick(0.1, 0.1).fire).toBe(false);
+  });
+  it('aims over 360° (y down) and fires past the dead zone', () => {
+    expect(aimStick(1, 0)).toEqual({ angle: 0, fire: true });
+    expect(aimStick(0, 1).angle).toBeCloseTo(Math.PI / 2);
+    expect(aimStick(-1, 0).angle).toBeCloseTo(Math.PI);
+    expect(aimStick(0.5, -0.5).angle).toBeCloseTo(-Math.PI / 4);
   });
 });
 

@@ -28,6 +28,8 @@ export default defineConfig({
     port: GAME_DEV_PORT,
     strictPort: true,
     host: true,
+    // The game is meant for other machines: accept a forwarded port's host name too (Vite would block it)
+    allowedHosts: true,
     open: false,
     proxy: {
       '/ws': { target: `ws://127.0.0.1:${GAME_SERVER_PORT}`, ws: true },
