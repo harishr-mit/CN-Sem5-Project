@@ -11,6 +11,7 @@
 import React, { useEffect, useState } from 'react';
 import { NetClient } from '../net/NetClient.js';
 import { gameServerUrl } from '../net/serverUrl.js';
+import { playerToken } from '../net/playerToken.js';
 import { LandingForm } from '../ui/LandingForm.js';
 import { MatchView } from '../ui/MatchView.js';
 import { loadSettings, applyUiScale, onSettingsChange } from '../ui/settings.js';
@@ -32,7 +33,7 @@ export const PlayApp: React.FC = () => {
   }, []);
 
   const play = (name: string, room: string) => {
-    const client = new NetClient({ url: gameServerUrl(window.location), name, room, sync: { model: 'delta' } });
+    const client = new NetClient({ url: gameServerUrl(window.location), name, room, sync: { model: 'delta' }, pid: playerToken() });
     client.toggles = { ...client.toggles, prediction: true, reconciliation: true, interpolation: true, redundancy: false, ghost: false };
     setNet(client);
   };

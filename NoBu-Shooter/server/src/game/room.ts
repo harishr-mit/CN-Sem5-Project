@@ -99,6 +99,8 @@ interface MoverState {
 }
 
 let nextPlayerId = 1;
+/** Parked seats kept per room (the oldest go first; only a never-closing quick match gets near it). */
+const MAX_SEATS = 256;
 
 interface RoomCfg {
   bots: boolean;
@@ -132,6 +134,9 @@ export class Room {
   private state: RoomState;
   private botCtrl: BotController;
   private botSeqMap = new Map<number, number>();
+  /** Persistent identities (hello `pid`): token → the player id, name and score it left with; and id → token for live humans. */
+  private seats = new Map<string, { id: number; score: number; name: string }>();
+  private tokens = new Map<number, string>();
   private rng = mulberry32(GAME.bots.seed + 1); // separate from bot rng
   private pickupRng = mulberry32(GAME.bots.seed + 2);
   readonly metrics = new Metrics();
@@ -277,11 +282,35 @@ export class Room {
     return this.state.players.size >= MAX_PARTICIPANTS;
   }
 
-  addPlayer(name: string, isBot = false): number {
-    const id = nextPlayerId++;
+  /**
+   * A human's name made unique in this room, case-insensitively: a second ALEX
+   * becomes "ALEX 2". Live players and parked seats of other tokens count.
+   */
+  private uniqueName(name: string, token: string | undefined): string {
+    const max = GAME.player.maxNameLength;
+    const taken = new Set<string>();
+    for (const q of this.state.players.values()) taken.add(q.name.toLowerCase());
+    for (const [t, seat] of this.seats) if (t !== token) taken.add(seat.name.toLowerCase());
+    const base = name.slice(0, max);
+    if (!taken.has(base.toLowerCase())) return base;
+    for (let n = 2; ; n++) {
+      const suffix = ` ${n}`;
+      const candidate = base.slice(0, max - suffix.length) + suffix;
+      if (!taken.has(candidate.toLowerCase())) return candidate;
+    }
+  }
+
+  /**
+   * `token`: the player's persistent identity (hello `pid`). Whoever rejoins
+   * with a token this room has seen gets the same player id (so the same
+   * colour) and the score they left with; seats last as long as the room.
+   */
+  addPlayer(name: string, isBot = false, token?: string): number {
+    const seat = !isBot && token ? this.seats.get(token) : undefined;
+    const id = seat && !this.state.players.has(seat.id) ? seat.id : nextPlayerId++;
     const spawnPos = this.spawnFor();
     const p: PlayerState = {
-      id, name: name.slice(0, GAME.player.maxNameLength), bot: isBot,
+      id, name: isBot ? name.slice(0, GAME.player.maxNameLength) : this.uniqueName(name, token), bot: isBot,
       x: spawnPos.x, y: spawnPos.y,
       // In a private room's lobby players stand on the map (they can't move before the match)
       alive: this.state.matchState === 'RUNNING' || this.inLobby,
@@ -292,12 +321,14 @@ export class Room {
       aim: 0,
       shield: this.spawnShield,
       invincible: false,
-      score: 0,
+      score: seat?.score ?? 0,
       inputQueue: [],
       lastConsumedSeq: 0,
       left: false,
     };
     this.state.players.set(id, p);
+    if (seat) this.state.leftPlayers = this.state.leftPlayers.filter((lp) => lp.id !== id); // back: no longer "left"
+    if (!isBot && token) { this.tokens.set(id, token); this.seats.set(token, { id, score: p.score, name: p.name }); }
     if (isBot) {
       this.botCtrl.addBot(id);
       this.botSeqMap.set(id, 0);
@@ -322,6 +353,12 @@ export class Room {
       if (proj.ownerId === id) this.state.projectiles.delete(pid);
     }
     this.state.leftPlayers.push({ id, name: p.name, score: p.score });
+    const token = this.tokens.get(id);
+    if (token) { // park the seat: the same token gets this id, name slot and score back
+      this.seats.set(token, { id, score: p.score, name: p.name });
+      this.tokens.delete(id);
+      if (this.seats.size > MAX_SEATS) this.seats.delete(this.seats.keys().next().value as string); // oldest first (a long-lived quick match)
+    }
     this.state.players.delete(id);
     if (p.bot) {
       this.botCtrl.removeBot(id);
@@ -995,6 +1032,7 @@ export class Room {
     this._matchResults = null;
     for (const p of this.state.players.values()) { p.score = 0; p.life++; }
     this.state.leftPlayers = [];
+    this.resetSeatScores();
     this.refreshLobby();
   }
 
@@ -1041,6 +1079,12 @@ export class Room {
     }
 
     this.state.leftPlayers = [];
+    this.resetSeatScores();
+  }
+
+  /** Scores restart with every match, so parked seats forget theirs too. */
+  private resetSeatScores(): void {
+    for (const seat of this.seats.values()) seat.score = 0;
   }
 
   private startMatch(): void {

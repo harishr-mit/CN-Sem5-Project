@@ -58,7 +58,8 @@ Resent every 250 ms until an authoritative `welcome` message is received.
 }
 ```
 - `v`: Protocol version (`number`, must be 1).
-- `name`: Callsign string (truncated to 12 chars by the server, GAMERULES.md §4).
+- `name`: Callsign string (truncated to 12 chars by the server, GAMERULES.md §4). Made unique within the room, case-insensitively: a second `ALEX` is `ALEX 2` (the welcome's player entry and snapshots carry the final name).
+- `pid` (optional, string `[A-Za-z0-9_-]{8,64}`): the player's **persistent identity**, a random secret the client keeps in `localStorage` (`client/src/net/playerToken.ts`). A room that has seen it gives back the same player id and score on a rejoin (GAMERULES.md §4a). Never sent to other players. Malformed → the message is dropped. Ignored in the `lab` room.
 - `room`: one of
   - `"main"`: the quick match (bots fill it; it starts as soon as a human is in, `GAMERULES.md` §2);
   - `"lab"`: the movement-only sandbox used by the Compare view (demo only; every lab player spawns at the same point, `rooms.lab.spawn`, so all panes' players start together);

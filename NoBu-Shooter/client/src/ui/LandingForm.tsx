@@ -8,6 +8,7 @@
 import React, { useState } from 'react';
 import { normalizeCode } from '@nobu/shared/rooms/codes.js';
 import { roomFromUrl } from '../net/serverUrl.js';
+import { savedName, saveName } from '../net/playerToken.js';
 import { isTouchUi } from './touch.js';
 
 const TOUCH_HINT = 'LEFT SIDE: Move • RIGHT SIDE: Aim + auto-fire • RELOAD / DASH buttons • ☰ MENU: settings, sound, leave';
@@ -22,10 +23,14 @@ interface LandingFormProps {
   controlsHint: React.ReactNode;
 }
 
-const cleanName = (name: string) => name.trim() || 'PILOT_01';
+const cleanName = (name: string) => {
+  const n = name.trim() || 'PILOT_01';
+  saveName(n);
+  return n;
+};
 
 export const LandingForm: React.FC<LandingFormProps> = ({ subtitle, onPlay, quickMatchLabel = 'QUICK MATCH (vs bots)', extras, controlsHint }) => {
-  const [name, setName] = useState(() => 'PILOT_' + Math.floor(100 + Math.random() * 900));
+  const [name, setName] = useState(() => savedName() ?? 'PILOT_' + Math.floor(100 + Math.random() * 900));
   // A share link (?room=blue-fox) fills in the code
   const [code, setCode] = useState(() => (typeof window !== 'undefined' ? roomFromUrl(window.location) ?? '' : ''));
   const [codeError, setCodeError] = useState<string | null>(null);

@@ -43,6 +43,11 @@ export interface MsgHello {
    */
   room: string;
   nonce: string;
+  /**
+   * Persistent player identity (a random secret the client keeps in localStorage, 8–64 chars of [A-Za-z0-9_-]).
+   * Rejoining a room with it restores the player id and score; never broadcast.
+   */
+  pid?: string;
   /** Join as a spectator: receive snapshots, no player (Compare reference pane). */
   spectate?: boolean;
   /** Sync model for this connection (default full; spectators always get full). PHASES.md Phase 3. */
@@ -486,6 +491,7 @@ export function validateClientMsg(raw: unknown): ClientMsg | null {
       if (raw['v'] !== 1) return null;
       if (typeof raw['name'] !== 'string') return null;
       if (typeof raw['nonce'] !== 'string') return null;
+      if (raw['pid'] !== undefined && (typeof raw['pid'] !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(raw['pid']))) return null;
       if (raw['spectate'] !== undefined && typeof raw['spectate'] !== 'boolean') return null;
       if (raw['sync'] !== undefined && !isSyncSpec(raw['sync'])) return null;
       {

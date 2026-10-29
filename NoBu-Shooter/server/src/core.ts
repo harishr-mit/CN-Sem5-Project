@@ -49,6 +49,8 @@ export interface Connection {
   lockstep: LockstepEncoder | null;
   room: Room | null;
   nonce: string | null;
+  /** The player's persistent identity from hello (shared/src/protocol: `pid`). */
+  pid?: string;
   lastMsg: number;
   msgCount: number;
   msgCountWindow: number;
@@ -209,7 +211,14 @@ export class GameServer {
           return;
         }
         if (msg.sync && this.mode === 'demo') this.setSync(conn, msg.sync, room);
-        conn.playerId = room.addPlayer(msg.name);
+        // The same identity joining again (a refresh, a dropped network) takes over its old connection's seat
+        if (msg.pid && room.name !== 'lab') { // the lab's panes (Compare) share one browser's identity
+          for (const old of [...this.connections]) {
+            if (old !== conn && old.room === room && old.pid === msg.pid) { this.removeConnection(old); old.close(); }
+          }
+          conn.pid = msg.pid;
+        }
+        conn.playerId = room.addPlayer(msg.name, false, room.name === 'lab' ? undefined : msg.pid);
         this.emptySince.delete(room.name);
         conn.room = room;
         conn.nonce = msg.nonce;

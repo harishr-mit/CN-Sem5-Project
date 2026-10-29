@@ -8,6 +8,7 @@ import { NetClient } from '../net/NetClient.js';
 import { ALL_MODELS } from '../net/allModels.js';
 import { EmulatorClient } from '../net/EmulatorClient.js';
 import { demoServiceUrl } from '../net/serverUrl.js';
+import { playerToken } from '../net/playerToken.js';
 import { Landing } from './Landing.js';
 import { MatchView } from './MatchView.js';
 import { DEMO_CONTROLS } from './demoControls.js';
@@ -61,7 +62,7 @@ export const App: React.FC = () => {
     // Initialize network clients
     // Saved ghost preference and sync model (Network Lab, `Y`)
     const initialSettings = loadSettings();
-    const net = new NetClient({ models: ALL_MODELS, url: emulatorDataUrl(), name, room, sync: initialSettings.syncModel });
+    const net = new NetClient({ models: ALL_MODELS, url: emulatorDataUrl(), name, room, sync: initialSettings.syncModel, pid: playerToken() });
     const emu = new EmulatorClient(EMULATOR_CONTROL_URL);
     net.toggles.ghost = initialSettings.showGhost;
 

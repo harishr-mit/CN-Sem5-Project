@@ -175,12 +175,24 @@ Shared context for every agent working in this directory. Read this file **befor
 * [x] T121: Touch revision 2: floating move stick (left half) + aim stick (right half, auto-fire), buttons on the right, handheld-style portrait pad; both editions
 * [x] T122: Remote access: demo 8080 serves the game to non-local Hosts (game-mode server), 5173 / 9001 "Restricted" pages, dev 5173 `allowedHosts`, tests, docs
 
+* [x] T123: Player identity: persistent token (`pid`), seats per room for the room's lifetime (same id + score on a rejoin, takeover), unique names, remembered name, tests, docs
+
 *Add new tasks at the bottom with the next free ID. Never reuse or renumber IDs.*
 
 
 ## Change Log
 
 <!-- Newest first. Copy the template below for each entry. -->
+
+### 2026-10-29 — Claude (Sonnet 5.5) — Player identity (T123)
+
+* **Task:** Owner: a rejoining player was a new random player; wanted the same player and score back, and custom names (same-name case handled). Owner answers (asked): seats last the room's lifetime; duplicate names get a numeric suffix; the name is set and remembered on the landing page; no visible tag.
+* **Process note:** I started editing before the owner's "wait for implementation" message reached me; I reported it, the owner chose to keep the edits, and I finished after approval.
+* **Done:** `client/src/net/playerToken.ts` (token + remembered name in localStorage, wrapped), `NetClient` `pid`, `PlayApp` / `App` pass it, `LandingForm` pre-fills / saves the name; protocol `hello.pid` (validated `[A-Za-z0-9_-]{8,64}`); `room.ts` seats + `uniqueName` + seat score reset per match; `core.ts` takeover (not in the lab).
+* **Bug found by the tests:** the takeover also ran in the lab, closing Compare's sibling panes (same browser, same token) → skipped for `lab`. Also a lone rejoiner into an empty room starts fresh (the room had reset), documented.
+* **Tests:** `tests/identity.test.ts` (new, 9). **299 tests**, typecheck clean, `npm run build` (bundle guard) and `npm run smoke` pass.
+* **Not checked:** a real browser refresh in a live room (covered by the server tests and the unchanged client hello path); `npm run shots`.
+* **Docs:** GAMERULES §4 / new Player identity bullet, PROTOCOL §2.1, ASSUMPTIONS #140.
 
 ### 2026-10-29 — Claude (Sonnet 5.5) — Touch revision 2 + remote access (T121–T122)
 
