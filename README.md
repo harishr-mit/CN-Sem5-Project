@@ -290,6 +290,7 @@ CN-Sem5-Project/
 ├── log.md                  # Development & task tracking log (agents)
 ├── docs/
 │   ├── PROTOCOL.md         # Wire protocol (JSON messages, rooms, game server) and emulator control API
+│   ├── NGP.md              # NoBu Game Protocol: the rules in RFC style (state machine, timers, reliability)
 │   ├── DEMO_SCRIPT.md      # Step-by-step walkthrough with expected numbers
 │   ├── ASSUMPTIONS.md      # Design decisions and their reasons
 │   ├── PHASE2_PLAN.md      # Phase 2 implementation plan (Compare view, movers)

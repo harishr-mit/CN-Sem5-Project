@@ -184,6 +184,10 @@ Shared context for every agent working in this directory. Read this file **befor
 
 <!-- Newest first. Copy the template below for each entry. -->
 
+### 2026-10-30 — Claude (Sonnet 5.5) — Demo prep: protocol rules document
+
+* Created `docs/NGP.md` (RFC-style rules of the JSON protocol: layering, state machine, timers, reliability, errors), checked against `net.json`, `core.ts`, `fragment.ts`. Added to the README tree. No code changed.
+
 ### 2026-10-29 — Claude (Sonnet 5.5) — Player identity (T123)
 
 * **Task:** Owner: a rejoining player was a new random player; wanted the same player and score back, and custom names (same-name case handled). Owner answers (asked): seats last the room's lifetime; duplicate names get a numeric suffix; the name is set and remembered on the landing page; no visible tag.
