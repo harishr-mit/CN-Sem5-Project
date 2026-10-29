@@ -196,6 +196,8 @@ export interface NetClientOptions {
   spectate?: boolean;
   /** Sync model (PHASES.md Phase 3); default full. Spectators always get full. */
   sync?: SyncSpec;
+  /** Persistent player identity (net/playerToken.ts): a rejoin keeps the id and score. */
+  pid?: string;
 }
 
 interface Listeners {
@@ -268,6 +270,7 @@ export class NetClient {
   private fatalError: { code: string; msg: string } | null = null;
   private readonly spectating: boolean;
   private readonly nonce: string;
+  private readonly pid: string | undefined;
   private readonly transportFactory: TransportFactory;
   private readonly now: () => number;
   private transport: ClientTransport | null = null;
@@ -408,6 +411,7 @@ export class NetClient {
   constructor(opts: NetClientOptions) {
     this.url = opts.url;
     this.playerName = opts.name;
+    this.pid = opts.pid;
     this.roomName = opts.room ?? 'main';
     this.models = opts.models ?? null;
     this.spectating = opts.spectate ?? false;
@@ -549,6 +553,7 @@ export class NetClient {
   private startHello(): void {
     const sendHello = () => this.send({
       t: 'hello', v: 1, name: this.playerName, room: this.roomName, nonce: this.nonce,
+      ...(this.pid ? { pid: this.pid } : {}),
       ...(this.spectating ? { spectate: true } : {}),
       ...(!this.spectating && this.syncSpec.model !== 'full' ? { sync: this.wireSync() } : {}),
     });
