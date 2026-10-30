@@ -42,7 +42,7 @@ A peer is one WebSocket connection, or one UDP `ip:port`.
               └──┘  give up after 10 s)
 ```
 
-1. **Join.** The client sends `hello {v, name, room, nonce}` and **repeats it every 250 ms** until a `welcome` with the same `nonce` arrives; it gives up after 10 s. A `hello` repeated by a joined peer with the same `nonce` gets the same `welcome` again (idempotent). This replaces a handshake: it works over UDP, which has none.
+1. **Join.** The client sends `hello {v, name, room, nonce}` and **repeats it every 250 ms** until a `welcome` with the same `nonce` arrives; it gives up after 10 s. A `hello` repeated by a joined peer with the same `nonce` gets the same `welcome` again (idempotent). This replaces a handshake: it works over UDP, which has none. An optional `pid` (8–64 characters, `A-Za-z0-9_-`) is the client's stable identity: a peer that joins a room with a `pid` already seated there takes over its old connection and seat (a refresh or a dropped network keeps the player and score).
 2. **Play.** The client sends `input` at 30 Hz and `ping` at 2 Hz. The server sends a snapshot every 2 ticks (30 Hz).
 3. **Leave.** `bye`, a closed socket, or **5 s without any message** (`timeoutMs`) removes the peer. A later datagram from the same UDP address starts a new connection and needs a new `hello`.
 

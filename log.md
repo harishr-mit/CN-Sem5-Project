@@ -186,7 +186,7 @@ Shared context for every agent working in this directory. Read this file **befor
 
 ### 2026-10-30 — Claude (Sonnet 5.5) — Demo prep: protocol rules document
 
-* Created `docs/NGP.md` (RFC-style rules of the JSON protocol: layering, state machine, timers, reliability, errors), checked against `net.json`, `core.ts`, `fragment.ts`. Added to the README tree. No code changed.
+* Created `docs/NGP.md` (RFC-style rules of the JSON protocol: layering, state machine, timers, reliability, errors), checked against `net.json`, `core.ts`, `fragment.ts`. Added to the README tree. No code changed. Later the same day: added the optional `hello.pid` (player identity, T123) that the first version left out.
 
 ### 2026-10-29 — Claude (Sonnet 5.5) — Player identity (T123)
 
